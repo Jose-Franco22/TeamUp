@@ -9,7 +9,7 @@ A skill-based team formation platform for CSCI 4390 senior projects. TeamUp help
 - Jose Franco Garza
 - Alexis Covarrubias
 
-Faculty Adviser: [TBD]
+Faculty Adviser: Erik Enriquez
 
 ## Project Overview
 
