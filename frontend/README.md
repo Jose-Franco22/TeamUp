@@ -32,10 +32,22 @@ src/
   api/
     client.js      All network calls. The mock/real switch lives here.
     mockData.js    Fixture data using the exact database column names.
+  auth/            Session context and the protected-route wrapper.
   components/      Shared pieces used by more than one page.
   pages/           One file per route.
   styles.css       All styling, organised by section.
 ```
+
+## Routes
+
+| Path       | Access             | Notes                                   |
+| ---------- | ------------------ | ---------------------------------------- |
+| /          | Public             | Landing page                            |
+| /login     | Public             | Mock sign-in (pick any seeded user)     |
+| /browse    | Public             | Guests see projects/roles, not members  |
+| /profile   | Signed in          | Redirects guests to /login              |
+| /requests  | Signed in          | Redirects guests to /login              |
+| /team      | Signed in          | Redirects guests to /login              |
 
 ## Endpoints the backend needs to provide
 
@@ -58,6 +70,14 @@ those exactly means the frontend needs no changes when the API lands.
 - Accepting a request must add the roster row, and flip the project to
   `full` plus set `teams.formed_at` when the roster reaches
   `team_size_target`. Do that in one transaction on the server.
-- Auth is not wired up yet; the current user is hardcoded in
-  `mockData.js` as `CURRENT_USER_ID`.
+- Auth is stubbed, not real: `src/auth/SessionContext.jsx` fakes a
+  session by letting you pick any seeded user on `/login` and persisting
+  that choice in `localStorage`. It's structured so a real provider
+  (Supabase Auth) can replace it without changing any page — see the
+  comments in that file and in `client.js`'s `setSessionUserId` /
+  `setAuthHeaderProvider`.
+- The public/guest split on `/browse` (member names, availability hidden
+  from signed-out visitors) is UX only for now. The real API must not
+  send that data to unauthenticated requests in the first place — see
+  `TODO-backend.md`.
 - "Add a skill" and "Import from resume" are not implemented.
