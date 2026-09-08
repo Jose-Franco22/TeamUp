@@ -5,14 +5,23 @@ import { Empty, ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
 import StatusPill from '../components/StatusPill';
 
+// Default role for an incoming request: whichever open role matches one
+// of the applicant's own skills, otherwise the first role needed.
+function defaultRoleFor(r) {
+  if (!r.roles_needed || r.roles_needed.length === 0) return '';
+  const match = r.roles_needed.find((role) => r.skills.includes(role.skill_name));
+  return (match || r.roles_needed[0]).skill_name;
+}
+
 export default function Requests() {
   const { data, loading, error, reload } = useAsync(getRequests, []);
   const [busy, setBusy] = useState({});
+  const [roleChoices, setRoleChoices] = useState({});
 
-  async function respond(id, status) {
+  async function respond(id, status, role) {
     setBusy((b) => ({ ...b, [id]: status }));
     try {
-      await respondToRequest(id, status);
+      await respondToRequest(id, status, role);
       reload();
     } catch (err) {
       setBusy((b) => ({ ...b, [id]: err.message }));
@@ -46,32 +55,54 @@ export default function Requests() {
             <div>Availability</div>
             <div>Decision</div>
           </div>
-          {incoming.map((r) => (
-            <div className="row" key={r.id}>
-              <Avatar name={r.user_name} size={34} />
-              <div>
-                <div className="nm">{r.user_name}</div>
-                <div className="sub">{r.skills.join(', ') || 'No skills listed'}</div>
+          {incoming.map((r) => {
+            const role = roleChoices[r.id] ?? defaultRoleFor(r);
+            return (
+              <div className="row" key={r.id}>
+                <Avatar name={r.user_name} size={34} />
+                <div>
+                  <div className="nm">{r.user_name}</div>
+                  <div className="sub">{r.skills.join(', ') || 'No skills listed'}</div>
+                </div>
+                <div className="sub">{r.availability_hours} hrs/wk</div>
+                <div className="decision">
+                  {r.roles_needed.length > 0 && (
+                    <select
+                      className="role-select"
+                      aria-label={`Role for ${r.user_name}`}
+                      value={role}
+                      disabled={!!busy[r.id]}
+                      onChange={(e) =>
+                        setRoleChoices((c) => ({ ...c, [r.id]: e.target.value }))
+                      }
+                    >
+                      {r.roles_needed.map((rn) => (
+                        <option key={rn.skill_id} value={rn.skill_name}>
+                          {rn.skill_name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div className="acts">
+                    <button
+                      className="btn"
+                      disabled={!!busy[r.id]}
+                      onClick={() => respond(r.id, 'accepted', role)}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      className="btn quiet"
+                      disabled={!!busy[r.id]}
+                      onClick={() => respond(r.id, 'declined')}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="sub">{r.availability_hours} hrs/wk</div>
-              <div className="acts">
-                <button
-                  className="btn"
-                  disabled={!!busy[r.id]}
-                  onClick={() => respond(r.id, 'accepted')}
-                >
-                  Accept
-                </button>
-                <button
-                  className="btn quiet"
-                  disabled={!!busy[r.id]}
-                  onClick={() => respond(r.id, 'declined')}
-                >
-                  Decline
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
