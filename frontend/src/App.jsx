@@ -6,6 +6,7 @@ import Profile from './pages/Profile';
 import Requests from './pages/Requests';
 import Team from './pages/Team';
 import Avatar from './components/Avatar';
+import ThemeToggle from './components/ThemeToggle';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 
@@ -34,6 +35,7 @@ export default function App() {
           ))}
         </nav>
         <div className="me">
+          <ThemeToggle />
           {status === 'authenticated' && (
             <>
               {user.name} <Avatar name={user.name} />
