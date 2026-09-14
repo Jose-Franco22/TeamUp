@@ -1,16 +1,35 @@
 :root {
-  --ink: #15181f;
-  --slate: #646b79;
-  --mute: #8e95a3;
-  --line: #e3e6ec;
-  --canvas: #f6f7f9;
+  --ink: #424242;
+  --slate: #646469;
+  --mute: #8d8d92;
+  --line: #dcdcdf;
+  --canvas: #f5f5f6;
   --paper: #ffffff;
-  --open: #136b45;
-  --open-bg: #e7f3ed;
-  --open-line: #9ccbb4;
+  --open: #cb4900;
+  --open-bg: #fbe9df;
+  --open-line: #e8ab86;
   --warn: #8a6212;
   --warn-bg: #fbf2de;
   --danger: #9b2c2c;
+  --emphasis-bg: var(--ink);
+  --emphasis-text: #ffffff;
+}
+
+:root[data-theme='dark'] {
+  --ink: #f0f0f1;
+  --slate: #b6b6bb;
+  --mute: #86868b;
+  --line: #3a3a3d;
+  --canvas: #19191a;
+  --paper: #242426;
+  --open: #e2590c;
+  --open-bg: #3a2414;
+  --open-line: #7a4018;
+  --warn: #e0a94a;
+  --warn-bg: #3a2f14;
+  --danger: #e2685f;
+  --emphasis-bg: var(--open);
+  --emphasis-text: #ffffff;
 }
 
 * { box-sizing: border-box; }
@@ -23,6 +42,28 @@ body {
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+body,
+.bar,
+.card,
+.rows,
+.row,
+.empty-state,
+.step,
+.pill,
+.role,
+.tag,
+.btn,
+.btn-label,
+.avatar,
+.field input,
+.field textarea,
+.field select,
+.role-select,
+.theme-toggle {
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 button { font-family: inherit; font-size: 14px; cursor: pointer; }
@@ -55,10 +96,25 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .me { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--slate); }
 
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--slate);
+  flex: none;
+  padding: 0;
+}
+.theme-toggle:hover { color: var(--ink); border-color: var(--mute); }
+
 .avatar {
   border-radius: 50%;
-  background: var(--ink);
-  color: #fff;
+  background: var(--emphasis-bg);
+  color: var(--emphasis-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -162,9 +218,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .btn {
   display: inline-block;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  color: #fff;
+  border: 1px solid var(--emphasis-bg);
+  background: var(--emphasis-bg);
+  color: var(--emphasis-text);
   border-radius: 7px;
   padding: 9px 16px;
   font-weight: 500;
