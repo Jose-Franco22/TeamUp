@@ -3,11 +3,58 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../auth/SessionContext';
 import { users } from '../api/mockData';
 
-// Dev-only stand-in for a real sign-in form. Picks any seeded user so both
-// sides of a request (project creator vs. applicant) are easy to test.
-// This whole file gets replaced by a Supabase Auth form later — nothing
-// else in the app depends on how sign-in itself is implemented.
-export default function Login() {
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
+
+// Supabase redirects OAuth failures (e.g. the provisioning trigger
+// rejecting a non-@utrgv.edu account) back to redirectTo with error info
+// either in the query string or the URL hash, depending on flow.
+function readOAuthError() {
+  const params = new URLSearchParams(
+    (window.location.hash || '').replace(/^#/, '') || window.location.search
+  );
+  const description = params.get('error_description');
+  return description ? description.replace(/\+/g, ' ') : null;
+}
+
+function MicrosoftLogin() {
+  const { signInWithMicrosoft } = useSession();
+  const [error, setError] = useState(readOAuthError);
+  const [pending, setPending] = useState(false);
+
+  async function handleClick() {
+    setError(null);
+    setPending(true);
+    try {
+      await signInWithMicrosoft();
+      // Browser navigates away to Microsoft; nothing else to do here.
+    } catch (err) {
+      setError(err.message);
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="auth-wrap">
+      <section className="card auth-card">
+        <h1>Sign in</h1>
+        <p className="desc">
+          TeamUp is only open to UTRGV students — sign in with your @utrgv.edu Microsoft account.
+        </p>
+        {error && <p className="inline-error">{error}</p>}
+        <div className="foot">
+          <button type="button" className="btn" onClick={handleClick} disabled={pending}>
+            {pending ? 'Redirecting…' : 'Sign in with Microsoft'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// Dev-only stand-in for the real sign-in form above. Picks any seeded user
+// so both sides of a request (project creator vs. applicant) are easy to
+// test without a real Microsoft account.
+function MockLogin() {
   const { signIn } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
@@ -50,4 +97,8 @@ export default function Login() {
       </section>
     </div>
   );
+}
+
+export default function Login() {
+  return USE_MOCKS ? <MockLogin /> : <MicrosoftLogin />;
 }
