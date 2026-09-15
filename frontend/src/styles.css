@@ -264,9 +264,46 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: var(--ink);
 }
 .field textarea { min-height: 76px; resize: vertical; }
+
+.req,
+.opt {
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.req { color: var(--open); }
+.opt { color: var(--mute); }
 .num { display: flex; align-items: center; gap: 10px; }
 .num input { width: 90px; }
 .num span { font-size: 13px; color: var(--slate); }
+
+/* ---------- roles-needed picker ---------- */
+.role-rows { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.role-row { display: flex; gap: 8px; align-items: center; }
+.role-row select {
+  flex: 1;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.role-row input[type='number'] {
+  width: 80px;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.role-row .btn { padding: 9px 12px; }
 
 /* ---------- key/value ---------- */
 .kv { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 16px; }
