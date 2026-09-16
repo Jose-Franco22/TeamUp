@@ -47,6 +47,12 @@ mocks exactly; a few things don't show up in JS fixtures and are called out belo
   rather than only checked-then-inserted in application code.
 - `team_members.role` stays free text, matching the mocks — see "Known issue: two ways of naming a
   role" below. Not resolved here on purpose; it's a separate decision.
+- **`projects.team_size_target`'s live check is `> 0`, but the product rule is 2 to 4** (a senior
+  project team is 2–4 students). The frontend enforces that range in `client.js`
+  (`MIN_TEAM_SIZE`/`MAX_TEAM_SIZE`) and in the create-project form, so the constraint below needs
+  tightening to match — a one-line migration:
+  `alter table projects drop constraint projects_team_size_target_check, add check (team_size_target between 2 and 4);`
+  Every existing project (mock and live) is already inside that range, so it won't reject any rows.
 
 ```sql
 create extension if not exists pgcrypto; -- gen_random_uuid()
@@ -136,6 +142,8 @@ exercised) replaces every function that used to describe a REST endpoint:
 | `createJoinRequest`       | `supabase.rpc('create_join_request', ...)` |
 | `respondToRequest`        | `supabase.rpc('respond_to_join_request', ...)` |
 | `getMyTeam`                | `team_members` lookup by `auth.uid()`, then the same project composition, enriched with teammates' skills/availability |
+| `createProject`           | `supabase.rpc('create_project', ...)` — **not implemented server-side yet**, see "Creating a project" below |
+| `getSkills`                | `supabase.from('skills').select('id, name, category')` — plain read, no RPC needed |
 
 `viewer_request_status` (null / `'pending'` / `'accepted'` / `'declined'`) is computed client-side
 in `composeProject()` from one batched `join_requests` fetch, same semantics as the mock's
@@ -233,6 +241,41 @@ either fully commits or fully rolls back on the raised exception):
 `for update` row locks on the request and team rows guard against two accepts racing each other
 and overfilling a team.
 
+## Creating a project — needs `create_project()`, not written yet
+
+The frontend side of this now exists: `frontend/src/pages/CreateProject.jsx` (a new nav tab,
+`/projects/new`, behind the same `ProtectedRoute` as Profile/Requests/Team) and
+`createProject(...)`/`getSkills()` in `client.js`. The mock branch works end to end. The real
+branch calls `supabase.rpc('create_project', { p_title, p_description, p_team_size_target,
+p_creator_role, p_roles_needed })` — that function does not exist in `03_functions.sql` yet, and
+`projects_select_all` is currently the *only* RLS policy on `projects`, so nothing can write to it
+as a normal user. This needs, in one transaction (same shape as `respond_to_join_request`):
+
+1. Insert into `projects` (`creator_id = auth.uid()`, `status = 'open'`), rejecting a
+   `p_team_size_target` outside 2–4 — the product rule, which the live `check (team_size_target > 0)`
+   doesn't yet capture (see Schema above for the migration that tightens it).
+2. Insert one `teams` row for it (`formed_at = null`).
+3. Insert one `team_members` row for the caller, with `role = p_creator_role` — required, not
+   nullable (`team_members.role` is `not null`; the frontend form already requires this field for
+   exactly that reason, but the function must not trust the client and should itself reject a
+   blank/whitespace `p_creator_role`).
+4. Insert one `project_roles_needed` row per entry in `p_roles_needed` (`{ skill_id,
+   quantity_needed }[]`).
+
+And, matching `create_join_request`'s existing rule: **reject the caller if they already hold any
+`team_members` row.** A project's creator becomes that project's first team member (step 3 above),
+so creating a second project while already on a team is exactly the same violation as sending a
+second join request — the `team_members.user_id` primary key would catch it at the DB level
+regardless, but the function should raise a clear error rather than let that constraint violation
+surface directly. `CreateProject.jsx` already hides the form and shows a message for a user who's
+already on a team (via `getMyTeam()`), but that's UX only, same caveat as everywhere else in this
+document.
+
+Also needed: an RLS write policy allowing an authenticated user to insert into `projects` (likely
+scoped to `creator_id = auth.uid()`, though the `create_project` function running as
+`security definer` may make a broad policy unnecessary — whichever approach `respond_to_join_request`
+already uses for its writes is probably the right template).
+
 ### Known issue: two ways of naming a role
 
 `project_roles_needed` identifies a role by `skill_id` (a foreign key into `skills`).
@@ -266,6 +309,6 @@ Still open:
 - Exercise the rest of real-mode `client.js` while signed in — Browse loading real projects,
   Profile save/reload, sign out — and confirm a signed-out/incognito view of Browse shows projects
   without member names (the RLS boundary, not just a UI nicety).
-- Project creation (`POST` a new project) still has no `client.js` function, RLS write policy, or
-  UI — it's out of scope until that feature exists. `projects_select_all` is currently the only
-  policy on that table.
+- Project creation now has a `client.js` function, mock implementation, and UI (see "Creating a
+  project" above) — but the `create_project()` Postgres function and an RLS write policy on
+  `projects` still don't exist, so it only works with `VITE_USE_MOCKS=true` for now.
