@@ -8,16 +8,23 @@
 
 import {
   projects,
+  projectRolesNeeded,
   joinRequests,
   teams,
   teamMembers,
   users,
+  skills,
   buildProject,
   skillsForUser,
 } from './mockData';
 import { supabase } from '../lib/supabaseClient';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
+
+// A senior project team is 2 to 4 students. Exported so the create-project
+// form labels and bounds its input from the same numbers this file enforces.
+export const MIN_TEAM_SIZE = 2;
+export const MAX_TEAM_SIZE = 4;
 
 // Small delay so loading states are visible during development.
 const delay = (ms = 250) => new Promise((r) => setTimeout(r, ms));
@@ -166,6 +173,76 @@ export async function getProject(id) {
   ]);
   if (error) throw new Error('Project not found');
   return composeProject(row, viewerId, requestMap);
+}
+
+// `roles_needed` is an array of { skill_id, quantity_needed }. `creator_role`
+// is the creator's own free-text role on the team they're forming, same
+// convention as team_members.role elsewhere — required, not optional,
+// since team_members.role is NOT NULL in the schema (see TODO-backend.md).
+// The form enforces this before calling here.
+export async function createProject({ title, description, team_size_target, creator_role, roles_needed }) {
+  // A senior project team is 2 to 4 students. Checked here so both modes
+  // reject it the same way; create_project() must re-check server-side.
+  if (team_size_target < MIN_TEAM_SIZE || team_size_target > MAX_TEAM_SIZE) {
+    throw new Error(`A team has to be between ${MIN_TEAM_SIZE} and ${MAX_TEAM_SIZE} people`);
+  }
+
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    // A student can only be on one team — same rule as createJoinRequest.
+    const onAnyTeam = teamMembers.some((tm) => tm.user_id === id);
+    if (onAnyTeam) throw new Error('You are already on a team and cannot create another project');
+
+    const projectId = `p-${Date.now()}`;
+    const project = {
+      id: projectId,
+      creator_id: id,
+      title,
+      description,
+      team_size_target,
+      status: 'open',
+    };
+    projects.push(project);
+
+    const teamId = `t-${Date.now()}`;
+    teams.push({ id: teamId, project_id: projectId, formed_at: null });
+    teamMembers.push({ team_id: teamId, user_id: id, role: creator_role });
+
+    for (const r of roles_needed) {
+      projectRolesNeeded.push({
+        project_id: projectId,
+        skill_id: r.skill_id,
+        quantity_needed: r.quantity_needed,
+      });
+    }
+
+    return buildProject(project, id);
+  }
+  // create_project() runs the same checks as create_join_request (rejects a
+  // caller already on any team) plus the project/team/roster/roles inserts,
+  // all in one transaction — see TODO-backend.md and supabase/03_functions.sql.
+  const { data, error } = await supabase.rpc('create_project', {
+    p_title: title,
+    p_description: description,
+    p_team_size_target: team_size_target,
+    p_creator_role: creator_role,
+    p_roles_needed: roles_needed,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// --- Skills --------------------------------------------------------------
+
+export async function getSkills() {
+  if (USE_MOCKS) {
+    await delay();
+    return skills;
+  }
+  const { data, error } = await supabase.from('skills').select('id, name, category').order('category');
+  if (error) throw error;
+  return data;
 }
 
 // --- Current user ------------------------------------------------------
