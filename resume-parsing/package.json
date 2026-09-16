@@ -1,0 +1,27 @@
+{
+  "name": "teamup-resume-parsing",
+  "version": "0.1.0",
+  "description": "Local resume parsing for TeamUp: PDF, DOCX and LaTeX to confirmed skills, with no LLM and no upload.",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node --test",
+    "demo": "node src/demo.mjs",
+    "samples": "node scripts/make-samples.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": "true",
+  "dependencies": {
+    "chrono-node": "^2.10.1",
+    "mammoth": "^1.12.3",
+    "pdfjs-dist": "^6.3.289"
+  },
+  "devDependencies": {
+    "docx": "^9.7.1",
+    "pdf-lib": "^1.17.1"
+  }
+}

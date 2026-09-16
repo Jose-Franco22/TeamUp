@@ -1,0 +1,21 @@
+Jordan Rivera
+jordan.rivera@example.com | github.com/example-jordan
+
+EDUCATION
+B.S. Computer Science, expected May 2027
+
+EXPERIENCE
+Web Development Intern, Example Corp - Jan 2025 - Aug 2025
+- Built an internal dashboard in ReactJS backed by a Node/Express REST API
+- Wrote unit tests with Jest and reviewed pull requests on GitHub
+- Containerized two services with Docker
+
+Undergraduate Research Assistant, Vision Lab - Sep 2024 - Dec 2024
+- Counted cars in campus camera footage using OpenCV and Python
+
+PROJECTS
+Traffic Counter, Spring 2025 - OpenCV and Python pipeline over campus camera footage
+Grade Predictor, Fall 2024 - random forest in sklearn on a Postgres dataset
+
+SKILLS
+Java, C++, JS, SQL, Figma, Docker
