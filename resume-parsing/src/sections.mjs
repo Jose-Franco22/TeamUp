@@ -65,7 +65,9 @@ export function splitEntries(lines, sectionOf) {
     // header they belong to.
     if (!line) return;
     const isBullet = BULLET.test(line);
-    const hasDate = /\b(19|20)\d{2}\b|\b(present|current)\b/i.test(line);
+    // Bounded to plausible years: "2048 parallel environments" is a count, not
+    // a date, and would otherwise split a bullet off into its own entry.
+    const hasDate = /\b(19[5-9]\d|20[0-3]\d)\b|\b(present|current)\b/i.test(line);
     const startsEntry = !isBullet && hasDate;
 
     if (startsEntry || !current) {

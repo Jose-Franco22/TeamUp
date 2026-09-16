@@ -9,7 +9,7 @@
 import { toDocument } from './toDocument.mjs';
 import { sectionMap, splitEntries } from './sections.mjs';
 import { buildDictionary, findSkills, unmatchedTerms } from './skills.mjs';
-import { collectEvidence } from './evidence.mjs';
+import { collectEvidence, monthsIn } from './evidence.mjs';
 
 export async function parseResume(input, { name = '', dictionary = buildDictionary(), now = new Date() } = {}) {
   const started = Date.now();
@@ -34,6 +34,21 @@ export async function parseResume(input, { name = '', dictionary = buildDictiona
     skills, // suggestions: { skill_id, months, projects, evidence: [{ quote }] }
     unknownTerms: unknown, // candidates for growing the skills table
     warnings,
+    // The resume as the parser understood it: one entry per job or project,
+    // with the skills found inside it. Enough to rebuild the document.
+    structure: entries.map((entry) => ({
+      section: entry.section,
+      header: entry.header,
+      months: monthsIn(entry.header, now) || monthsIn(entry.lines.join(' '), now),
+      lines: entry.lines,
+      skill_ids: [
+        ...new Set(
+          hits
+            .filter((hit) => hit.lineNumber >= entry.from && hit.lineNumber <= entry.to)
+            .map((hit) => hit.skill_id),
+        ),
+      ],
+    })),
   };
 }
 
