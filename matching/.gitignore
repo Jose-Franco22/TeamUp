@@ -1,0 +1,4 @@
+# Run output stays local — never commit recommendations or judge verdicts.
+out/
+.env
+node_modules/

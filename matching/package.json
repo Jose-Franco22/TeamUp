@@ -1,0 +1,12 @@
+{
+  "name": "teamup-matching",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Two-stage team recommender for TeamUp: a point system shortlists candidate teams, an LLM judge picks the winner.",
+  "scripts": {
+    "demo": "node src/demo.mjs",
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "test": "node --test"
+  }
+}
