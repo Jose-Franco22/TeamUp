@@ -6,6 +6,11 @@
 // "Postgres"; the table says "scikit-learn", resumes say "sklearn".
 
 import { skills } from '../../frontend/src/api/mockData.js';
+import { isHeading } from './sections.mjs';
+
+// A link is not evidence of a skill: github.io in a project URL says nothing
+// about whether someone uses Git.
+const withoutLinks = (line) => line.replace(/https?:\/\/\S+|\b[\w.-]+\.(io|com|org|net|dev)\/\S*/gi, ' ');
 
 // Lowercase. Matching is case-insensitive.
 export const ALIASES = {
@@ -60,10 +65,11 @@ export function findSkills(lines, dictionary, { sectionOf = () => 'other' } = {}
   lines.forEach((line, lineNumber) => {
     if (!line) return;
     const section = sectionOf(lineNumber);
+    const searchable = withoutLinks(line);
     for (const entry of dictionary) {
       if (entry.contextOnly && section !== 'skills') continue;
       entry.pattern.lastIndex = 0;
-      if (!entry.pattern.test(line)) continue;
+      if (!entry.pattern.test(searchable)) continue;
       hits.push({
         skill_id: entry.skill_id,
         name: entry.name,
@@ -81,20 +87,30 @@ export function findSkills(lines, dictionary, { sectionOf = () => 'other' } = {}
 // Words in the skills section that matched nothing. These are the candidates
 // for growing the skills table — a resume saying "Docker" is a signal, even
 // though no project can ask for it yet.
-export function unmatchedTerms(lines, dictionary, sectionOf) {
-  const known = new Set();
-  for (const entry of dictionary) known.add(entry.alias);
+// Category labels a resume uses to group its skills list. Not skills.
+const LABELS = /^(languages?|ml & data|web & tools|tools?|frameworks?|libraries|databases?|technologies|other)$/i;
 
+export function unmatchedTerms(lines, dictionary, sectionOf) {
   const found = new Set();
+
   lines.forEach((line, lineNumber) => {
-    if (sectionOf(lineNumber) !== 'skills' || !line) return;
-    for (const raw of line.split(/[,;|•·]| - /)) {
+    if (sectionOf(lineNumber) !== 'skills' || !line || isHeading(line)) return;
+
+    // Split on the separators a skills list actually uses, the colon after a
+    // category label included.
+    for (const raw of line.split(/[,;|•·:]| - /)) {
       const term = raw.replace(/^[\s\-*]+|[\s.]+$/g, '').trim();
-      if (!term || term.length > 28 || /^skills?:?$/i.test(term)) continue;
+      if (!term || term.length > 28 || LABELS.test(term)) continue;
       if (term.split(/\s+/).length > 3) continue;
-      if (known.has(term.toLowerCase())) continue;
-      found.add(term);
+
+      // "Git/GitHub" is already covered by the git alias, so it is not unknown.
+      const alreadyKnown = dictionary.some((entry) => {
+        entry.pattern.lastIndex = 0;
+        return entry.pattern.test(term);
+      });
+      if (!alreadyKnown) found.add(term);
     }
   });
+
   return [...found];
 }

@@ -28,6 +28,13 @@ export function monthsIn(text, now = new Date()) {
   return longest;
 }
 
+// Long bullets get cut at a word, not mid-word.
+function shorten(line, limit = 160) {
+  if (line.length <= limit) return line;
+  const cut = line.slice(0, limit);
+  return `${cut.slice(0, cut.lastIndexOf(' ')).trimEnd()}…`;
+}
+
 // One row per skill, shaped the way profile_evidence would store it.
 export function collectEvidence(hits, entries, { now = new Date() } = {}) {
   const monthsByEntry = entries.map((entry) => monthsIn(entry.header, now) || monthsIn(entry.lines.join(' '), now));
@@ -56,7 +63,7 @@ export function collectEvidence(hits, entries, { now = new Date() } = {}) {
     // Quote the line the skill was found on, so the student can check it and
     // the app can show why a skill was suggested.
     if (!record.evidence.some((e) => e.quote === hit.line)) {
-      record.evidence.push({ quote: hit.line.slice(0, 160), section: hit.section });
+      record.evidence.push({ quote: shorten(hit.line), section: hit.section });
     }
 
     if (entry && !record.countedEntries.has(entryIndex)) {

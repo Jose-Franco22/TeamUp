@@ -10,6 +10,7 @@ const HEADINGS = [
   ['projects', /^(personal |academic |selected )?projects?$/i],
   ['skills', /^(technical )?skills?$|^technologies$|^tech stack$|^competencies$/i],
   ['education', /^education$|^academics?$/i],
+  ['summary', /^(professional |career )?summary$|^objective$|^profile$/i],
   ['other', /^(certifications?|awards?|activities|interests|publications|leadership|involvement)$/i],
 ];
 
@@ -23,7 +24,9 @@ export function isHeading(line) {
   for (const [name, pattern] of HEADINGS) {
     if (pattern.test(text)) return name;
   }
-  const looksLikeHeading = text === text.toUpperCase() && /[A-Z]{3}/.test(text) && text.split(/\s+/).length <= 4;
+  // Capitals alone are not enough: "GPA 3.92" and "NASA 2025" are content.
+  const looksLikeHeading =
+    text === text.toUpperCase() && /[A-Z]{3}/.test(text) && !/\d/.test(text) && text.split(/\s+/).length <= 4;
   return looksLikeHeading ? 'other' : null;
 }
 
@@ -42,10 +45,11 @@ export function sectionMap(lines) {
   };
 }
 
-// An entry is one job or one project: a header line plus the bullets under it.
-// Blank lines are unreliable (PDF extraction loses them), so a new entry starts
-// at a non-bullet line that either carries a date or sits in the projects
-// section.
+// An entry is one job or one project: a header line plus everything under it.
+//
+// The only reliable marker of a new entry is a date. Bullet characters are not:
+// many PDFs draw them outside the text layer, so bullets arrive as plain lines
+// and splitting on those detaches them from the job they describe.
 export function splitEntries(lines, sectionOf) {
   const entries = [];
   let current = null;
@@ -62,7 +66,7 @@ export function splitEntries(lines, sectionOf) {
     if (!line) return;
     const isBullet = BULLET.test(line);
     const hasDate = /\b(19|20)\d{2}\b|\b(present|current)\b/i.test(line);
-    const startsEntry = !isBullet && (hasDate || section === 'projects' || !current);
+    const startsEntry = !isBullet && hasDate;
 
     if (startsEntry || !current) {
       current = { section, header: line, lines: [line], from: index, to: index };

@@ -93,6 +93,9 @@ asserts they produce **identical** skills, months and projects.
 - **Aliases are hand-written.** Twelve skills today. A larger table needs a
   bigger alias list, and eventually a fuzzy fallback for typos.
 - **Months can double-count.** A skill under two overlapping jobs adds both.
+- **Entries split on dates.** A new job or project is detected by its date
+  range, because bullet characters often are not in a PDF's text layer. A
+  projects section with no dates at all reads as one entry.
 - **Sections are heuristic.** Unusual headings fall back to "other", which only
   weakens evidence, never invents it.
 - **Not wired into the app yet.** The next step is the Profile page flow:

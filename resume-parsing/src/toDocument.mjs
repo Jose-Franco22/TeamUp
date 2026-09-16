@@ -90,6 +90,23 @@ async function readDocx(bytes) {
   return value;
 }
 
+// A bullet that runs past the page width arrives as two lines, and the second
+// half starts mid-sentence. Rejoin those so a quote reads as written.
+function joinWrapped(lines) {
+  const joined = [];
+  for (const line of lines) {
+    const previous = joined[joined.length - 1];
+    const continues =
+      previous &&
+      !/[.!?]["')\]]?$/.test(previous) && // previous line did not finish a sentence
+      /^[a-z(]/.test(line) && // this one starts mid-sentence
+      !/^https?:/i.test(line);
+    if (continues) joined[joined.length - 1] = `${previous} ${line}`;
+    else joined.push(line);
+  }
+  return joined;
+}
+
 export async function toDocument(input, { name = '' } = {}) {
   const kind = detectKind(name, input);
   const warnings = [];
@@ -110,6 +127,6 @@ export async function toDocument(input, { name = '' } = {}) {
     );
   }
 
-  const lines = text.split('\n').map((line) => line.trim());
-  return { kind, text, lines, warnings };
+  const lines = joinWrapped(text.split('\n').map((line) => line.trim()));
+  return { kind, text: lines.join('\n'), lines, warnings };
 }
