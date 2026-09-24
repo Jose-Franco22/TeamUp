@@ -51,9 +51,9 @@ create policy "user_skills_manage_own"
 
 -- --- projects ----------------------------------------------------------------
 -- Public recruiting info per TODO-backend.md: guests must be able to browse.
--- No insert/update policy yet — project creation isn't part of the current
--- API contract (client.js has no createProject call). Add one here (scoped
--- to auth.uid() = creator_id) when that ships.
+-- No direct insert/update policy: project creation goes through the
+-- SECURITY DEFINER create_project() function in 03_functions.sql, same
+-- pattern as join_requests/team_members below.
 alter table public.projects enable row level security;
 
 create policy "projects_select_all"
