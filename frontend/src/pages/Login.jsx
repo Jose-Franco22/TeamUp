@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../auth/SessionContext';
-import { users } from '../api/mockData';
+import { teamMembers, users } from '../api/mockData';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
 
@@ -54,11 +54,21 @@ function MicrosoftLogin() {
 // Dev-only stand-in for the real sign-in form above. Picks any seeded user
 // so both sides of a request (project creator vs. applicant) are easy to
 // test without a real Microsoft account.
+//
+// Each option says whether that account is already on a team, because a
+// student is only ever on one: signing in as someone already seated gets
+// you a disabled "Already on a team" button on every project, which reads
+// as a broken app rather than as the rule working. Computed at render, so
+// it reflects teams created during this session too.
 function MockLogin() {
   const { signIn } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
   const [selected, setSelected] = useState(users[0].id);
+
+  const onATeam = (id) => teamMembers.some((tm) => tm.user_id === id);
+  const free = users.filter((u) => !onATeam(u.id));
+  const seated = users.filter((u) => onATeam(u.id));
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -80,11 +90,20 @@ function MockLogin() {
           <div className="field">
             <label htmlFor="user">Account</label>
             <select id="user" value={selected} onChange={(e) => setSelected(e.target.value)}>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} — {u.email}
-                </option>
-              ))}
+              <optgroup label="Not on a team — can request to join">
+                {free.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} — {u.email}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Already on a team">
+                {seated.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} — {u.email}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
 
