@@ -3,6 +3,7 @@ import { getCurrentUser, updateCurrentUser } from '../api/client';
 import useAsync from '../components/useAsync';
 import { ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
+import ResumeImport from '../components/ResumeImport';
 
 export default function Profile() {
   const { data, loading, error, reload, setData } = useAsync(getCurrentUser, []);
@@ -135,7 +136,7 @@ export default function Profile() {
 
         <div className="foot">
           <button className="btn ghost">Add a skill</button>
-          <button className="btn ghost">Import from resume</button>
+          <ResumeImport mySkills={data.skills} onImported={setData} />
         </div>
       </section>
     </>

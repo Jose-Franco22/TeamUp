@@ -1,39 +1,21 @@
-// The conversion layer: any resume in, one shape out.
+// Reading a resume in Node, for the tools in this package.
 //
-//   toDocument(bytes, { name }) -> { kind, text, lines, warnings }
-//
-// Everything downstream (sections, skills, evidence) reads that shape and never
-// learns which format it came from, so adding .md or .rtf later costs one case
-// in this file and nothing else.
-//
-// All three readers run locally — in Node here, and in the browser unchanged,
-// which is the point: a resume never has to be uploaded anywhere.
+// The browser has its own readers in frontend/src/lib/resume/readFile.js.
+// Everything after reading is shared, so both sides produce the same result —
+// a test in this package asserts that for every format.
 
 import mammoth from 'mammoth';
-import { texToText } from './latex.mjs';
+import { detectKind, finishDocument } from '../../frontend/src/lib/resume/text.js';
+import { texToText } from '../../frontend/src/lib/resume/latex.js';
 
-// A page of text that yields almost nothing is usually a scan.
-const SUSPICIOUSLY_EMPTY = 200;
+export { detectKind };
 
 const asBuffer = (input) =>
   Buffer.isBuffer(input) ? input : Buffer.from(input instanceof Uint8Array ? input : new Uint8Array(input));
 
-export function detectKind(name = '', bytes) {
-  const ext = String(name).toLowerCase().split('.').pop();
-  if (['pdf', 'docx', 'tex', 'txt', 'md'].includes(ext)) return ext === 'md' ? 'txt' : ext;
-
-  // Fall back to the file's own signature when the name is missing or lying.
-  const head = asBuffer(bytes).subarray(0, 4).toString('binary');
-  if (head.startsWith('%PDF')) return 'pdf';
-  if (head.startsWith('PK')) return 'docx'; // any Office file is a zip
-  return 'txt';
-}
-
-// pdf.js ships the 14 standard fonts as data files and warns when it cannot
-// find them. In a browser the bundler provides the URL; in Node we resolve the
-// installed package. Guarded so this file still imports cleanly in a browser.
+// pdf.js ships the standard fonts as data files and warns when it cannot find
+// them. Fonts only matter for drawing pages, and we only read text.
 async function standardFontsUrl() {
-  if (typeof process === 'undefined' || !process.versions?.node) return undefined;
   const { createRequire } = await import('node:module');
   const { pathToFileURL } = await import('node:url');
   const { dirname, join } = await import('node:path');
@@ -49,8 +31,6 @@ async function readPdf(bytes) {
     isEvalSupported: false,
     disableFontFace: true,
     standardFontDataUrl: await standardFontsUrl(),
-    // Fonts only matter for drawing pages, and we only read text. Without this
-    // pdf.js warns on every missing font file.
     verbosity: 0,
   });
   const doc = await task.promise;
@@ -60,15 +40,12 @@ async function readPdf(bytes) {
     const page = await doc.getPage(pageNumber);
     const content = await page.getTextContent();
 
-    // PDFs have no concept of a line: items carry x/y positions, so items that
-    // share a y are one line, ordered by x.
     const rows = new Map();
     for (const item of content.items) {
       if (!item.str || !item.str.trim()) continue;
       const y = Math.round(item.transform[5]);
-      const x = item.transform[4];
       if (!rows.has(y)) rows.set(y, []);
-      rows.get(y).push({ x, str: item.str });
+      rows.get(y).push({ x: item.transform[4], str: item.str });
     }
     for (const y of [...rows.keys()].sort((a, b) => b - a)) {
       const row = rows
@@ -85,48 +62,14 @@ async function readPdf(bytes) {
   return lines.join('\n');
 }
 
-async function readDocx(bytes) {
-  const { value } = await mammoth.extractRawText({ buffer: asBuffer(bytes) });
-  return value;
-}
-
-// A bullet that runs past the page width arrives as two lines, and the second
-// half starts mid-sentence. Rejoin those so a quote reads as written.
-function joinWrapped(lines) {
-  const joined = [];
-  for (const line of lines) {
-    const previous = joined[joined.length - 1];
-    const continues =
-      previous &&
-      !/[.!?]["')\]]?$/.test(previous) && // previous line did not finish a sentence
-      /^[a-z(]/.test(line) && // this one starts mid-sentence
-      !/^https?:/i.test(line);
-    if (continues) joined[joined.length - 1] = `${previous} ${line}`;
-    else joined.push(line);
-  }
-  return joined;
-}
-
 export async function toDocument(input, { name = '' } = {}) {
   const kind = detectKind(name, input);
-  const warnings = [];
 
-  let text;
-  if (kind === 'pdf') text = await readPdf(input);
-  else if (kind === 'docx') text = await readDocx(input);
-  else if (kind === 'tex') text = texToText(asBuffer(input).toString('utf8'));
-  else text = asBuffer(input).toString('utf8');
-
-  text = text.replace(/\r\n?/g, '\n').replace(/ /g, ' ').trim();
-
-  if (text.length < SUSPICIOUSLY_EMPTY) {
-    warnings.push(
-      kind === 'pdf'
-        ? 'Almost no text came out of this PDF. It is probably a scan or an image export — ask for a text PDF.'
-        : 'This file holds almost no text.',
-    );
+  if (kind === 'pdf') return finishDocument(kind, await readPdf(input));
+  if (kind === 'docx') {
+    const { value } = await mammoth.extractRawText({ buffer: asBuffer(input) });
+    return finishDocument(kind, value);
   }
-
-  const lines = joinWrapped(text.split('\n').map((line) => line.trim()));
-  return { kind, text: lines.join('\n'), lines, warnings };
+  const text = asBuffer(input).toString('utf8');
+  return finishDocument(kind, kind === 'tex' ? texToText(text) : text);
 }

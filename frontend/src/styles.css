@@ -413,3 +413,30 @@ button:disabled { opacity: 0.45; cursor: default; }
   .shell { padding: 20px 16px; }
   .bar { padding: 0 16px; gap: 20px; }
 }
+
+/* ---------- resume import ---------- */
+.import {
+  flex-basis: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-top: 14px;
+  background: var(--canvas);
+}
+.import-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.import-head .lbl { margin: 0; }
+.import .desc { margin: 4px 0 10px; font-size: 13.5px; color: var(--slate); }
+.import .foot { border-top: 1px solid var(--line); }
+
+.suggestion {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.suggestion input { margin-top: 3px; accent-color: var(--open); width: 15px; height: 15px; flex: none; }
+.suggestion b { font-weight: 500; font-size: 14px; }
+.suggestion .facts { font-style: normal; font-size: 12.5px; color: var(--slate); }
+.suggestion small { display: block; font-size: 12px; color: var(--mute); margin-top: 2px; line-height: 1.45; }

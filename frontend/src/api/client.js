@@ -14,6 +14,7 @@ import {
   teamMembers,
   users,
   skills,
+  userSkills,
   buildProject,
   skillsForUser,
 } from './mockData';
@@ -243,6 +244,40 @@ export async function getSkills() {
   const { data, error } = await supabase.from('skills').select('id, name, category').order('category');
   if (error) throw error;
   return data;
+}
+
+// Saves the skills a student confirmed after importing a resume. Nothing is
+// written until they confirm, so this is the only write the import performs.
+//
+// Duplicates are ignored rather than rejected: a student who imports an
+// updated resume should not hit an error on the skills they already had.
+// The evidence behind each skill (months, projects, the quote) has nowhere to
+// live in the schema yet, so only the user_skills rows are stored for now.
+export async function addResumeSkills(skillIds) {
+  if (!skillIds?.length) return getCurrentUser();
+
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    for (const skillId of skillIds) {
+      const already = userSkills.some((row) => row.user_id === id && row.skill_id === skillId);
+      if (!already) userSkills.push({ user_id: id, skill_id: skillId, source: 'resume' });
+    }
+    return getCurrentUser();
+  }
+
+  const viewerId = requireViewerId(await getViewerId());
+  const rows = skillIds.map((skillId) => ({
+    user_id: viewerId,
+    skill_id: skillId,
+    source: 'resume',
+  }));
+  // RLS (user_skills_manage_own) already limits this to the caller's own rows.
+  const { error } = await supabase
+    .from('user_skills')
+    .upsert(rows, { onConflict: 'user_id,skill_id', ignoreDuplicates: true });
+  if (error) throw error;
+  return getCurrentUser();
 }
 
 // --- Current user ------------------------------------------------------
