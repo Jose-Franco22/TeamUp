@@ -3,6 +3,7 @@ import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Browse from './pages/Browse';
 import CreateProject from './pages/CreateProject';
+import EditProject from './pages/EditProject';
 import Profile from './pages/Profile';
 import Requests from './pages/Requests';
 import Team from './pages/Team';
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="/browse" element={<Browse />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/projects/new" element={<CreateProject />} />
+            <Route path="/projects/:id/edit" element={<EditProject />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/requests" element={<Requests />} />
             <Route path="/team" element={<Team />} />

@@ -103,6 +103,7 @@ export default function Browse() {
                 <MemberStrip
                   members={p.members}
                   targetSize={p.team_size_target}
+                  memberCount={p.member_count}
                   isAuthenticated={isAuthenticated}
                 />
 

@@ -5,12 +5,23 @@ import Avatar from './Avatar';
 // get the seat count — member identities require signing in. This is a UX
 // nicety, not a security boundary: the real API must not send member names
 // to unauthenticated requests in the first place (see TODO-backend.md).
-export default function MemberStrip({ members, targetSize, isAuthenticated = true }) {
+//
+// The guest count comes from memberCount, NOT members.length: in real mode
+// composeProject() leaves members empty for an unauthenticated viewer and
+// fills member_count from the project_member_count RPC instead. Note this
+// can't be reproduced with VITE_USE_MOCKS=true — the mocks have no RLS, so
+// buildProject() returns a full members array to guests too.
+export default function MemberStrip({
+  members,
+  targetSize,
+  memberCount = members.length,
+  isAuthenticated = true,
+}) {
   if (!isAuthenticated) {
     return (
       <div className="members guest">
         <span className="seat-count">
-          {members.length} of {targetSize} seats filled
+          {memberCount} of {targetSize} seats filled
         </span>
         <Link className="guest-note" to="/login">
           Sign in to see who's on this team
