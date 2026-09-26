@@ -5,6 +5,31 @@
 // only thing that changes is the fetch in client.js — no component has to
 // be touched, because the shapes already match.
 
+// --- ROLES -------------------------------------------------------------
+// roles: id, name, sort_order
+//
+// A role is what a person *does* on the team; a skill is a technology they
+// know. project_roles_needed points at both (the skill is optional), and
+// team_members.role_id points at one of these — see
+// supabase/04_roles_and_team_deletion.sql, which replaced the free-text
+// team_members.role column this file used to mirror.
+// skill_categories is which skills.category values make sense for a role —
+// what stops "Frontend Developer + pandas". See the note in
+// supabase/04_roles_and_team_deletion.sql.
+export const roles = [
+  { id: 'r-pm', name: 'Project Manager', sort_order: 10, skill_categories: ['Tools'] },
+  { id: 'r-frontend', name: 'Frontend Developer', sort_order: 20, skill_categories: ['Frontend'] },
+  { id: 'r-backend', name: 'Backend Developer', sort_order: 30, skill_categories: ['Backend'] },
+  { id: 'r-fullstack', name: 'Full-stack Developer', sort_order: 40, skill_categories: ['Frontend', 'Backend'] },
+  { id: 'r-design', name: 'UI/UX Designer', sort_order: 50, skill_categories: ['Frontend'] },
+  { id: 'r-data', name: 'Data / ML', sort_order: 60, skill_categories: ['Data'] },
+  { id: 'r-qa', name: 'QA & Testing', sort_order: 70, skill_categories: ['Tools'] },
+  { id: 'r-devops', name: 'DevOps', sort_order: 80, skill_categories: ['Backend', 'Tools'] },
+  { id: 'r-writer', name: 'Technical Writer', sort_order: 90, skill_categories: ['Tools'] },
+];
+
+const roleById = Object.fromEntries(roles.map((r) => [r.id, r]));
+
 // --- SKILLS ------------------------------------------------------------
 // skills: id, name, category
 export const skills = [
@@ -65,6 +90,16 @@ export const users = [
   { id: 'u-priya', email: 'pvale01@utrgv.edu', name: 'Priya Vale', bio: '', availability_hours: 10, github_url: '' },
   { id: 'u-omar', email: 'omolina01@utrgv.edu', name: 'Omar Molina', bio: '', availability_hours: 12, github_url: '' },
   { id: 'u-rita', email: 'rcano01@utrgv.edu', name: 'Rita Cano', bio: '', availability_hours: 6, github_url: '' },
+  // Unteamed students. Eight of the ten accounts above are already seated
+  // on a fixture team, which is correct data but made the app look broken
+  // in mock mode: create a project, sign in as anyone else, and the button
+  // reads "Already on a team." These exist so there's a pool of people who
+  // can actually send a request. Keep several of them free — see the
+  // invariant on teamMembers below.
+  { id: 'u-sofia', email: 'sgarza02@utrgv.edu', name: 'Sofia Garza', bio: 'Frontend, a lot of CSS. Want a project people outside class will use.', availability_hours: 14, github_url: '' },
+  { id: 'u-marcus', email: 'mhall01@utrgv.edu', name: 'Marcus Hall', bio: 'Backend and APIs. Happy to own deployment too.', availability_hours: 11, github_url: '' },
+  { id: 'u-ana', email: 'avillarreal01@utrgv.edu', name: 'Ana Villarreal', bio: 'Data and notebooks. Looking for something with messy real data.', availability_hours: 9, github_url: '' },
+  { id: 'u-derek', email: 'dcho01@utrgv.edu', name: 'Derek Cho', bio: 'I like testing and keeping a project organized.', availability_hours: 8, github_url: '' },
 ];
 
 const userById = Object.fromEntries(users.map((u) => [u.id, u]));
@@ -99,6 +134,17 @@ export const userSkills = [
   { user_id: 'u-priya', skill_id: 's-figma', source: 'manual' },
   { user_id: 'u-omar', skill_id: 's-node', source: 'manual' },
   { user_id: 'u-rita', skill_id: 's-python', source: 'manual' },
+  { user_id: 'u-sofia', skill_id: 's-react', source: 'manual' },
+  { user_id: 'u-sofia', skill_id: 's-js', source: 'manual' },
+  { user_id: 'u-sofia', skill_id: 's-figma', source: 'resume' },
+  { user_id: 'u-marcus', skill_id: 's-node', source: 'manual' },
+  { user_id: 'u-marcus', skill_id: 's-express', source: 'manual' },
+  { user_id: 'u-marcus', skill_id: 's-pg', source: 'manual' },
+  { user_id: 'u-ana', skill_id: 's-python', source: 'manual' },
+  { user_id: 'u-ana', skill_id: 's-pandas', source: 'manual' },
+  { user_id: 'u-ana', skill_id: 's-sklearn', source: 'resume' },
+  { user_id: 'u-derek', skill_id: 's-jest', source: 'manual' },
+  { user_id: 'u-derek', skill_id: 's-git', source: 'manual' },
 ];
 
 export function skillsForUser(userId) {
@@ -153,23 +199,30 @@ export const projects = [
 ];
 
 // --- PROJECT_ROLES_NEEDED ---------------------------------------------
-// project_roles_needed: project_id, skill_id, quantity_needed
+// project_roles_needed: project_id, role_id, skill_id, quantity_needed
+//
+// Keyed on (project_id, role_id): a project asks for N of a *role*, and may
+// optionally tag it with the key skill it wants for that role. skill_id is
+// nullable — a Project Manager has no entry in the skills taxonomy.
 //
 // Also returned as `roles_needed` (see buildProject() below) on each entry
 // of GET /api/requests's `incoming` array — the project creator picks a
 // role from that list when accepting an applicant, so the client needs it
 // without a second fetch. See client.js's getRequests()/respondToRequest().
 export const projectRolesNeeded = [
-  { project_id: 'p-parking', skill_id: 's-react', quantity_needed: 2 },
-  { project_id: 'p-parking', skill_id: 's-figma', quantity_needed: 1 },
-  { project_id: 'p-degree', skill_id: 's-react', quantity_needed: 1 },
-  { project_id: 'p-degree', skill_id: 's-pg', quantity_needed: 1 },
-  { project_id: 'p-scam', skill_id: 's-jest', quantity_needed: 1 },
+  { project_id: 'p-parking', role_id: 'r-frontend', skill_id: 's-react', quantity_needed: 2 },
+  { project_id: 'p-parking', role_id: 'r-design', skill_id: 's-figma', quantity_needed: 1 },
+  { project_id: 'p-degree', role_id: 'r-frontend', skill_id: 's-react', quantity_needed: 1 },
+  { project_id: 'p-degree', role_id: 'r-backend', skill_id: 's-pg', quantity_needed: 1 },
+  { project_id: 'p-scam', role_id: 'r-qa', skill_id: 's-jest', quantity_needed: 1 },
+  // A role with no skill attached — skill_id is nullable, which is what
+  // makes "we need a project manager" expressible at all.
+  { project_id: 'p-scam', role_id: 'r-pm', skill_id: null, quantity_needed: 1 },
 ];
 
 // --- TEAMS / TEAM_MEMBERS ---------------------------------------------
 // teams: id, project_id, formed_at
-// team_members: team_id, user_id, role
+// team_members: team_id, user_id, role_id
 //
 // Invariant: a user can hold at most one team_members row — a student is
 // on one senior project team at a time. createJoinRequest() in client.js
@@ -185,21 +238,23 @@ export const teams = [
 ];
 
 export const teamMembers = [
-  { team_id: 't-parking', user_id: 'u-nicolas', role: 'Backend' },
-  { team_id: 't-parking', user_id: 'u-jose', role: 'Data' },
-  { team_id: 't-degree', user_id: 'u-alexis', role: 'Algorithms' },
-  { team_id: 't-scam', user_id: 'u-maria', role: 'Modeling' },
-  { team_id: 't-scam', user_id: 'u-luis', role: 'Backend' },
-  { team_id: 't-scam', user_id: 'u-dana', role: 'Data' },
-  { team_id: 't-lab', user_id: 'u-omar', role: 'Backend' },
-  { team_id: 't-lab', user_id: 'u-priya', role: 'Design' },
+  { team_id: 't-parking', user_id: 'u-nicolas', role_id: 'r-backend' },
+  { team_id: 't-parking', user_id: 'u-jose', role_id: 'r-data' },
+  { team_id: 't-degree', user_id: 'u-alexis', role_id: 'r-fullstack' },
+  { team_id: 't-scam', user_id: 'u-maria', role_id: 'r-data' },
+  { team_id: 't-scam', user_id: 'u-luis', role_id: 'r-backend' },
+  { team_id: 't-scam', user_id: 'u-dana', role_id: 'r-data' },
+  { team_id: 't-lab', user_id: 'u-omar', role_id: 'r-backend' },
+  { team_id: 't-lab', user_id: 'u-priya', role_id: 'r-design' },
 ];
 
 // --- JOIN_REQUESTS -----------------------------------------------------
 // join_requests: id, project_id, user_id, status
 //
 // Adan and Rita are deliberately unteamed here (see the invariant above) so
-// their pending requests below are valid states, not conflicts.
+// their pending requests below are valid states, not conflicts. Sofia,
+// Marcus, Ana and Derek are unteamed too and have no requests out at all --
+// they are the accounts to sign in as when testing 'request to join'.
 export const joinRequests = [
   { id: 'jr-1', project_id: 'p-parking', user_id: 'u-adan', status: 'pending', created_at: '2026-09-01T14:00:00Z' },
   { id: 'jr-2', project_id: 'p-parking', user_id: 'u-rita', status: 'pending', created_at: '2026-08-31T09:00:00Z' },
@@ -233,15 +288,24 @@ export function buildProject(project, viewerId = null) {
   const members = team
     ? teamMembers
         .filter((tm) => tm.team_id === team.id)
-        .map((tm) => ({ user_id: tm.user_id, name: userById[tm.user_id].name, role: tm.role }))
+        .map((tm) => ({
+          user_id: tm.user_id,
+          name: userById[tm.user_id].name,
+          role_id: tm.role_id,
+          role: roleById[tm.role_id]?.name ?? null,
+        }))
     : [];
 
+  // skill_id is nullable, so skill_name/category come back null for a role
+  // listed without a specific skill attached to it.
   const roles_needed = projectRolesNeeded
     .filter((r) => r.project_id === project.id)
     .map((r) => ({
-      skill_id: r.skill_id,
-      skill_name: skillById[r.skill_id].name,
-      category: skillById[r.skill_id].category,
+      role_id: r.role_id,
+      role_name: roleById[r.role_id].name,
+      skill_id: r.skill_id ?? null,
+      skill_name: r.skill_id ? skillById[r.skill_id].name : null,
+      category: r.skill_id ? skillById[r.skill_id].category : null,
       quantity_needed: r.quantity_needed,
     }));
 

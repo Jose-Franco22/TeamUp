@@ -1,32 +1,21 @@
-import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import {
-  createProject,
-  getMyTeam,
-  getSkills,
-  MAX_TEAM_SIZE,
-  MIN_TEAM_SIZE,
-} from '../api/client';
+import { createProject, getMyTeam, getRoles, getSkills } from '../api/client';
 import useAsync from '../components/useAsync';
+import ProjectForm from '../components/ProjectForm';
 import { Empty, ErrorState, Loading } from '../components/States';
 
 export default function CreateProject() {
   const navigate = useNavigate();
   const teamState = useAsync(getMyTeam, []);
   const skillsState = useAsync(getSkills, []);
+  const rolesState = useAsync(getRoles, []);
 
-  const [form, setForm] = useState({
-    title: '',
-    description: '',
-    team_size_target: 4,
-    creator_role: '',
-  });
-  const [roles, setRoles] = useState([{ skill_id: '', quantity_needed: 1 }]);
-  const [submitState, setSubmitState] = useState(null); // 'saving' | message
-
-  if (teamState.loading || skillsState.loading) return <Loading label="Loading" />;
+  if (teamState.loading || skillsState.loading || rolesState.loading) {
+    return <Loading label="Loading" />;
+  }
   if (teamState.error) return <ErrorState error={teamState.error} onRetry={teamState.reload} />;
   if (skillsState.error) return <ErrorState error={skillsState.error} onRetry={skillsState.reload} />;
+  if (rolesState.error) return <ErrorState error={rolesState.error} onRetry={rolesState.reload} />;
 
   // A student can only be on one team. Checking here — rather than letting
   // the submit fail — mirrors how Browse disables "Request to join"
@@ -42,54 +31,17 @@ export default function CreateProject() {
     );
   }
 
-  const allSkills = skillsState.data || [];
-
-  function updateRole(index, patch) {
-    setRoles((rs) => rs.map((r, i) => (i === index ? { ...r, ...patch } : r)));
-  }
-
-  function addRole() {
-    setRoles((rs) => [...rs, { skill_id: '', quantity_needed: 1 }]);
-  }
-
-  function removeRole(index) {
-    setRoles((rs) => rs.filter((_, i) => i !== index));
-  }
-
-  // Excludes skills already chosen in another row so the same skill can't
-  // be picked twice for one project.
-  function skillOptionsFor(index) {
-    const chosenElsewhere = roles.filter((_, i) => i !== index).map((r) => r.skill_id);
-    return allSkills.filter((s) => s.id === roles[index].skill_id || !chosenElsewhere.includes(s.id));
-  }
-
-  const size = Number(form.team_size_target);
-  const canSubmit =
-    form.title.trim() &&
-    form.description.trim() &&
-    form.creator_role.trim() &&
-    size >= MIN_TEAM_SIZE &&
-    size <= MAX_TEAM_SIZE;
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setSubmitState('saving');
-    try {
-      await createProject({
-        title: form.title.trim(),
-        description: form.description.trim(),
-        team_size_target: Number(form.team_size_target),
-        creator_role: form.creator_role.trim(),
-        roles_needed: roles
-          .filter((r) => r.skill_id)
-          .map((r) => ({ skill_id: r.skill_id, quantity_needed: Number(r.quantity_needed) || 1 })),
-      });
-      // No project detail page yet — /team already shows this project,
-      // since creating it makes you its first member.
-      navigate('/team', { replace: true });
-    } catch (err) {
-      setSubmitState(err.message);
-    }
+  async function handleSubmit({ title, description, team_size_target, own_role_id, roles_needed }) {
+    await createProject({
+      title,
+      description,
+      team_size_target,
+      creator_role_id: own_role_id,
+      roles_needed,
+    });
+    // No project detail page yet — /team already shows this project,
+    // since creating it makes you its first member.
+    navigate('/team', { replace: true });
   }
 
   return (
@@ -101,122 +53,15 @@ export default function CreateProject() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit}>
-        <section className="card">
-          <div className="field">
-            <label htmlFor="title">
-              Title <span className="req">Required</span>
-            </label>
-            <input
-              id="title"
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              required
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="description">
-              Description <span className="req">Required</span>
-            </label>
-            <textarea
-              id="description"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              required
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="size">
-              Team size target <span className="req">Required</span>
-            </label>
-            <p className="hint">
-              Including yourself — a team is {MIN_TEAM_SIZE} to {MAX_TEAM_SIZE} people.
-            </p>
-            <div className="num">
-              <input
-                id="size"
-                type="number"
-                min={MIN_TEAM_SIZE}
-                max={MAX_TEAM_SIZE}
-                value={form.team_size_target}
-                onChange={(e) => setForm({ ...form, team_size_target: e.target.value })}
-                required
-              />
-              <span>people</span>
-            </div>
-          </div>
-
-          <div className="field">
-            <label htmlFor="role">
-              Your role <span className="req">Required</span>
-            </label>
-            <p className="hint">What you're contributing yourself, e.g. "Frontend."</p>
-            <input
-              id="role"
-              value={form.creator_role}
-              onChange={(e) => setForm({ ...form, creator_role: e.target.value })}
-              required
-            />
-          </div>
-        </section>
-
-        <section className="card">
-          <h2>
-            Roles needed <span className="opt">Optional</span>
-          </h2>
-          <p className="desc">
-            Skills you're still looking for, and how many of each. You can add these later.
-          </p>
-
-          <div className="role-rows">
-            {roles.map((r, i) => (
-              <div className="role-row" key={i}>
-                <select
-                  aria-label="Skill"
-                  value={r.skill_id}
-                  onChange={(e) => updateRole(i, { skill_id: e.target.value })}
-                >
-                  <option value="">Choose a skill…</option>
-                  {skillOptionsFor(i).map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  aria-label="Quantity needed"
-                  type="number"
-                  min="1"
-                  value={r.quantity_needed}
-                  onChange={(e) => updateRole(i, { quantity_needed: e.target.value })}
-                />
-                <button type="button" className="btn quiet" onClick={() => removeRole(i)}>
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="foot">
-            <button type="button" className="btn ghost" onClick={addRole}>
-              Add a role
-            </button>
-          </div>
-        </section>
-
-        <div className="foot">
-          <button className="btn" type="submit" disabled={!canSubmit || submitState === 'saving'}>
-            {submitState === 'saving' ? 'Creating…' : 'Create project'}
-          </button>
-          {submitState && submitState !== 'saving' && (
-            <span className="inline-error" role="alert">
-              {submitState}
-            </span>
-          )}
-        </div>
-      </form>
+      <ProjectForm
+        allRoles={rolesState.data || []}
+        allSkills={skillsState.data || []}
+        memberCount={1}
+        onSubmit={handleSubmit}
+        submitLabel="Create project"
+        savingLabel="Creating…"
+        roleFieldHint="What you're taking on yourself. You're the team's first member."
+      />
     </>
   );
 }

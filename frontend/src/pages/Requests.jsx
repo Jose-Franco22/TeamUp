@@ -1,20 +1,33 @@
 import { useState } from 'react';
-import { getRequests, respondToRequest } from '../api/client';
+import { getRequests, getRoles, respondToRequest } from '../api/client';
 import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
 import StatusPill from '../components/StatusPill';
 
-// Default role for an incoming request: whichever open role matches one
-// of the applicant's own skills, otherwise the first role needed.
-function defaultRoleFor(r) {
-  if (!r.roles_needed || r.roles_needed.length === 0) return '';
-  const match = r.roles_needed.find((role) => r.skills.includes(role.skill_name));
-  return (match || r.roles_needed[0]).skill_name;
+// Default role for an incoming request: whichever listed role has a skill
+// pinned to it that the applicant actually claims, otherwise the first role
+// the project listed. Returns a roles.id — team_members.role_id is a
+// foreign key now, not the free-text skill name this used to hand back.
+//
+// "Roles needed" is optional on a project, so there may be nothing to
+// default to. Falling back to the first role in the taxonomy (rather than
+// '') is what keeps a project that listed no roles from being unable to
+// accept anyone at all — the select below offers every role for the same
+// reason, since what a project listed is a wishlist, not a constraint on
+// who the creator is allowed to seat.
+function defaultRoleFor(r, allRoles) {
+  const needed = r.roles_needed || [];
+  if (needed.length > 0) {
+    const match = needed.find((role) => role.skill_name && r.skills.includes(role.skill_name));
+    return (match || needed[0]).role_id;
+  }
+  return allRoles[0]?.id ?? '';
 }
 
 export default function Requests() {
   const { data, loading, error, reload } = useAsync(getRequests, []);
+  const rolesState = useAsync(getRoles, []);
   const [busy, setBusy] = useState({});
   const [roleChoices, setRoleChoices] = useState({});
 
@@ -28,10 +41,12 @@ export default function Requests() {
     }
   }
 
-  if (loading) return <Loading label="Loading requests" />;
+  if (loading || rolesState.loading) return <Loading label="Loading requests" />;
   if (error) return <ErrorState error={error} onRetry={reload} />;
+  if (rolesState.error) return <ErrorState error={rolesState.error} onRetry={rolesState.reload} />;
 
   const { incoming = [], outgoing = [] } = data || {};
+  const allRoles = rolesState.data || [];
 
   return (
     <>
@@ -56,7 +71,8 @@ export default function Requests() {
             <div>Decision</div>
           </div>
           {incoming.map((r) => {
-            const role = roleChoices[r.id] ?? defaultRoleFor(r);
+            const needed = r.roles_needed || [];
+            const role = roleChoices[r.id] ?? defaultRoleFor(r, allRoles);
             return (
               <div className="row" key={r.id}>
                 <Avatar name={r.user_name} size={34} />
@@ -66,27 +82,37 @@ export default function Requests() {
                 </div>
                 <div className="sub">{r.availability_hours} hrs/wk</div>
                 <div className="decision">
-                  {r.roles_needed.length > 0 && (
-                    <select
-                      className="role-select"
-                      aria-label={`Role for ${r.user_name}`}
-                      value={role}
-                      disabled={!!busy[r.id]}
-                      onChange={(e) =>
-                        setRoleChoices((c) => ({ ...c, [r.id]: e.target.value }))
-                      }
-                    >
-                      {r.roles_needed.map((rn) => (
-                        <option key={rn.skill_id} value={rn.skill_name}>
-                          {rn.skill_name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  <select
+                    className="role-select"
+                    aria-label={`Role for ${r.user_name}`}
+                    value={role}
+                    disabled={!!busy[r.id]}
+                    onChange={(e) => setRoleChoices((c) => ({ ...c, [r.id]: e.target.value }))}
+                  >
+                    {needed.length > 0 && (
+                      <optgroup label="Roles you listed">
+                        {needed.map((rn) => (
+                          <option key={rn.role_id} value={rn.role_id}>
+                            {rn.role_name}
+                            {rn.skill_name ? ` · ${rn.skill_name}` : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <optgroup label={needed.length > 0 ? 'Other roles' : 'Roles'}>
+                      {allRoles
+                        .filter((ar) => !needed.some((rn) => rn.role_id === ar.id))
+                        .map((ar) => (
+                          <option key={ar.id} value={ar.id}>
+                            {ar.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                  </select>
                   <div className="acts">
                     <button
                       className="btn"
-                      disabled={!!busy[r.id]}
+                      disabled={!!busy[r.id] || !role}
                       onClick={() => respond(r.id, 'accepted', role)}
                     >
                       Accept
