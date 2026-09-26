@@ -6,7 +6,7 @@
 // "Postgres"; the table says "scikit-learn", resumes say "sklearn".
 
 import { skills } from '../../frontend/src/api/mockData.js';
-import { isHeading } from './sections.mjs';
+import { headingInfo } from './sections.mjs';
 
 // A link is not evidence of a skill: github.io in a project URL says nothing
 // about whether someone uses Git.
@@ -88,13 +88,19 @@ export function findSkills(lines, dictionary, { sectionOf = () => 'other' } = {}
 // for growing the skills table — a resume saying "Docker" is a signal, even
 // though no project can ask for it yet.
 // Category labels a resume uses to group its skills list. Not skills.
-const LABELS = /^(languages?|ml & data|web & tools|tools?|frameworks?|libraries|databases?|technologies|other)$/i;
+const LABELS =
+  /^((technical|core|key|relevant|additional|other|web|data|ml)\s*[&and]*\s*)*(skills?|languages?|tools?|frameworks?|libraries|databases?|technologies|data|other)$/i;
 
 export function unmatchedTerms(lines, dictionary, sectionOf) {
   const found = new Set();
 
   lines.forEach((line, lineNumber) => {
-    if (sectionOf(lineNumber) !== 'skills' || !line || isHeading(line)) return;
+    if (sectionOf(lineNumber) !== 'skills' || !line) return;
+
+    // A heading on its own line has no terms to collect. A heading sharing its
+    // line with content ("Technical Skills: Python, Git") does.
+    const heading = headingInfo(line);
+    if (heading && !heading.inline) return;
 
     // Split on the separators a skills list actually uses, the colon after a
     // category label included.

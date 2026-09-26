@@ -18,16 +18,35 @@ const BULLET = /^\s*[-*•·o]\s+/;
 
 // A heading is short, has no sentence punctuation, and either matches a known
 // section name or is written in capitals the way resume headings usually are.
-export function isHeading(line) {
+//
+// Returns { name, inline }. Inline means the heading and its content share a
+// line, as in "Technical Skills: Python, pandas" — common on one-page resumes,
+// and the content after the colon still has to be read.
+export function headingInfo(line) {
   const text = line.trim().replace(/[:•]+$/, '');
+
+  // "Technical Skills: Python, pandas, Git"
+  const colon = line.indexOf(':');
+  if (colon > 2 && colon <= 30 && line.length > colon + 1) {
+    const label = line.slice(0, colon).trim();
+    for (const [name, pattern] of HEADINGS) {
+      if (pattern.test(label)) return { name, inline: true };
+    }
+  }
+
   if (!text || text.length > 40 || /[.,;]$/.test(text)) return null;
   for (const [name, pattern] of HEADINGS) {
-    if (pattern.test(text)) return name;
+    if (pattern.test(text)) return { name, inline: false };
   }
   // Capitals alone are not enough: "GPA 3.92" and "NASA 2025" are content.
   const looksLikeHeading =
     text === text.toUpperCase() && /[A-Z]{3}/.test(text) && !/\d/.test(text) && text.split(/\s+/).length <= 4;
-  return looksLikeHeading ? 'other' : null;
+  return looksLikeHeading ? { name: 'other', inline: false } : null;
+}
+
+// Name only, for the callers that just want to know "is this a heading".
+export function isHeading(line) {
+  return headingInfo(line)?.name ?? null;
 }
 
 // Maps every line to the section it sits under.
@@ -35,8 +54,8 @@ export function sectionMap(lines) {
   const sections = [];
   let current = 'header';
   lines.forEach((line, index) => {
-    const heading = isHeading(line);
-    if (heading) current = heading;
+    const heading = headingInfo(line);
+    if (heading) current = heading.name;
     sections[index] = current;
   });
   return {

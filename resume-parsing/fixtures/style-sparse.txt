@@ -1,0 +1,9 @@
+Sam Chen
+sam.chen@example.com
+
+Summary
+Junior developer comfortable with React and Node.js, currently learning Figma.
+
+Experience
+Freelance web work
+Built small marketing sites for local businesses using React.

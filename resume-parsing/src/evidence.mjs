@@ -9,8 +9,35 @@ import * as chrono from 'chrono-node';
 const MS_PER_MONTH = 1000 * 60 * 60 * 24 * 30.44;
 const MAX_MONTHS = 72; // six years; anything longer is a parsing mistake
 
-// "Jan 2025 - Aug 2025", "2023 to 2024", "Sep 2024 - Present".
+// Students date things by semester, which no date parser understands. Roughly
+// when each one runs, so "Fall 2024 - Spring 2025" is an academic year rather
+// than nothing at all.
+const SEASONS = {
+  spring: (year) => [new Date(year, 0, 15), new Date(year, 4, 15)],
+  summer: (year) => [new Date(year, 4, 25), new Date(year, 7, 20)],
+  fall: (year) => [new Date(year, 7, 25), new Date(year, 11, 15)],
+  autumn: (year) => [new Date(year, 7, 25), new Date(year, 11, 15)],
+  winter: (year) => [new Date(year, 11, 1), new Date(year + 1, 0, 15)],
+};
+
+function semesterMonths(text) {
+  const found = [...text.matchAll(/\b(spring|summer|fall|autumn|winter)\s+((?:19|20)\d{2})\b/gi)];
+  if (!found.length) return 0;
+
+  const spans = found.map(([, season, year]) => SEASONS[season.toLowerCase()](Number(year)));
+  const start = Math.min(...spans.map(([from]) => from.getTime()));
+  const end = Math.max(...spans.map(([, to]) => to.getTime()));
+  const months = Math.round((end - start) / MS_PER_MONTH);
+  return months > 0 && months <= MAX_MONTHS ? months : 0;
+}
+
+// "Jan 2025 - Aug 2025", "05/2023 - 08/2023", "Sep 2024 - Present", and
+// "Fall 2024 - Spring 2025".
 export function monthsIn(text, now = new Date()) {
+  // A season name beats the date parser, which reads "Fall 2024" as a bare year.
+  const bySemester = semesterMonths(text);
+  if (bySemester) return bySemester;
+
   const results = chrono.parse(text, now, { forwardDate: false });
   let longest = 0;
 

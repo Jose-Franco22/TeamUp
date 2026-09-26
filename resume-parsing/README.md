@@ -68,8 +68,10 @@ Each suggestion carries the evidence `matching/` scores:
 }
 ```
 
-- **months** comes from the date range on the job the skill was mentioned under
-  (`chrono-node` reads "Jan 2025 - Aug 2025" and "Sep 2024 - Present").
+- **months** comes from the date range on the job the skill was mentioned under.
+  `chrono-node` reads "Jan 2025 - Aug 2025", "05/2023 - 08/2023" and
+  "Sep 2024 - Present"; semesters ("Fall 2024 - Spring 2025") are handled
+  separately, since no date parser knows when a semester runs.
 - **projects** counts entries in the projects section where it appears.
 - **quote** is the line it was found on, so the student can check each
   suggestion. A test asserts every quote really exists in the resume.
@@ -79,12 +81,27 @@ with `source: 'resume'` and a `profile_evidence` row. Nothing is saved until
 the student ticks the box, which is what the Profile page's "imported" tag
 already promises.
 
-## Samples
+## Samples and accuracy
 
 `fixtures/` holds the same invented resume as `.txt`, `.tex`, `.pdf` and
-`.docx`, plus a text-free PDF that stands in for a scan. Real resumes are
-personal data and never belong in the repo. A test parses all four formats and
-asserts they produce **identical** skills, months and projects.
+`.docx`, plus a text-free PDF standing in for a scan, and three resumes written
+in deliberately different styles:
+
+| Fixture | What it exercises |
+| --- | --- |
+| `style-semester.txt` | semester dates across an academic year, an inline `Technical Skills:` heading, bullet glyphs |
+| `style-numeric.txt` | numeric ranges like `05/2023 - 08/2023`, headings ending in a colon, no projects section |
+| `style-sparse.txt` | skills mentioned only in prose, no dates anywhere |
+
+`fixtures/expected.json` records, by hand, what each one should produce.
+`test/accuracy.test.mjs` fails on any miss, any false positive, and any wrong
+month count, so accuracy is measured rather than assumed. **When a real resume
+parses badly, add it as a fixture, write down what it should say, and fix until
+the test passes.** Real resumes are personal data and never belong in the repo,
+so add a redacted or invented equivalent.
+
+A separate test parses all four formats of the same resume and asserts they
+produce **identical** skills, months and projects.
 
 ## Known limits
 
