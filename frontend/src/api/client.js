@@ -454,9 +454,9 @@ export async function getSkills() {
 //
 // Duplicates are ignored rather than rejected: a student who imports an
 // updated resume should not hit an error on the skills they already had.
-// The evidence behind each skill (months, projects, the quote) has nowhere to
-// live in the schema yet, so only the user_skills rows are stored for now.
-export async function addResumeSkills(skillIds) {
+// The evidence behind each skill ({ skill_id, months, projects, quote }) goes
+// to profile_evidence, overwriting what an earlier import stored.
+export async function addResumeSkills(skillIds, evidence = []) {
   if (!skillIds?.length) return getCurrentUser();
 
   if (USE_MOCKS) {
@@ -480,6 +480,25 @@ export async function addResumeSkills(skillIds) {
     .from('user_skills')
     .upsert(rows, { onConflict: 'user_id,skill_id', ignoreDuplicates: true });
   if (error) throw error;
+
+  // After user_skills, since each evidence row references its user_skills row.
+  const confirmed = new Set(skillIds);
+  const evidenceRows = evidence
+    .filter((e) => confirmed.has(e.skill_id))
+    .map(({ skill_id, months, projects, quote }) => ({
+      user_id: viewerId,
+      skill_id,
+      months,
+      projects,
+      quote,
+      updated_at: new Date().toISOString(),
+    }));
+  if (evidenceRows.length) {
+    const { error: evidenceError } = await supabase
+      .from('profile_evidence')
+      .upsert(evidenceRows, { onConflict: 'user_id,skill_id' });
+    if (evidenceError) throw evidenceError;
+  }
   return getCurrentUser();
 }
 

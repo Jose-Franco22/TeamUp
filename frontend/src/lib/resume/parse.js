@@ -62,9 +62,8 @@ export function parseDocument(doc, { table, dictionary, now = new Date() } = {})
   };
 }
 
-// What the app writes once the student confirms. Evidence (months, projects,
-// the quote) has nowhere to live in the schema yet, so only the user_skills
-// rows are saved today; the rest rides along for when that table exists.
+// What the app writes once the student confirms: a user_skills row and its
+// profile_evidence row (months, projects, the quote) per skill.
 export function toProfileRows(parsed, userId, confirmedSkillIds = null) {
   const keep = confirmedSkillIds ? new Set(confirmedSkillIds) : null;
   return parsed.skills

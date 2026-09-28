@@ -58,7 +58,13 @@ export default function ResumeImport({ mySkills = [], onImported }) {
     setStage('saving');
     setError('');
     try {
-      const updated = await addResumeSkills([...selected]);
+      const evidence = parsed.skills.map((skill) => ({
+        skill_id: skill.skill_id,
+        months: skill.months,
+        projects: skill.projects,
+        quote: skill.evidence[0]?.quote ?? null,
+      }));
+      const updated = await addResumeSkills([...selected], evidence);
       const count = selected.size;
       setNote(`Added ${count} skill${count === 1 ? '' : 's'} from ${fileName}.`);
       reset();
