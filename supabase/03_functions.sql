@@ -29,6 +29,76 @@ $$;
 
 grant execute on function public.project_member_count(uuid) to anon, authenticated;
 
+-- --- create_project -----------------------------------------------------
+-- Mirrors createProject()'s mock-mode branch in client.js: inserts the
+-- project, its one team, seats the creator on that team, and records the
+-- roles still needed, all in one transaction. Re-checks what client.js
+-- already checks (team size 2-4, not already on a team) since a
+-- client-side check is not a security boundary. p_roles_needed is the
+-- jsonb form of the `roles_needed` array client.js sends: each element
+-- `{ skill_id, quantity_needed }`.
+create or replace function public.create_project(
+  p_title text,
+  p_description text,
+  p_team_size_target smallint,
+  p_creator_role text,
+  p_roles_needed jsonb
+)
+returns public.projects
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller uuid := auth.uid();
+  v_project public.projects;
+  v_team public.teams;
+  v_role jsonb;
+begin
+  if caller is null then
+    raise exception 'Not signed in';
+  end if;
+
+  if p_team_size_target < 2 or p_team_size_target > 4 then
+    raise exception 'A team has to be between 2 and 4 people';
+  end if;
+
+  if coalesce(btrim(p_creator_role), '') = '' then
+    raise exception 'A role is required to create a project';
+  end if;
+
+  -- Same invariant create_join_request enforces: one team per student, ever.
+  if exists (select 1 from public.team_members where user_id = caller) then
+    raise exception 'You are already on a team and cannot create another project';
+  end if;
+
+  insert into public.projects (creator_id, title, description, team_size_target)
+  values (caller, p_title, p_description, p_team_size_target)
+  returning * into v_project;
+
+  insert into public.teams (project_id)
+  values (v_project.id)
+  returning * into v_team;
+
+  insert into public.team_members (user_id, team_id, role)
+  values (caller, v_team.id, p_creator_role);
+
+  for v_role in select * from jsonb_array_elements(coalesce(p_roles_needed, '[]'::jsonb))
+  loop
+    insert into public.project_roles_needed (project_id, skill_id, quantity_needed)
+    values (
+      v_project.id,
+      (v_role->>'skill_id')::uuid,
+      (v_role->>'quantity_needed')::smallint
+    );
+  end loop;
+
+  return v_project;
+end;
+$$;
+
+grant execute on function public.create_project(text, text, smallint, text, jsonb) to authenticated;
+
 -- --- create_join_request -----------------------------------------------------
 -- Mirrors the four checks createJoinRequest() does in the mock client.js, in
 -- the same order, inside one transaction so there's no gap between checking
