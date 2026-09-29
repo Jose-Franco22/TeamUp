@@ -502,6 +502,28 @@ export async function addResumeSkills(skillIds, evidence = []) {
   return getCurrentUser();
 }
 
+// Removes one skill from the caller's profile. Its profile_evidence row goes
+// with it (on delete cascade in 07_profile_evidence.sql).
+export async function removeSkill(skillId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const i = userSkills.findIndex((row) => row.user_id === id && row.skill_id === skillId);
+    if (i !== -1) userSkills.splice(i, 1);
+    return getCurrentUser();
+  }
+
+  const viewerId = requireViewerId(await getViewerId());
+  // RLS (user_skills_manage_own) already limits this to the caller's own rows.
+  const { error } = await supabase
+    .from('user_skills')
+    .delete()
+    .eq('user_id', viewerId)
+    .eq('skill_id', skillId);
+  if (error) throw error;
+  return getCurrentUser();
+}
+
 // --- Current user ------------------------------------------------------
 
 const USER_SELECT = 'id, email, name, bio, availability_hours, github_url, user_skills ( source, skills ( id, name, category ) )';
