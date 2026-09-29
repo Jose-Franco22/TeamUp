@@ -1,0 +1,16 @@
+ALEX MORENO
+alex.moreno@example.edu • (000) 555-0100 • linkedin.com/in/example-alex
+
+Technical Skills: Python, pandas, scikit-learn, PostgreSQL, Git, Docker
+
+RESEARCH EXPERIENCE
+Undergraduate Research Assistant, Data Science Lab — Fall 2024 – Spring 2025
+• Built ETL pipelines in Python with pandas to clean 2M survey records
+• Trained baseline models in scikit-learn and stored results in PostgreSQL
+
+RELEVANT COURSEWORK
+Databases, Machine Learning, Software Engineering
+
+PROJECTS
+Campus Bus Tracker • Summer 2024
+• Real-time map in React backed by a Node.js service

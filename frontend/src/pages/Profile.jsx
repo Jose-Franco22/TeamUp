@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
-import { getCurrentUser, updateCurrentUser } from '../api/client';
+import { getCurrentUser, removeSkill, updateCurrentUser } from '../api/client';
 import useAsync from '../components/useAsync';
 import { ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
+import ResumeImport from '../components/ResumeImport';
 
 export default function Profile() {
   const { data, loading, error, reload, setData } = useAsync(getCurrentUser, []);
   const [form, setForm] = useState(null);
   const [saveState, setSaveState] = useState(null); // 'saving' | 'saved' | message
+  const [removingId, setRemovingId] = useState(null);
+  const [removeError, setRemoveError] = useState(null);
 
   useEffect(() => {
     if (data) {
@@ -40,6 +43,18 @@ export default function Profile() {
       setSaveState('saved');
     } catch (err) {
       setSaveState(err.message);
+    }
+  }
+
+  async function handleRemoveSkill(skillId) {
+    setRemovingId(skillId);
+    setRemoveError(null);
+    try {
+      setData(await removeSkill(skillId));
+    } catch (err) {
+      setRemoveError(err.message);
+    } finally {
+      setRemovingId(null);
     }
   }
 
@@ -127,15 +142,26 @@ export default function Profile() {
                 <span className="tag" key={s.id}>
                   {s.name}
                   {s.source === 'resume' && <em>imported</em>}
+                  <button
+                    className="tag-remove"
+                    aria-label={`Remove ${s.name}`}
+                    title="Remove skill"
+                    disabled={removingId !== null}
+                    onClick={() => handleRemoveSkill(s.id)}
+                  >
+                    ×
+                  </button>
                 </span>
               ))}
             </div>
           </div>
         ))}
 
+        {removeError && <p className="inline-error" role="alert">{removeError}</p>}
+
         <div className="foot">
           <button className="btn ghost">Add a skill</button>
-          <button className="btn ghost">Import from resume</button>
+          <ResumeImport mySkills={data.skills} onImported={setData} />
         </div>
       </section>
     </>

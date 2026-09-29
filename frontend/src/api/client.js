@@ -15,6 +15,7 @@ import {
   users,
   roles as allRoles,
   skills,
+  userSkills,
   buildProject,
   skillsForUser,
 } from './mockData';
@@ -446,6 +447,81 @@ export async function getSkills() {
   const { data, error } = await supabase.from('skills').select('id, name, category').order('category');
   if (error) throw error;
   return data;
+}
+
+// Saves the skills a student confirmed after importing a resume. Nothing is
+// written until they confirm, so this is the only write the import performs.
+//
+// Duplicates are ignored rather than rejected: a student who imports an
+// updated resume should not hit an error on the skills they already had.
+// The evidence behind each skill ({ skill_id, months, projects, quote }) goes
+// to profile_evidence, overwriting what an earlier import stored.
+export async function addResumeSkills(skillIds, evidence = []) {
+  if (!skillIds?.length) return getCurrentUser();
+
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    for (const skillId of skillIds) {
+      const already = userSkills.some((row) => row.user_id === id && row.skill_id === skillId);
+      if (!already) userSkills.push({ user_id: id, skill_id: skillId, source: 'resume' });
+    }
+    return getCurrentUser();
+  }
+
+  const viewerId = requireViewerId(await getViewerId());
+  const rows = skillIds.map((skillId) => ({
+    user_id: viewerId,
+    skill_id: skillId,
+    source: 'resume',
+  }));
+  // RLS (user_skills_manage_own) already limits this to the caller's own rows.
+  const { error } = await supabase
+    .from('user_skills')
+    .upsert(rows, { onConflict: 'user_id,skill_id', ignoreDuplicates: true });
+  if (error) throw error;
+
+  // After user_skills, since each evidence row references its user_skills row.
+  const confirmed = new Set(skillIds);
+  const evidenceRows = evidence
+    .filter((e) => confirmed.has(e.skill_id))
+    .map(({ skill_id, months, projects, quote }) => ({
+      user_id: viewerId,
+      skill_id,
+      months,
+      projects,
+      quote,
+      updated_at: new Date().toISOString(),
+    }));
+  if (evidenceRows.length) {
+    const { error: evidenceError } = await supabase
+      .from('profile_evidence')
+      .upsert(evidenceRows, { onConflict: 'user_id,skill_id' });
+    if (evidenceError) throw evidenceError;
+  }
+  return getCurrentUser();
+}
+
+// Removes one skill from the caller's profile. Its profile_evidence row goes
+// with it (on delete cascade in 07_profile_evidence.sql).
+export async function removeSkill(skillId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const i = userSkills.findIndex((row) => row.user_id === id && row.skill_id === skillId);
+    if (i !== -1) userSkills.splice(i, 1);
+    return getCurrentUser();
+  }
+
+  const viewerId = requireViewerId(await getViewerId());
+  // RLS (user_skills_manage_own) already limits this to the caller's own rows.
+  const { error } = await supabase
+    .from('user_skills')
+    .delete()
+    .eq('user_id', viewerId)
+    .eq('skill_id', skillId);
+  if (error) throw error;
+  return getCurrentUser();
 }
 
 // --- Current user ------------------------------------------------------
