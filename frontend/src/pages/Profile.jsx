@@ -4,6 +4,7 @@ import useAsync from '../components/useAsync';
 import { ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
 import ResumeImport from '../components/ResumeImport';
+import SkillPicker from '../components/SkillPicker';
 
 export default function Profile() {
   const { data, loading, error, reload, setData } = useAsync(getCurrentUser, []);
@@ -160,7 +161,7 @@ export default function Profile() {
         {removeError && <p className="inline-error" role="alert">{removeError}</p>}
 
         <div className="foot">
-          <button className="btn ghost">Add a skill</button>
+          <SkillPicker mySkills={data.skills} onAdded={setData} />
           <ResumeImport mySkills={data.skills} onImported={setData} />
         </div>
       </section>

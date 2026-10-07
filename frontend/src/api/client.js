@@ -502,6 +502,29 @@ export async function addResumeSkills(skillIds, evidence = []) {
   return getCurrentUser();
 }
 
+// Adds one skill the student picked by hand. Adding a skill they already have
+// is a no-op, same as addResumeSkills.
+export async function addSkill(skillId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const already = userSkills.some((row) => row.user_id === id && row.skill_id === skillId);
+    if (!already) userSkills.push({ user_id: id, skill_id: skillId, source: 'manual' });
+    return getCurrentUser();
+  }
+
+  const viewerId = requireViewerId(await getViewerId());
+  // RLS (user_skills_manage_own) already limits this to the caller's own rows.
+  const { error } = await supabase
+    .from('user_skills')
+    .upsert(
+      { user_id: viewerId, skill_id: skillId, source: 'manual' },
+      { onConflict: 'user_id,skill_id', ignoreDuplicates: true },
+    );
+  if (error) throw error;
+  return getCurrentUser();
+}
+
 // Removes one skill from the caller's profile. Its profile_evidence row goes
 // with it (on delete cascade in 07_profile_evidence.sql).
 export async function removeSkill(skillId) {
