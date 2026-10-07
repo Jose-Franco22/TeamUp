@@ -493,3 +493,42 @@ button:disabled { opacity: 0.45; cursor: default; }
 .suggestion b { font-weight: 500; font-size: 14px; }
 .suggestion .facts { font-style: normal; font-size: 12.5px; color: var(--slate); }
 .suggestion small { display: block; font-size: 12px; color: var(--mute); margin-top: 2px; line-height: 1.45; }
+
+/* ---------- skill picker ---------- */
+.picker { position: relative; }
+.picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 8px;
+}
+.picker-menu input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.picker-menu ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.picker-menu li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.picker-menu li span { font-size: 12px; color: var(--mute); }
+.picker-menu li.active { background: var(--canvas); }
+.picker-note { font-size: 13px; color: var(--mute); margin: 8px 4px 2px; }
