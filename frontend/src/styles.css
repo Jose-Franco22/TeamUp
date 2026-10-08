@@ -1,16 +1,35 @@
 :root {
-  --ink: #15181f;
-  --slate: #646b79;
-  --mute: #8e95a3;
-  --line: #e3e6ec;
-  --canvas: #f6f7f9;
+  --ink: #424242;
+  --slate: #646469;
+  --mute: #8d8d92;
+  --line: #dcdcdf;
+  --canvas: #f5f5f6;
   --paper: #ffffff;
-  --open: #136b45;
-  --open-bg: #e7f3ed;
-  --open-line: #9ccbb4;
+  --open: #cb4900;
+  --open-bg: #fbe9df;
+  --open-line: #e8ab86;
   --warn: #8a6212;
   --warn-bg: #fbf2de;
   --danger: #9b2c2c;
+  --emphasis-bg: var(--ink);
+  --emphasis-text: #ffffff;
+}
+
+:root[data-theme='dark'] {
+  --ink: #f0f0f1;
+  --slate: #b6b6bb;
+  --mute: #86868b;
+  --line: #3a3a3d;
+  --canvas: #19191a;
+  --paper: #242426;
+  --open: #e2590c;
+  --open-bg: #3a2414;
+  --open-line: #7a4018;
+  --warn: #e0a94a;
+  --warn-bg: #3a2f14;
+  --danger: #e2685f;
+  --emphasis-bg: var(--open);
+  --emphasis-text: #ffffff;
 }
 
 * { box-sizing: border-box; }
@@ -23,6 +42,28 @@ body {
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+body,
+.bar,
+.card,
+.rows,
+.row,
+.empty-state,
+.step,
+.pill,
+.role,
+.tag,
+.btn,
+.btn-label,
+.avatar,
+.field input,
+.field textarea,
+.field select,
+.role-select,
+.theme-toggle {
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 button { font-family: inherit; font-size: 14px; cursor: pointer; }
@@ -55,10 +96,25 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .me { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--slate); }
 
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--slate);
+  flex: none;
+  padding: 0;
+}
+.theme-toggle:hover { color: var(--ink); border-color: var(--mute); }
+
 .avatar {
   border-radius: 50%;
-  background: var(--ink);
-  color: #fff;
+  background: var(--emphasis-bg);
+  color: var(--emphasis-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -141,6 +197,15 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .role.none { border-style: solid; color: var(--mute); }
 .role .qty { font-style: normal; font-weight: 400; opacity: 0.75; margin-left: 5px; }
+.role .skill {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  opacity: 0.8;
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid currentColor;
+}
 
 /* ---------- members ---------- */
 .members { display: flex; gap: 16px; margin: 16px 0 0; flex-wrap: wrap; }
@@ -162,9 +227,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .btn {
   display: inline-block;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  color: #fff;
+  border: 1px solid var(--emphasis-bg);
+  background: var(--emphasis-bg);
+  color: var(--emphasis-text);
   border-radius: 7px;
   padding: 9px 16px;
   font-weight: 500;
@@ -191,13 +256,25 @@ button:disabled { opacity: 0.45; cursor: default; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tag { font-size: 12.5px; padding: 4px 9px; border-radius: 6px; background: var(--canvas); color: var(--slate); }
 .tag em { font-style: normal; color: var(--mute); font-size: 11px; margin-left: 5px; }
+.tag-remove {
+  margin-left: 6px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--mute);
+  font-size: 14px;
+  line-height: 1;
+}
+.tag-remove:hover:not(:disabled) { color: var(--slate); }
+.tag-remove:disabled { cursor: default; opacity: 0.5; }
 
 /* ---------- forms ---------- */
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 5px; }
 .field .hint { font-size: 12.5px; color: var(--mute); margin: 0 0 7px; line-height: 1.45; }
 .field input,
-.field textarea {
+.field textarea,
+.field select {
   width: 100%;
   font-family: inherit;
   font-size: 14px;
@@ -208,9 +285,78 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: var(--ink);
 }
 .field textarea { min-height: 76px; resize: vertical; }
+
+.req,
+.opt {
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.req { color: var(--open); }
+.opt { color: var(--mute); }
 .num { display: flex; align-items: center; gap: 10px; }
 .num input { width: 90px; }
 .num span { font-size: 13px; color: var(--slate); }
+
+/* ---------- roles-needed picker ---------- */
+.role-rows { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.role-row { display: flex; gap: 8px; align-items: center; }
+.role-row select {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.qty-field { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.qty-field span { font-size: 13px; color: var(--slate); }
+.role-row input[type='number'] {
+  width: 68px;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.role-row .btn { padding: 9px 12px; white-space: nowrap; }
+
+.hint.seats { margin: 8px 0 0; }
+.hint.seats.over { color: var(--danger); }
+
+/* Role + skill + quantity + remove is too much for a phone-width row. */
+@media (max-width: 620px) {
+  .role-row { flex-wrap: wrap; }
+  .role-row select { flex: 1 1 100%; }
+}
+
+/* ---------- roster ---------- */
+.tag.owner {
+  margin-left: 7px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+/* ---------- danger zone ---------- */
+.danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+.danger-zone h2 { color: var(--danger); }
+.btn.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.btn.danger:disabled { opacity: 0.4; }
 
 /* ---------- key/value ---------- */
 .kv { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 16px; }
@@ -320,3 +466,69 @@ button:disabled { opacity: 0.45; cursor: default; }
   .shell { padding: 20px 16px; }
   .bar { padding: 0 16px; gap: 20px; }
 }
+
+/* ---------- resume import ---------- */
+.import {
+  flex-basis: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-top: 14px;
+  background: var(--canvas);
+}
+.import-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.import-head .lbl { margin: 0; }
+.import .desc { margin: 4px 0 10px; font-size: 13.5px; color: var(--slate); }
+.import .foot { border-top: 1px solid var(--line); }
+
+.suggestion {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.suggestion input { margin-top: 3px; accent-color: var(--open); width: 15px; height: 15px; flex: none; }
+.suggestion b { font-weight: 500; font-size: 14px; }
+.suggestion .facts { font-style: normal; font-size: 12.5px; color: var(--slate); }
+.suggestion small { display: block; font-size: 12px; color: var(--mute); margin-top: 2px; line-height: 1.45; }
+
+/* ---------- skill picker ---------- */
+.picker { position: relative; }
+.picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 8px;
+}
+.picker-menu input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.picker-menu ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.picker-menu li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.picker-menu li span { font-size: 12px; color: var(--mute); }
+.picker-menu li.active { background: var(--canvas); }
+.picker-note { font-size: 13px; color: var(--mute); margin: 8px 4px 2px; }

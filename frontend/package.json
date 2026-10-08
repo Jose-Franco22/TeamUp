@@ -9,6 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "chrono-node": "^2.10.1",
+    "mammoth": "^1.12.3",
+    "pdfjs-dist": "^6.3.289",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2"
@@ -16,5 +20,8 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
     "vite": "^5.4.8"
+  },
+  "allowScripts": {
+    "esbuild": true
   }
 }

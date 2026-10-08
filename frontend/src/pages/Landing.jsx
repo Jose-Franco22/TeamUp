@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useSession } from '../auth/SessionContext';
 
 const STEPS = [
   {
@@ -20,6 +21,8 @@ const STEPS = [
 ];
 
 export default function Landing() {
+  const { status } = useSession();
+
   return (
     <>
       <section className="hero">
@@ -34,9 +37,11 @@ export default function Landing() {
           <Link className="btn" to="/browse">
             Browse open projects
           </Link>
-          <Link className="btn ghost" to="/login">
-            Sign in
-          </Link>
+          {status !== 'authenticated' && (
+            <Link className="btn ghost" to="/login">
+              Sign in
+            </Link>
+          )}
         </div>
       </section>
 

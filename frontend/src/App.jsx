@@ -2,15 +2,19 @@ import { Link, NavLink, Route, Routes } from 'react-router-dom';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Browse from './pages/Browse';
+import CreateProject from './pages/CreateProject';
+import EditProject from './pages/EditProject';
 import Profile from './pages/Profile';
 import Requests from './pages/Requests';
 import Team from './pages/Team';
 import Avatar from './components/Avatar';
+import ThemeToggle from './components/ThemeToggle';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 
 const PUBLIC_TABS = [{ to: '/browse', label: 'Browse' }];
 const MEMBER_TABS = [
+  { to: '/projects/new', label: 'Create a project' },
   { to: '/profile', label: 'Your profile' },
   { to: '/requests', label: 'Requests' },
   { to: '/team', label: 'Your team' },
@@ -34,6 +38,7 @@ export default function App() {
           ))}
         </nav>
         <div className="me">
+          <ThemeToggle />
           {status === 'authenticated' && (
             <>
               {user.name} <Avatar name={user.name} />
@@ -56,6 +61,8 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/browse" element={<Browse />} />
           <Route element={<ProtectedRoute />}>
+            <Route path="/projects/new" element={<CreateProject />} />
+            <Route path="/projects/:id/edit" element={<EditProject />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/requests" element={<Requests />} />
             <Route path="/team" element={<Team />} />

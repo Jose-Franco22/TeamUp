@@ -1,0 +1,57 @@
+{
+  "_comment": "Ground truth, checked by hand against each resume. test/accuracy.test.mjs fails if the parser finds a skill that is not here (a false positive), misses one that is (a miss), or reports different months. Add a row whenever a new resume style is added.",
+
+  "sample-resume.txt": {
+    "note": "Dated internship, dated research post, two semester-dated projects, a comma skills list.",
+    "skills": {
+      "s-react": 7,
+      "s-node": 7,
+      "s-express": 7,
+      "s-jest": 7,
+      "s-git": 7,
+      "s-opencv": 7,
+      "s-python": 7,
+      "s-pg": 4,
+      "s-sklearn": 4,
+      "s-figma": 0,
+      "s-js": 0
+    },
+    "unknownIncludes": ["Java", "C++", "SQL", "Docker"]
+  },
+
+  "style-semester.txt": {
+    "note": "Semester dates across an academic year, an inline skills heading, bullet glyphs.",
+    "skills": {
+      "s-python": 9,
+      "s-pandas": 9,
+      "s-sklearn": 9,
+      "s-pg": 9,
+      "s-react": 3,
+      "s-node": 3,
+      "s-git": 0
+    },
+    "unknownIncludes": ["Docker"]
+  },
+
+  "style-numeric.txt": {
+    "note": "Numeric date ranges, headings ending in a colon, no projects section.",
+    "skills": {
+      "s-js": 4,
+      "s-express": 3,
+      "s-jest": 3,
+      "s-node": 3,
+      "s-git": 0
+    },
+    "unknownIncludes": ["Bash"]
+  },
+
+  "style-sparse.txt": {
+    "note": "Skills mentioned only in prose, no dates anywhere.",
+    "skills": {
+      "s-react": 0,
+      "s-node": 0,
+      "s-figma": 0
+    },
+    "unknownIncludes": []
+  }
+}

@@ -26,19 +26,19 @@ See `/docs` for the full project proposal.
 
 | Layer | Technology |
 |---|---|
-| Frontend | React Native |
-| Backend | Node.js + Express |
-| Database | PostgreSQL |
+| Frontend | React (Vite) |
+| Backend | Supabase — no separate server; access control is Postgres Row Level Security, and the few operations that must be atomic (join requests) are Postgres functions called via `supabase.rpc(...)` |
+| Database | PostgreSQL (via Supabase) |
 | Resume parsing | LLM-based extraction (Google Gemini API, free tier) |
-| Auth | Supabase Auth / Firebase Auth |
-| Hosting | Vercel (frontend), Render or Supabase (backend/DB) |
+| Auth | Supabase Auth — Microsoft/Entra ID sign-in, restricted to UTRGV's tenant so only `@utrgv.edu` accounts can sign in |
+| Hosting | Vercel (frontend), Supabase (database/auth/backend logic) |
 
 ## Repo Structure
 
 ```
-/frontend    React Native app
-/backend     Node/Express API
-/docs        Proposal, design notes, meeting notes
+/frontend         React app (Vite)
+/supabase         RLS policies, auth-provisioning trigger, and RPC functions (SQL)
+TODO-backend.md   Schema reference and Supabase implementation notes
 README.md
 ```
 
@@ -59,15 +59,16 @@ cd teamup-csci4390
 # Install frontend dependencies
 cd frontend
 npm install
-
-# Install backend dependencies
-cd ../backend
-npm install
 ```
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` in `/backend` and fill in your own values (database URL, API keys). Never commit `.env` — it's already covered in `.gitignore`.
+Copy `frontend/.env.example` to `frontend/.env`. The defaults (`VITE_USE_MOCKS=true`) run the app
+against fixture data with no further setup — good enough for UI work. To run against the real
+Supabase project instead, set `VITE_USE_MOCKS=false` and fill in `VITE_SUPABASE_URL` /
+`VITE_SUPABASE_ANON_KEY` (Supabase project settings → API) — see `TODO-backend.md` for the full
+Supabase setup (schema, RLS policies, Microsoft/Entra sign-in). Never commit `.env` — it's already
+covered in `.gitignore`.
 
 ## Workflow
 
