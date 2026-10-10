@@ -79,7 +79,7 @@ pull request (`.github/workflows/tests.yml`), and a pull request shouldn't merge
 | Suite | What it covers | Run it |
 |---|---|---|
 | Frontend | Validation logic, components and pages (Vitest + React Testing Library, mock API) | `cd frontend && npm test` |
-| Resume parsing | The resume parser (`node --test`) | `cd resume-parsing && npm test` |
+| Resume parsing | The resume parser (`node --test`) | `cd resume-parsing && npm test` (run `npm install` in `frontend/` first, since it shares code from there) |
 | Database | Constraints, RLS, triggers and RPC functions (pgTAP) | see below |
 
 Use `npm run test:watch` in `frontend/` to re-run tests as you edit.

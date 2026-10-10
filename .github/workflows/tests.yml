@@ -16,8 +16,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -34,12 +34,19 @@ jobs:
       run:
         working-directory: resume-parsing
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: resume-parsing/package-lock.json
+          cache-dependency-path: |
+            resume-parsing/package-lock.json
+            frontend/package-lock.json
+      # The parser re-exports code from frontend/src/lib/resume/, which
+      # imports packages (e.g. chrono-node) from frontend/node_modules.
+      - name: Install frontend dependencies the parser shares
+        run: npm ci
+        working-directory: frontend
       - run: npm ci
       - run: npm test
 
@@ -64,7 +71,7 @@ jobs:
       PGUSER: postgres
       PGPASSWORD: postgres
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install pgTAP into the Postgres container
         run: |
           docker exec ${{ job.services.postgres.id }} sh -c \
