@@ -51,7 +51,6 @@ body,
 .rows,
 .row,
 .empty-state,
-.step,
 .pill,
 .role,
 .tag,
@@ -406,14 +405,11 @@ button:disabled { opacity: 0.45; cursor: default; }
 .empty-title { font-size: 15px; font-weight: 500; color: var(--ink); margin: 0 0 4px; }
 .empty-state p { margin: 0; font-size: 13.5px; color: var(--slate); }
 
-/* ---------- landing ---------- */
+/* ---------- login hero ---------- */
 .hero { padding: 40px 0 8px; max-width: 640px; }
 .hero h1 { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 14px; line-height: 1.25; }
 .hero p { font-size: 15px; color: var(--slate); line-height: 1.6; margin: 0 0 24px; }
-.hero-cta { display: flex; gap: 10px; }
 
-.steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 28px; }
-.step { display: flex; gap: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
 .step-num {
   flex: none;
   width: 26px;
@@ -427,8 +423,6 @@ button:disabled { opacity: 0.45; cursor: default; }
   font-size: 12.5px;
   font-weight: 600;
 }
-.step h3 { margin: 0 0 4px; font-size: 14.5px; font-weight: 600; }
-.step p { margin: 0; font-size: 13px; color: var(--slate); line-height: 1.5; }
 
 .about p { margin: 0 0 16px; font-size: 14px; color: var(--ink); line-height: 1.65; }
 .about-people { display: flex; gap: 26px; flex-wrap: wrap; }
@@ -442,9 +436,10 @@ button:disabled { opacity: 0.45; cursor: default; }
 .guest-note:hover { text-decoration: underline; }
 
 /* ---------- auth ---------- */
-.auth-wrap { display: flex; justify-content: center; padding-top: 40px; }
-.auth-card { width: 100%; max-width: 380px; }
-.auth-card h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.login { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 40px; align-items: center; margin-bottom: 12px; }
+.login .hero { padding: 24px 0; }
+.login .hero p { margin: 0; }
+.auth-card { width: 100%; margin-bottom: 0; }
 .field select {
   width: 100%;
   font-family: inherit;
@@ -459,7 +454,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 /* ---------- narrow screens ---------- */
 @media (max-width: 860px) {
   .grid2 { grid-template-columns: 1fr; }
-  .steps { grid-template-columns: 1fr; }
+  .login { grid-template-columns: 1fr; gap: 8px; }
+  .tour-progress-label { display: none; }
   .hero h1 { font-size: 26px; }
   .row { grid-template-columns: 44px 1fr; row-gap: 8px; }
   .row.hd { display: none; }
@@ -532,3 +528,59 @@ button:disabled { opacity: 0.45; cursor: default; }
 .picker-menu li span { font-size: 12px; color: var(--mute); }
 .picker-menu li.active { background: var(--canvas); }
 .picker-note { font-size: 13px; color: var(--mute); margin: 8px 4px 2px; }
+
+/* ---------- first-sign-in walkthrough ---------- */
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 16px 16px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow-y: auto;
+}
+.tour {
+  width: 100%;
+  max-width: 560px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+  padding: 24px 26px;
+  outline: none;
+}
+.tour h2 { margin: 18px 0 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.tour .desc { margin: 6px 0 0; font-size: 14px; color: var(--slate); line-height: 1.6; }
+.tour .tags { margin-top: 14px; }
+.tour-hello { margin: 0 0 16px; font-size: 14px; color: var(--slate); }
+.tour-empty { margin: 14px 0 0; font-size: 13px; color: var(--mute); }
+
+.tour-progress { display: flex; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.tour-progress li {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--line);
+  font-size: 12.5px;
+  color: var(--mute);
+}
+.tour-progress li.on,
+.tour-progress li.done { border-bottom-color: var(--open); }
+.tour-progress li.on { color: var(--ink); font-weight: 500; }
+.tour-progress .step-num { width: 22px; height: 22px; font-size: 11.5px; flex: none; }
+.tour-progress li.on .step-num,
+.tour-progress li.done .step-num { background: var(--open); color: #ffffff; }
+
+.tour-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.tour-foot .btn.quiet { margin-right: auto; border-color: transparent; padding-left: 0; }

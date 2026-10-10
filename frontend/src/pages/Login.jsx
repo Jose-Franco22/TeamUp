@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useSession } from '../auth/SessionContext';
 import { teamMembers, users } from '../api/mockData';
+import { Loading } from '../components/States';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
 
@@ -34,20 +35,18 @@ function MicrosoftLogin() {
   }
 
   return (
-    <div className="auth-wrap">
-      <section className="card auth-card">
-        <h1>Sign in</h1>
-        <p className="desc">
-          TeamUp is only open to UTRGV students — sign in with your @utrgv.edu Microsoft account.
-        </p>
-        {error && <p className="inline-error">{error}</p>}
-        <div className="foot">
-          <button type="button" className="btn" onClick={handleClick} disabled={pending}>
-            {pending ? 'Redirecting…' : 'Sign in with Microsoft'}
-          </button>
-        </div>
-      </section>
-    </div>
+    <section className="card auth-card">
+      <h2>Sign in to get started</h2>
+      <p className="desc">
+        TeamUp is only open to UTRGV students — sign in with your @utrgv.edu Microsoft account.
+      </p>
+      {error && <p className="inline-error">{error}</p>}
+      <div className="foot">
+        <button type="button" className="btn" onClick={handleClick} disabled={pending}>
+          {pending ? 'Redirecting…' : 'Sign in with Microsoft'}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -62,8 +61,6 @@ function MicrosoftLogin() {
 // it reflects teams created during this session too.
 function MockLogin() {
   const { signIn } = useSession();
-  const navigate = useNavigate();
-  const location = useLocation();
   const [selected, setSelected] = useState(users[0].id);
 
   const onATeam = (id) => teamMembers.some((tm) => tm.user_id === id);
@@ -72,52 +69,106 @@ function MockLogin() {
 
   function handleSubmit(e) {
     e.preventDefault();
+    // Login re-renders as signed in and redirects from there.
     signIn(selected);
-    const from = location.state?.from?.pathname || '/browse';
-    navigate(from, { replace: true });
   }
 
   return (
-    <div className="auth-wrap">
-      <section className="card auth-card">
-        <h1>Sign in</h1>
-        <p className="desc">
-          Stub login for development — pick a mock account. This gets replaced by real sign-in
-          before launch.
-        </p>
+    <section className="card auth-card">
+      <h2>Sign in to get started</h2>
+      <p className="desc">
+        Stub login for development — pick a mock account. This gets replaced by real sign-in
+        before launch.
+      </p>
 
-        <form onSubmit={handleSubmit}>
-          <div className="field">
-            <label htmlFor="user">Account</label>
-            <select id="user" value={selected} onChange={(e) => setSelected(e.target.value)}>
-              <optgroup label="Not on a team — can request to join">
-                {free.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} — {u.email}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Already on a team">
-                {seated.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} — {u.email}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </div>
+      <form onSubmit={handleSubmit}>
+        <div className="field">
+          <label htmlFor="user">Account</label>
+          <select id="user" value={selected} onChange={(e) => setSelected(e.target.value)}>
+            <optgroup label="Not on a team — can request to join">
+              {free.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} — {u.email}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Already on a team">
+              {seated.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} — {u.email}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        </div>
 
-          <div className="foot">
-            <button type="submit" className="btn">
-              Continue
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
+        <div className="foot">
+          <button type="submit" className="btn">
+            Continue
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 
+// The only page a guest can reach — every other route redirects here — so it
+// also has to explain what TeamUp is.
 export default function Login() {
-  return USE_MOCKS ? <MockLogin /> : <MicrosoftLogin />;
+  const { status } = useSession();
+  const location = useLocation();
+
+  if (status === 'loading') return <Loading label="Checking session" />;
+  if (status === 'authenticated') {
+    return <Navigate to={location.state?.from?.pathname || '/browse'} replace />;
+  }
+
+  return (
+    <>
+      <div className="login">
+        <section className="hero">
+          <h1>Find a senior project team by skill, not by who you already know.</h1>
+          <p>
+            CSCI 4390 teams usually form through whoever's already in your group chat — not
+            whoever actually has the skills the project needs. TeamUp lists what every project is
+            building, what roles are still open, and lets you request to join the ones that match
+            what you can bring.
+          </p>
+        </section>
+        {USE_MOCKS ? <MockLogin /> : <MicrosoftLogin />}
+      </div>
+
+      <section>
+        <h2 className="section">About</h2>
+        <div className="card about">
+          {/* TODO: replace with real copy — the actual story (how the four
+              of us ended up forming this team through CSCI 4390 group
+              chats and existing friend groups, which is exactly the
+              coordination problem TeamUp is meant to fix) should go here
+              instead of this placeholder. Do this before showing the site
+              to Erik or anyone else. */}
+          <p>
+            TeamUp is a senior project for CSCI 4390 at UTRGV, built by Adan Barrera, Nicolas
+            Guerra, Jose Franco Garza, and Alexis Covarrubias, advised by Erik Enriquez. We built
+            it because forming a project team usually comes down to who you already know, not who
+            actually fits the project — and we wanted a way to match on skills instead.
+          </p>
+          <div className="about-people">
+            <div>
+              <b>Team</b>
+              <span>Adan Barrera · Nicolas Guerra · Jose Franco Garza · Alexis Covarrubias</span>
+            </div>
+            <div>
+              <b>Adviser</b>
+              <span>Erik Enriquez</span>
+            </div>
+            <div>
+              <b>Course</b>
+              <span>CSCI 4390, UTRGV</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </>
+  );
 }

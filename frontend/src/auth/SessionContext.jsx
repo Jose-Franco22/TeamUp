@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabaseClient';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
 const STORAGE_KEY = 'teamup.mockSessionUserId';
+const MOCK_ONBOARDED_KEY = 'teamup.mockOnboarded';
 
 const SessionContext = createContext(null);
 
@@ -21,9 +22,31 @@ async function loadProfile(authUserId) {
   return data;
 }
 
+// Read separately from loadProfile so a database that hasn't run
+// supabase/11_onboarding.sql yet still signs people in — they just see the
+// walkthrough again.
+async function loadOnboarded(authUserId) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('onboarded_at')
+    .eq('id', authUserId)
+    .single();
+  return !error && Boolean(data?.onboarded_at);
+}
+
+function mockOnboardedIds() {
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_ONBOARDED_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
+
 export function SessionProvider({ children }) {
   const [status, setStatus] = useState('loading');
   const [user, setUser] = useState(null);
+  // Whether this user has been through the first-sign-in walkthrough.
+  const [onboarded, setOnboarded] = useState(true);
 
   useEffect(() => {
     if (USE_MOCKS) {
@@ -32,6 +55,7 @@ export function SessionProvider({ children }) {
       if (stored) {
         setSessionUserId(stored.id);
         setUser(stored);
+        setOnboarded(mockOnboardedIds().includes(stored.id));
         setStatus('authenticated');
       } else {
         setSessionUserId(null);
@@ -50,7 +74,10 @@ export function SessionProvider({ children }) {
         }
         return;
       }
-      const profile = await loadProfile(session.user.id);
+      const [profile, done] = await Promise.all([
+        loadProfile(session.user.id),
+        loadOnboarded(session.user.id),
+      ]);
       if (!active) return;
       if (!profile) {
         // A session exists but the users row isn't there yet — e.g. the
@@ -61,6 +88,7 @@ export function SessionProvider({ children }) {
         return;
       }
       setUser(profile);
+      setOnboarded(done);
       setStatus('authenticated');
     }
 
@@ -84,19 +112,35 @@ export function SessionProvider({ children }) {
     localStorage.setItem(STORAGE_KEY, u.id);
     setSessionUserId(u.id);
     setUser(u);
+    setOnboarded(mockOnboardedIds().includes(u.id));
     setStatus('authenticated');
   }
 
   // Real sign-in: redirects to Microsoft, then back into the app. The
   // Supabase Azure provider + supabase/01_auth_provisioning.sql together
-  // enforce @utrgv.edu-only accounts.
+  // enforce @utrgv.edu-only accounts. Lands on /login so an OAuth error is
+  // still in the URL for Login to show; a successful sign-in is sent on to
+  // /browse from there.
   async function signInWithMicrosoft() {
     if (USE_MOCKS) throw new Error('signInWithMicrosoft() requires VITE_USE_MOCKS=false');
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
-      options: { redirectTo: `${window.location.origin}/browse` },
+      options: { redirectTo: `${window.location.origin}/login` },
     });
     if (error) throw error;
+  }
+
+  // Marks the walkthrough done. The local flag flips first so the dialog
+  // closes immediately; if the write fails the tour just shows again on the
+  // next visit, which is better than trapping the student in it now.
+  async function completeOnboarding() {
+    setOnboarded(true);
+    if (USE_MOCKS) {
+      const ids = mockOnboardedIds();
+      if (!ids.includes(user.id)) localStorage.setItem(MOCK_ONBOARDED_KEY, JSON.stringify([...ids, user.id]));
+      return;
+    }
+    await supabase.from('users').update({ onboarded_at: new Date().toISOString() }).eq('id', user.id);
   }
 
   async function signOut() {
@@ -111,8 +155,8 @@ export function SessionProvider({ children }) {
   }
 
   const value = useMemo(
-    () => ({ status, user, signIn, signInWithMicrosoft, signOut }),
-    [status, user]
+    () => ({ status, user, onboarded, signIn, signInWithMicrosoft, signOut, completeOnboarding }),
+    [status, user, onboarded]
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

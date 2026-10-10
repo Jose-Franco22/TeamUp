@@ -1,5 +1,4 @@
-import { Link, NavLink, Route, Routes } from 'react-router-dom';
-import Landing from './pages/Landing';
+import { Link, Navigate, NavLink, Route, Routes } from 'react-router-dom';
 import Login from './pages/Login';
 import Browse from './pages/Browse';
 import CreateProject from './pages/CreateProject';
@@ -9,11 +8,13 @@ import Requests from './pages/Requests';
 import Team from './pages/Team';
 import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
+import Walkthrough from './components/Walkthrough';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 
-const PUBLIC_TABS = [{ to: '/browse', label: 'Browse' }];
-const MEMBER_TABS = [
+// Everything but /login needs a signed-in user, so guests get no tabs.
+const TABS = [
+  { to: '/browse', label: 'Browse' },
   { to: '/projects/new', label: 'Create a project' },
   { to: '/profile', label: 'Your profile' },
   { to: '/requests', label: 'Requests' },
@@ -21,13 +22,13 @@ const MEMBER_TABS = [
 ];
 
 export default function App() {
-  const { status, user, signOut } = useSession();
-  const tabs = status === 'authenticated' ? [...PUBLIC_TABS, ...MEMBER_TABS] : PUBLIC_TABS;
+  const { status, user, onboarded, signOut } = useSession();
+  const tabs = status === 'authenticated' ? TABS : [];
 
   return (
     <>
       <header className="bar">
-        <Link className="mark" to="/">
+        <Link className="mark" to="/browse">
           Team<span>Up</span>
         </Link>
         <nav className="nav">
@@ -47,29 +48,26 @@ export default function App() {
               </button>
             </>
           )}
-          {status === 'guest' && (
-            <Link className="btn ghost" to="/login">
-              Sign in
-            </Link>
-          )}
         </div>
       </header>
 
       <main className="shell">
         <Routes>
-          <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/browse" element={<Browse />} />
           <Route element={<ProtectedRoute />}>
+            <Route path="/" element={<Navigate to="/browse" replace />} />
+            <Route path="/browse" element={<Browse />} />
             <Route path="/projects/new" element={<CreateProject />} />
             <Route path="/projects/:id/edit" element={<EditProject />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/requests" element={<Requests />} />
             <Route path="/team" element={<Team />} />
+            <Route path="*" element={<p className="empty">Page not found.</p>} />
           </Route>
-          <Route path="*" element={<p className="empty">Page not found.</p>} />
         </Routes>
       </main>
+
+      {status === 'authenticated' && !onboarded && <Walkthrough />}
     </>
   );
 }
