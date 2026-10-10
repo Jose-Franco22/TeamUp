@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react';
 import { getCurrentUser, removeSkill, updateCurrentUser } from '../api/client';
+import {
+  AVAILABILITY_MAX,
+  AVAILABILITY_MIN,
+  BIO_MAX,
+  ValidationError,
+  charCount,
+  validateProfile,
+} from '../lib/validation';
 import useAsync from '../components/useAsync';
 import { ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
@@ -12,6 +20,7 @@ export default function Profile() {
   const [saveState, setSaveState] = useState(null); // 'saving' | 'saved' | message
   const [removingId, setRemovingId] = useState(null);
   const [removeError, setRemoveError] = useState(null);
+  const [serverErrors, setServerErrors] = useState({});
 
   useEffect(() => {
     if (data) {
@@ -30,21 +39,52 @@ export default function Profile() {
   const dirty =
     form.bio !== (data.bio || '') ||
     form.github_url !== (data.github_url || '') ||
-    Number(form.availability_hours) !== data.availability_hours;
+    String(form.availability_hours) !== String(data.availability_hours ?? 0);
+
+  // Client-side errors from validateProfile, plus any field error the server
+  // sent back on the last save (a database CHECK the form didn't catch).
+  const { values, errors: clientErrors, isValid } = validateProfile(form);
+  const errors = { ...serverErrors, ...clientErrors };
+  const bioCount = charCount(form.bio.trim());
+
+  function update(field, value) {
+    setForm({ ...form, [field]: value });
+    setServerErrors((prev) => {
+      const { [field]: _cleared, ...rest } = prev;
+      return rest;
+    });
+    if (saveState && saveState !== 'saving') setSaveState(null);
+  }
 
   async function handleSave() {
+    if (!isValid) return;
     setSaveState('saving');
     try {
-      const updated = await updateCurrentUser({
-        bio: form.bio,
-        github_url: form.github_url,
-        availability_hours: Number(form.availability_hours),
-      });
+      const updated = await updateCurrentUser(values);
       setData(updated);
       setSaveState('saved');
     } catch (err) {
-      setSaveState(err.message);
+      if (err instanceof ValidationError) {
+        setServerErrors(err.fieldErrors);
+        setSaveState(null);
+      } else {
+        setSaveState(err.message || 'Could not save your profile. Try again.');
+      }
     }
+  }
+
+  // aria wiring for a field's error message, shared by all three inputs.
+  function errorProps(field) {
+    return errors[field]
+      ? { 'aria-invalid': true, 'aria-describedby': `${field}-error` }
+      : { 'aria-invalid': false };
+  }
+  function fieldError(field) {
+    return errors[field] ? (
+      <p id={`${field}-error`} className="inline-error" role="alert">
+        {errors[field]}
+      </p>
+    ) : null;
   }
 
   async function handleRemoveSkill(skillId) {
@@ -88,37 +128,57 @@ export default function Profile() {
           <textarea
             id="bio"
             value={form.bio}
-            onChange={(e) => setForm({ ...form, bio: e.target.value })}
+            onChange={(e) => update('bio', e.target.value)}
+            {...errorProps('bio')}
           />
+          <p className={`counter${bioCount > BIO_MAX ? ' over' : ''}`} data-testid="bio-counter">
+            {bioCount}/{BIO_MAX}
+          </p>
+          {fieldError('bio')}
         </div>
 
         <div className="field">
           <label htmlFor="gh">GitHub URL</label>
+          <p className="hint">Your profile link, like https://github.com/your-username. Optional.</p>
           <input
             id="gh"
+            type="url"
+            inputMode="url"
+            placeholder="https://github.com/your-username"
             value={form.github_url}
-            onChange={(e) => setForm({ ...form, github_url: e.target.value })}
+            onChange={(e) => update('github_url', e.target.value)}
+            {...errorProps('github_url')}
           />
+          {fieldError('github_url')}
         </div>
 
         <div className="field">
           <label htmlFor="hrs">Availability</label>
-          <p className="hint">Hours per week you can put into the project.</p>
+          <p className="hint">
+            Hours per week you can put into the project ({AVAILABILITY_MIN}–{AVAILABILITY_MAX}).
+          </p>
           <div className="num">
             <input
               id="hrs"
               type="number"
-              min="0"
-              max="40"
+              min={AVAILABILITY_MIN}
+              max={AVAILABILITY_MAX}
+              step="1"
               value={form.availability_hours}
-              onChange={(e) => setForm({ ...form, availability_hours: e.target.value })}
+              onChange={(e) => update('availability_hours', e.target.value)}
+              {...errorProps('availability_hours')}
             />
             <span>hours per week</span>
           </div>
+          {fieldError('availability_hours')}
         </div>
 
         <div className="foot">
-          <button className="btn" disabled={!dirty || saveState === 'saving'} onClick={handleSave}>
+          <button
+            className="btn"
+            disabled={!dirty || !isValid || saveState === 'saving'}
+            onClick={handleSave}
+          >
             {saveState === 'saving' ? 'Saving…' : 'Save changes'}
           </button>
           {saveState === 'saved' && !dirty && <span className="meta">Saved</span>}
