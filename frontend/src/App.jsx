@@ -1,4 +1,4 @@
-import { Link, Navigate, NavLink, Route, Routes } from 'react-router-dom';
+import { Link, Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Browse from './pages/Browse';
 import CreateProject from './pages/CreateProject';
@@ -23,7 +23,17 @@ const TABS = [
 
 export default function App() {
   const { status, user, onboarded, signOut } = useSession();
+  const navigate = useNavigate();
   const tabs = status === 'authenticated' ? TABS : [];
+
+  // Every page but /login needs a session, so signing out goes straight to
+  // the sign-in page. Navigating first means ProtectedRoute never records
+  // the page being left, so the next person to sign in on this browser
+  // isn't sent back to the previous student's profile.
+  async function handleSignOut() {
+    navigate('/login', { replace: true });
+    await signOut();
+  }
 
   return (
     <>
@@ -43,7 +53,7 @@ export default function App() {
           {status === 'authenticated' && (
             <>
               {user.name} <Avatar name={user.name} />
-              <button className="btn quiet" onClick={signOut}>
+              <button className="btn quiet" onClick={handleSignOut}>
                 Sign out
               </button>
             </>

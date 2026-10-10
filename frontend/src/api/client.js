@@ -20,6 +20,7 @@ import {
   skillsForUser,
 } from './mockData';
 import { supabase } from '../lib/supabaseClient';
+import { ValidationError, fieldErrorsFromDbError, validateProfile } from '../lib/validation';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
 
@@ -569,17 +570,25 @@ export async function getCurrentUser() {
   return shapeUserRow(data);
 }
 
+// Validates and cleans the patch first (see lib/validation.js), so nothing
+// invalid is ever sent — and a database CHECK rejection comes back as the
+// same per-field ValidationError the form would have produced.
 export async function updateCurrentUser(patch) {
+  const { values, errors, isValid } = validateProfile(patch);
+  if (!isValid) throw new ValidationError(errors);
   if (USE_MOCKS) {
     await delay();
     const id = requireSessionUserId();
     const u = users.find((x) => x.id === id);
-    Object.assign(u, patch);
+    Object.assign(u, values);
     return { ...u, skills: skillsForUser(id) };
   }
   const viewerId = requireViewerId(await getViewerId());
-  const { error } = await supabase.from('users').update(patch).eq('id', viewerId);
-  if (error) throw error;
+  const { error } = await supabase.from('users').update(values).eq('id', viewerId);
+  if (error) {
+    const fieldErrors = fieldErrorsFromDbError(error);
+    throw fieldErrors ? new ValidationError(fieldErrors) : error;
+  }
   return getCurrentUser();
 }
 

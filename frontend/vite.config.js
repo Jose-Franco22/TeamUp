@@ -14,4 +14,14 @@ export default defineConfig({
       },
     },
   },
+  // Unit and component tests (npm test). jsdom stands in for the browser;
+  // tests run against the mock API unless a test stubs VITE_USE_MOCKS itself.
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.js'],
+    include: ['src/**/*.test.{js,jsx}'],
+    env: { VITE_USE_MOCKS: 'true' },
+    restoreMocks: true,
+    unstubEnvs: true,
+  },
 });
