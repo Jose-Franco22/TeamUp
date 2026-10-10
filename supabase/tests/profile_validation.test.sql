@@ -2,7 +2,19 @@
 -- form. Runs every check as a signed-in student through RLS, the same path
 -- a direct supabase-js call would take.
 begin;
-select plan(19);
+select plan(20);
+
+-- --- The rules cover existing rows too (14_validate_profile_rules.sql) ---
+-- Otherwise an old invalid profile blocks that student's next sign-in,
+-- since 13_ rewrites their row every time they sign in.
+select ok(
+  (select bool_and(convalidated) from pg_constraint
+   where conrelid = 'public.users'::regclass
+     and conname in ('users_availability_hours_range_check',
+                     'users_bio_length_check',
+                     'users_github_url_format_check')
+   having count(*) = 3),
+  'all three profile rules are validated against existing rows');
 
 select set_config('tests.me',    tests.sign_in_with_microsoft('me01@utrgv.edu', 'Me')::text, true);
 select set_config('tests.other', tests.sign_in_with_microsoft('other01@utrgv.edu', 'Other')::text, true);
