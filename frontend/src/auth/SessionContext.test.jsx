@@ -1,11 +1,11 @@
 // Issue #18 — SessionContext in real (Supabase) mode, with supabase-js
-// replaced by a fake so no network or Microsoft call happens.
+// replaced by a fake so no network or Microsoft call happens. Also covers
+// the first-sign-in walkthrough's onboarded flag.
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 
 const fake = vi.hoisted(() => {
-  const state = { session: null, profiles: {}, authListener: null };
+  const state = { session: null, profiles: {}, authListener: null, updates: [] };
   const supabase = {
     auth: {
       getSession: vi.fn(async () => ({ data: { session: state.session } })),
@@ -16,10 +16,18 @@ const fake = vi.hoisted(() => {
       signInWithOAuth: vi.fn(async () => ({ error: null })),
       signOut: vi.fn(async () => ({ error: null })),
     },
-    from: vi.fn(() => {
+    // Just enough of the query builder for SessionContext:
+    //   from('users').select(...).eq('id', x).single()
+    //   await from('users').update({...}).eq('id', x)
+    from: vi.fn((table) => {
       let id;
+      let patch = null;
       const query = {
         select: () => query,
+        update: (values) => {
+          patch = values;
+          return query;
+        },
         eq: (_col, value) => {
           id = value;
           return query;
@@ -28,6 +36,13 @@ const fake = vi.hoisted(() => {
           state.profiles[id]
             ? { data: state.profiles[id], error: null }
             : { data: null, error: { code: 'PGRST116', message: 'No rows' } },
+        then: (resolve) => {
+          if (patch) {
+            state.updates.push({ table, id, patch });
+            if (state.profiles[id]) Object.assign(state.profiles[id], patch);
+          }
+          resolve({ error: null });
+        },
       };
       return query;
     }),
@@ -37,7 +52,15 @@ const fake = vi.hoisted(() => {
 
 vi.mock('../lib/supabaseClient', () => ({ supabase: fake.supabase }));
 
-const JANE = { id: 'auth-jane', email: 'jane.doe01@utrgv.edu', name: 'Jane Doe', bio: '', availability_hours: 10, github_url: '' };
+const JANE = {
+  id: 'auth-jane',
+  email: 'jane.doe01@utrgv.edu',
+  name: 'Jane Doe',
+  bio: '',
+  availability_hours: 10,
+  github_url: '',
+  onboarded_at: null,
+};
 
 async function renderSession() {
   vi.stubEnv('VITE_USE_MOCKS', 'false');
@@ -46,7 +69,11 @@ async function renderSession() {
   let api;
   function Probe() {
     api = useSession();
-    return <p data-testid="status">{api.status}:{api.user?.email ?? 'none'}</p>;
+    return (
+      <p data-testid="status">
+        {api.status}:{api.user?.email ?? 'none'}:{api.onboarded ? 'onboarded' : 'new'}
+      </p>
+    );
   }
   render(
     <SessionProvider>
@@ -58,58 +85,63 @@ async function renderSession() {
 
 const status = () => screen.getByTestId('status').textContent;
 
+function signedInAs(profile) {
+  fake.state.session = { user: { id: profile.id } };
+  fake.state.profiles[profile.id] = { ...profile };
+}
+
 beforeEach(() => {
   fake.state.session = null;
   fake.state.profiles = {};
   fake.state.authListener = null;
+  fake.state.updates = [];
 });
 
 describe('SessionContext (real mode)', () => {
   test('no session means guest', async () => {
     await renderSession();
-    await waitFor(() => expect(status()).toBe('guest:none'));
+    await waitFor(() => expect(status()).toMatch(/^guest:none/));
   });
 
   test('a session with a provisioned profile is authenticated as that user', async () => {
-    fake.state.session = { user: { id: JANE.id } };
-    fake.state.profiles[JANE.id] = JANE;
+    signedInAs(JANE);
     await renderSession();
-    await waitFor(() => expect(status()).toBe('authenticated:jane.doe01@utrgv.edu'));
+    await waitFor(() => expect(status()).toMatch(/^authenticated:jane\.doe01@utrgv\.edu/));
   });
 
   test('a session with no profile row (e.g. a rejected non-UTRGV account) ends as guest', async () => {
     fake.state.session = { user: { id: 'auth-gmail-user' } };
     await renderSession();
-    await waitFor(() => expect(status()).toBe('guest:none'));
+    await waitFor(() => expect(status()).toMatch(/^guest:none/));
   });
 
   test('an auth change to no session (signed out elsewhere, token expired) ends as guest', async () => {
-    fake.state.session = { user: { id: JANE.id } };
-    fake.state.profiles[JANE.id] = JANE;
+    signedInAs(JANE);
     await renderSession();
     await waitFor(() => expect(status()).toMatch(/^authenticated/));
     await act(async () => fake.state.authListener('SIGNED_OUT', null));
-    expect(status()).toBe('guest:none');
+    expect(status()).toMatch(/^guest:none/);
   });
 
-  test('signInWithMicrosoft uses the Azure provider and comes back to /browse', async () => {
+  test('signInWithMicrosoft uses the Azure provider and comes back to /login', async () => {
+    // Back to /login, not /browse, so a rejected sign-in's error is still in
+    // the URL for the Login page to show; Login sends a success on to /browse.
     const { api } = await renderSession();
-    await waitFor(() => expect(status()).toBe('guest:none'));
+    await waitFor(() => expect(status()).toMatch(/^guest/));
     await api().signInWithMicrosoft();
     expect(fake.supabase.auth.signInWithOAuth).toHaveBeenCalledWith({
       provider: 'azure',
-      options: { redirectTo: `${window.location.origin}/browse` },
+      options: { redirectTo: `${window.location.origin}/login` },
     });
   });
 
   test('signOut signs out of Supabase and ends as guest', async () => {
-    fake.state.session = { user: { id: JANE.id } };
-    fake.state.profiles[JANE.id] = JANE;
+    signedInAs(JANE);
     const { api } = await renderSession();
     await waitFor(() => expect(status()).toMatch(/^authenticated/));
     await act(() => api().signOut());
     expect(fake.supabase.auth.signOut).toHaveBeenCalled();
-    expect(status()).toBe('guest:none');
+    expect(status()).toMatch(/^guest:none/);
   });
 
   test('the mock-only stub login refuses to run in real mode', async () => {
@@ -118,32 +150,28 @@ describe('SessionContext (real mode)', () => {
   });
 });
 
-// The app's own sign-out button, end to end in mock mode.
-describe('Sign out button', () => {
-  test('signing out from a protected page lands on the landing page', async () => {
-    vi.stubEnv('VITE_USE_MOCKS', 'true');
-    vi.resetModules();
-    localStorage.setItem('teamup.mockSessionUserId', 'u-jose');
-    const { MemoryRouter } = await import('react-router-dom');
-    const { SessionProvider } = await import('./SessionContext');
-    const { ThemeProvider } = await import('../theme/ThemeContext');
-    const { default: App } = await import('../App');
-    render(
-      <ThemeProvider>
-        <MemoryRouter initialEntries={['/profile']}>
-          <SessionProvider>
-            <App />
-          </SessionProvider>
-        </MemoryRouter>
-      </ThemeProvider>
-    );
-    await screen.findByRole('heading', { name: 'Your profile' });
+describe('Onboarding flag (real mode)', () => {
+  test('a student who has never finished the walkthrough is not onboarded', async () => {
+    signedInAs(JANE);
+    await renderSession();
+    await waitFor(() => expect(status()).toBe('authenticated:jane.doe01@utrgv.edu:new'));
+  });
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Sign out' }));
+  test('a student with onboarded_at set is onboarded', async () => {
+    signedInAs({ ...JANE, onboarded_at: '2026-10-01T12:00:00Z' });
+    await renderSession();
+    await waitFor(() => expect(status()).toBe('authenticated:jane.doe01@utrgv.edu:onboarded'));
+  });
 
-    expect(await screen.findByRole('heading', { name: /Find a senior project team/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: 'Sign in' }).length).toBeGreaterThan(0);
-    expect(localStorage.getItem('teamup.mockSessionUserId')).toBeNull();
+  test('completeOnboarding flips the flag and saves onboarded_at on their own row', async () => {
+    signedInAs(JANE);
+    const { api } = await renderSession();
+    await waitFor(() => expect(status()).toMatch(/:new$/));
+    await act(() => api().completeOnboarding());
+    expect(status()).toMatch(/:onboarded$/);
+    expect(fake.state.updates).toEqual([
+      { table: 'users', id: JANE.id, patch: { onboarded_at: expect.any(String) } },
+    ]);
+    expect(Number.isNaN(Date.parse(fake.state.updates[0].patch.onboarded_at))).toBe(false);
   });
 });

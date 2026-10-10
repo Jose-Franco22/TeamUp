@@ -1,0 +1,120 @@
+// Issue #18 — the app shell end to end in mock mode: everything but /login
+// needs a session, signing out goes to the sign-in page, and the
+// first-sign-in walkthrough shows once per student.
+import { describe, expect, test } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, useLocation } from 'react-router-dom';
+import App from './App';
+import { SessionProvider } from './auth/SessionContext';
+import { ThemeProvider } from './theme/ThemeContext';
+
+const SESSION_KEY = 'teamup.mockSessionUserId';
+const ONBOARDED_KEY = 'teamup.mockOnboarded';
+
+function CurrentPath() {
+  return <output data-testid="path">{useLocation().pathname}</output>;
+}
+
+function renderApp(path, { signedInAs, onboarded = true } = {}) {
+  if (signedInAs) {
+    localStorage.setItem(SESSION_KEY, signedInAs);
+    if (onboarded) localStorage.setItem(ONBOARDED_KEY, JSON.stringify([signedInAs]));
+  }
+  render(
+    <ThemeProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <SessionProvider>
+          <App />
+          <CurrentPath />
+        </SessionProvider>
+      </MemoryRouter>
+    </ThemeProvider>
+  );
+}
+
+const path = () => screen.getByTestId('path').textContent;
+
+describe('guests', () => {
+  test.each(['/', '/browse', '/profile', '/team'])('a guest opening %s is sent to /login', async (start) => {
+    renderApp(start);
+    await waitFor(() => expect(path()).toBe('/login'));
+    expect(screen.getByRole('heading', { name: 'Sign in to get started' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Browse' })).not.toBeInTheDocument();
+  });
+});
+
+describe('signed in', () => {
+  test('opening / goes to Browse', async () => {
+    renderApp('/', { signedInAs: 'u-jose' });
+    await waitFor(() => expect(path()).toBe('/browse'));
+    expect(await screen.findByRole('heading', { name: 'Open projects' })).toBeInTheDocument();
+  });
+
+  test('signing out from a protected page lands on the sign-in page', async () => {
+    renderApp('/profile', { signedInAs: 'u-jose' });
+    await screen.findByRole('heading', { name: 'Your profile' });
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Sign out' }));
+
+    await waitFor(() => expect(path()).toBe('/login'));
+    expect(screen.getByRole('heading', { name: 'Sign in to get started' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+  });
+
+  test('after signing out, the next sign-in starts on Browse, not the last student\'s page', async () => {
+    renderApp('/profile', { signedInAs: 'u-jose' });
+    await screen.findByRole('heading', { name: 'Your profile' });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    await screen.findByRole('heading', { name: 'Sign in to get started' });
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(path()).toBe('/browse'));
+  });
+});
+
+describe('first-sign-in walkthrough', () => {
+  test('shows for a student who has not finished it', async () => {
+    renderApp('/browse', { signedInAs: 'u-jose', onboarded: false });
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  test('does not show for a student who already finished it', async () => {
+    renderApp('/browse', { signedInAs: 'u-jose' });
+    await screen.findByRole('heading', { name: 'Open projects' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  test('skipping it closes it, lands on Browse, and it stays dismissed next visit', async () => {
+    renderApp('/profile', { signedInAs: 'u-jose', onboarded: false });
+    await screen.findByRole('dialog');
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Skip tour' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(path()).toBe('/browse');
+    expect(JSON.parse(localStorage.getItem(ONBOARDED_KEY))).toContain('u-jose');
+  });
+
+  test('Next and Back move between steps, and the last step finishes the tour', async () => {
+    renderApp('/browse', { signedInAs: 'u-jose', onboarded: false });
+    const dialog = await screen.findByRole('dialog');
+    const user = userEvent.setup();
+
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+
+    // Walk to the end; the last step's button finishes the tour.
+    while (!screen.queryByRole('button', { name: 'Browse projects' })) {
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+    }
+    await user.click(screen.getByRole('button', { name: 'Browse projects' }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(path()).toBe('/browse');
+  });
+});

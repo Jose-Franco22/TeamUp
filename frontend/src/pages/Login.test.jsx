@@ -3,27 +3,60 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const signInWithMicrosoft = vi.fn();
-vi.mock('../auth/SessionContext', () => ({ useSession: () => ({ signInWithMicrosoft }) }));
+const session = { status: 'guest' };
+vi.mock('../auth/SessionContext', () => ({
+  useSession: () => ({ ...session, signInWithMicrosoft }),
+}));
 
 // Login picks the mock or real form when the module loads, so switch to
 // real mode first and import it fresh.
-async function renderLogin(url = '/login') {
+async function renderLogin(url = '/login', { from } = {}) {
   vi.stubEnv('VITE_USE_MOCKS', 'false');
   vi.resetModules();
   window.history.replaceState(null, '', url);
   const { default: Login } = await import('./Login');
+  const entry = { pathname: '/login', state: from ? { from: { pathname: from } } : null };
   render(
-    <MemoryRouter>
-      <Login />
+    <MemoryRouter initialEntries={[entry]}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<PathProbe />} />
+      </Routes>
     </MemoryRouter>
   );
 }
 
+function PathProbe() {
+  return <p>Now at {useLocation().pathname}</p>;
+}
+
 beforeEach(() => {
   signInWithMicrosoft.mockReset();
+  session.status = 'guest';
+});
+
+describe('when a session already exists', () => {
+  test('a signed-in student is sent on to Browse', async () => {
+    session.status = 'authenticated';
+    await renderLogin();
+    expect(screen.getByText('Now at /browse')).toBeInTheDocument();
+  });
+
+  test('…or back to the page they were trying to open', async () => {
+    session.status = 'authenticated';
+    await renderLogin('/login', { from: '/team' });
+    expect(screen.getByText('Now at /team')).toBeInTheDocument();
+  });
+
+  test('shows a loading state while the session is being checked', async () => {
+    session.status = 'loading';
+    await renderLogin();
+    expect(screen.getByRole('status')).toHaveTextContent('Checking session');
+    expect(screen.queryByRole('button', { name: 'Sign in with Microsoft' })).not.toBeInTheDocument();
+  });
 });
 
 describe('Microsoft sign-in page', () => {
