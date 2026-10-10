@@ -1,3 +1,6 @@
+-- Renumbered from 11_onboarding.sql (11 was already taken by
+-- 11_profile_validation.sql). Already applied to the live database.
+--
 -- When the student finished (or skipped) the first-sign-in walkthrough.
 -- Null means they haven't seen it yet, so the app shows it on their next
 -- visit. Kept on the users row rather than in the browser so the tour shows

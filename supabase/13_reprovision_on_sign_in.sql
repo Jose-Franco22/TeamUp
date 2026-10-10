@@ -1,3 +1,6 @@
+-- Renumbered from 12_reprovision_on_sign_in.sql to run after
+-- 12_onboarding.sql.
+--
 -- Re-run provisioning on every sign-in, not just the first.
 --
 -- 01_auth_provisioning.sql fires only on insert into auth.identities, which

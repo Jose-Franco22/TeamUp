@@ -23,7 +23,7 @@ async function loadProfile(authUserId) {
 }
 
 // Read separately from loadProfile so a database that hasn't run
-// supabase/11_onboarding.sql yet still signs people in — they just see the
+// supabase/12_onboarding.sql yet still signs people in — they just see the
 // walkthrough again.
 async function loadOnboarded(authUserId) {
   const { data, error } = await supabase
