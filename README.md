@@ -70,6 +70,51 @@ Supabase project instead, set `VITE_USE_MOCKS=false` and fill in `VITE_SUPABASE_
 Supabase setup (schema, RLS policies, Microsoft/Entra sign-in). Never commit `.env` — it's already
 covered in `.gitignore`.
 
+## Testing
+
+Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.
+A story is done when those tests exist and pass in CI. All three suites run automatically on every
+pull request (`.github/workflows/tests.yml`), and a pull request shouldn't merge while any fail.
+
+| Suite | What it covers | Run it |
+|---|---|---|
+| Frontend | Validation logic, components and pages (Vitest + React Testing Library, mock API) | `cd frontend && npm test` |
+| Resume parsing | The resume parser (`node --test`) | `cd resume-parsing && npm test` |
+| Database | Constraints, RLS, triggers and RPC functions (pgTAP) | see below |
+
+Use `npm run test:watch` in `frontend/` to re-run tests as you edit.
+
+### Database tests
+
+`supabase/tests/run.sh` builds a throwaway database on plain Postgres: a small stand-in for
+Supabase's `auth` schema, the original tables, then **every `supabase/NN_*.sql` file in order**,
+exactly as the live project got them. It then runs each `supabase/tests/*.test.sql` file. It never
+touches the real Supabase project. A new numbered SQL file is picked up automatically, so if it
+doesn't apply cleanly on top of the others, CI fails.
+
+The easiest way to run it locally is Docker, with no Postgres install needed (run from the repo root):
+
+```bash
+docker run -d --name teamup-pg -e POSTGRES_PASSWORD=postgres -v "$PWD:/repo" postgres:16
+docker exec teamup-pg sh -c 'apt-get update -qq && apt-get install -y -qq postgresql-16-pgtap'
+docker exec -e PGUSER=postgres teamup-pg /repo/supabase/tests/run.sh          # all tests
+docker exec -e PGUSER=postgres teamup-pg /repo/supabase/tests/run.sh profile  # files matching "profile"
+```
+
+(The first two lines are one-time setup. Afterwards, `docker start teamup-pg` and run the last line.)
+
+### Writing a test for a story
+
+- Start the file with the issue it covers, e.g. `// Issue #17 — …`, and name each test after the
+  behavior from the issue's testing criteria.
+- **Frontend:** put `Thing.test.jsx` next to `Thing.jsx`. Tests run against the mock API by default.
+  See `src/auth/SessionContext.test.jsx` for testing real (Supabase) mode with a fake client.
+- **Database:** add `supabase/tests/<topic>.test.sql`, wrapped in `begin; select plan(N); … select * from finish(); rollback;`.
+  `tests.sign_in_with_microsoft(email)` creates a student, and `tests.authenticate_as(id)` runs the
+  rest of the test as them through RLS (see `supabase/tests/harness/02_helpers.sql`).
+- A validation rule lives in two places: `frontend/src/lib/validation.js` and a CHECK constraint in
+  SQL. Change both, and test both.
+
 ## Workflow
 
 - Work happens on feature branches, merged into `main` via pull request (at least one teammate reviews before merging)
