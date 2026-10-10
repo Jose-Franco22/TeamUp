@@ -1,4 +1,4 @@
-import { Link, NavLink, Route, Routes } from 'react-router-dom';
+import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Browse from './pages/Browse';
@@ -22,7 +22,15 @@ const MEMBER_TABS = [
 
 export default function App() {
   const { status, user, signOut } = useSession();
+  const navigate = useNavigate();
   const tabs = status === 'authenticated' ? [...PUBLIC_TABS, ...MEMBER_TABS] : PUBLIC_TABS;
+
+  // Leave for the landing page first, so a protected page doesn't bounce
+  // the now-signed-out user to /login on the way out.
+  async function handleSignOut() {
+    navigate('/', { replace: true });
+    await signOut();
+  }
 
   return (
     <>
@@ -42,7 +50,7 @@ export default function App() {
           {status === 'authenticated' && (
             <>
               {user.name} <Avatar name={user.name} />
-              <button className="btn quiet" onClick={signOut}>
+              <button className="btn quiet" onClick={handleSignOut}>
                 Sign out
               </button>
             </>

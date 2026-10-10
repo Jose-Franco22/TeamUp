@@ -40,7 +40,11 @@ function MicrosoftLogin() {
         <p className="desc">
           TeamUp is only open to UTRGV students — sign in with your @utrgv.edu Microsoft account.
         </p>
-        {error && <p className="inline-error">{error}</p>}
+        {error && (
+          <p className="inline-error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="foot">
           <button type="button" className="btn" onClick={handleClick} disabled={pending}>
             {pending ? 'Redirecting…' : 'Sign in with Microsoft'}
