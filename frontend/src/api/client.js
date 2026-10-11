@@ -20,6 +20,7 @@ import {
   skillsForUser,
 } from './mockData';
 import { supabase } from '../lib/supabaseClient';
+import { isOpenProject } from '../lib/browseFilters';
 import { ValidationError, fieldErrorsFromDbError, validateProfile } from '../lib/validation';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
@@ -194,10 +195,22 @@ function assertRolesMatchSkills(roles_needed) {
 
 // --- Projects ----------------------------------------------------------
 
-export async function getProjects() {
+// Open projects by default (issue #31): a full team cannot take anyone, so
+// listing it is a dead end for a seeker. Browse passes `{ onlyOpen: false }`
+// explicitly because it offers the switch and has to say how many projects
+// the switch is hiding — an empty screen with no explanation is worse than a
+// full project you can't join.
+//
+// The filter runs on composed rows rather than in the query so that mock mode
+// and real mode share one definition of "open" (lib/browseFilters.js). A
+// `.neq('status', 'full')` in the SQL would be a second, slightly different
+// rule that nothing tests.
+export async function getProjects({ onlyOpen = true } = {}) {
+  const keep = (list) => (onlyOpen ? list.filter(isOpenProject) : list);
+
   if (USE_MOCKS) {
     await delay();
-    return projects.map((p) => buildProject(p, sessionUserId));
+    return keep(projects.map((p) => buildProject(p, sessionUserId)));
   }
   const viewerId = await getViewerId();
   const [{ data: rows, error }, requestMap] = await Promise.all([
@@ -205,7 +218,7 @@ export async function getProjects() {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw error;
-  return Promise.all(rows.map((row) => composeProject(row, viewerId, requestMap)));
+  return keep(await Promise.all(rows.map((row) => composeProject(row, viewerId, requestMap))));
 }
 
 export async function getProject(id) {
