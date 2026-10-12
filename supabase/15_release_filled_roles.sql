@@ -29,25 +29,35 @@
 -- counts the form collects. A trigger would decrement for them too.
 
 -- --- Step 1: a role may sit at zero -------------------------------------
--- The constraint is found by its definition rather than by name, since the
--- live project and the test harness may have named it differently.
+--
+-- The new bound is `between 0 and 3`, not `>= 0`: the live rule from
+-- 04_roles_and_team_deletion.sql is `between 1 and 3`, and only the lower
+-- end is being relaxed. Dropping the upper end would let a creator ask for
+-- four people in one role.
+--
+-- Constraints are found by definition rather than by name, since the live
+-- project and the test harness named theirs differently (`between 1 and 3`
+-- and `> 0`). Every match is dropped, not just the first: if both ever
+-- existed on the same table, leaving one behind would silently keep zero
+-- forbidden and the release below would fail at runtime.
 do $$
 declare
   check_name text;
 begin
-  select conname into check_name
-  from pg_constraint
-  where conrelid = 'public.project_roles_needed'::regclass
-    and contype = 'c'
-    and pg_get_constraintdef(oid) ilike '%quantity_needed%';
-  if check_name is not null then
+  for check_name in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.project_roles_needed'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%quantity_needed%'
+  loop
     execute format('alter table public.project_roles_needed drop constraint %I', check_name);
-  end if;
+  end loop;
 end $$;
 
 alter table public.project_roles_needed
   add constraint project_roles_needed_quantity_needed_check
-  check (quantity_needed >= 0);
+  check (quantity_needed between 0 and 3);
 
 -- --- Step 2: the two helpers --------------------------------------------
 -- Internal. Called only from the SECURITY DEFINER functions below, which
@@ -254,11 +264,38 @@ $$;
 grant execute on function public.remove_member(uuid) to authenticated;
 
 -- --- Step 5: backfill ----------------------------------------------------
--- Projects that already have accepted members are still advertising their
--- seats. Bring them in line once, counting every member except the creator
--- (whose seat was never part of quantity_needed in the first place).
+--
+-- Projects that already have accepted members may still be advertising
+-- those seats. Bring them in line once.
+--
+-- Only projects that are actually over-subscribed are touched. A member who
+-- had already joined when the creator last ran update_project() was already
+-- excluded from quantity_needed by the form, so subtracting them again
+-- would take the same seat away twice — and there is no join timestamp to
+-- tell the two cases apart. "The listed roles add up to more than the seats
+-- that exist" is the one signal that something is definitely wrong, so it
+-- is the only case corrected here. Everything else is left alone, and
+-- release/restore keep it right from now on.
+--
+-- This is a no-op on the current data, which has no joined members.
 
-with filled as (
+with seats as (
+  select p.id as project_id,
+         greatest(0, p.team_size_target - (
+           select count(*) from public.team_members tm
+             join public.teams t on t.id = tm.team_id
+            where t.project_id = p.id
+         )) as open_seats,
+         coalesce((
+           select sum(quantity_needed) from public.project_roles_needed
+            where project_id = p.id
+         ), 0) as listed
+    from public.projects p
+),
+over_subscribed as (
+  select project_id from seats where listed > open_seats
+),
+filled as (
   select t.project_id, tm.role_id, count(*)::smallint as taken
     from public.team_members tm
     join public.teams t on t.id = tm.team_id
@@ -269,5 +306,6 @@ with filled as (
 update public.project_roles_needed prn
    set quantity_needed = greatest(0, prn.quantity_needed - filled.taken)
   from filled
+  join over_subscribed o on o.project_id = filled.project_id
  where prn.project_id = filled.project_id
    and prn.role_id = filled.role_id;

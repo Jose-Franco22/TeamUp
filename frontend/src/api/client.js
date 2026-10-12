@@ -584,19 +584,41 @@ export async function removeSkill(skillId) {
 // only ever gets their own months and projects — nobody else's resume lines
 // come back. The matching engine reads them as `depth`; without them every
 // skill scores as a bare tag and no student can reach a strong fit.
-const USER_SELECT =
+// profile_evidence is nested under user_skills, NOT under users.
+//
+// PostgREST can only embed across a real foreign key, and profile_evidence
+// has exactly one: the composite (user_id, skill_id) -> user_skills. There
+// is no FK to users, so asking for it beside user_skills returns PGRST200
+// ("could not find a relationship") and the whole profile fails to load.
+// Mock mode cannot catch that, because its shape is built by hand — see the
+// test in client.test.js that reads 07_profile_evidence.sql and asserts this
+// nesting, so the two cannot drift again.
+export const USER_SELECT =
   'id, email, name, bio, availability_hours, github_url, ' +
-  'user_skills ( source, skills ( id, name, category ) ), ' +
-  'profile_evidence ( skill_id, months, projects )';
+  'user_skills ( source, skills ( id, name, category ), profile_evidence ( months, projects ) )';
+
+// PostgREST returns an embedded child as an object when it can tell the
+// relationship is one-to-one (profile_evidence's PK is its whole FK) and as
+// a one-element array otherwise. Which one depends on version and on how it
+// reads the keys, so accept both rather than betting on it.
+function embeddedEvidence(value) {
+  const row = Array.isArray(value) ? value[0] : value;
+  if (!row) return null;
+  return { months: row.months ?? 0, projects: row.projects ?? 0 };
+}
 
 function shapeUserRow(data) {
-  const { user_skills, profile_evidence, ...profile } = data;
+  const { user_skills, ...profile } = data;
+  const rows = user_skills || [];
+  const evidence = {};
+  for (const us of rows) {
+    const found = embeddedEvidence(us.profile_evidence);
+    if (found && us.skills?.id) evidence[us.skills.id] = found;
+  }
   return {
     ...profile,
-    skills: (user_skills || []).map((us) => ({ ...us.skills, source: us.source })),
-    evidence: Object.fromEntries(
-      (profile_evidence || []).map((e) => [e.skill_id, { months: e.months, projects: e.projects }])
-    ),
+    skills: rows.map((us) => ({ ...us.skills, source: us.source })),
+    evidence,
   };
 }
 

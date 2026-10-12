@@ -6,7 +6,7 @@
 -- it. Everything below runs through the SECURITY DEFINER functions, which is
 -- the only way the app ever writes these tables.
 begin;
-select plan(21);
+select plan(25);
 
 select set_config('tests.owner', tests.sign_in_with_microsoft('owner01@utrgv.edu', 'Owner')::text, true);
 select set_config('tests.alice', tests.sign_in_with_microsoft('alice01@utrgv.edu', 'Alice')::text, true);
@@ -109,6 +109,35 @@ select is(
       and role_id = current_setting('tests.r_fe')::uuid),
   current_setting('tests.s_react')::uuid,
   'and the skill pinned to the role survived, because the row was kept');
+
+-- --- the bounds on quantity_needed --------------------------------------
+-- Relaxing the lower end to 0 must not take the upper end with it: the rule
+-- from 04_roles_and_team_deletion.sql is 1..3, and a creator asking for
+-- four people in one role is still wrong.
+
+select tests.clear_authentication();
+select lives_ok(
+  $$ update public.project_roles_needed set quantity_needed = 0
+      where project_id = current_setting('tests.project')::uuid
+        and role_id = current_setting('tests.r_be')::uuid $$,
+  'zero is allowed, so a filled role can be kept with its skill');
+select throws_ok(
+  $$ update public.project_roles_needed set quantity_needed = 4
+      where project_id = current_setting('tests.project')::uuid
+        and role_id = current_setting('tests.r_be')::uuid $$,
+  '23514', null,
+  'four in one role is still rejected — the upper bound survived');
+select throws_ok(
+  $$ update public.project_roles_needed set quantity_needed = -1
+      where project_id = current_setting('tests.project')::uuid
+        and role_id = current_setting('tests.r_be')::uuid $$,
+  '23514', null,
+  'and so is a negative count');
+select lives_ok(
+  $$ update public.project_roles_needed set quantity_needed = 1
+      where project_id = current_setting('tests.project')::uuid
+        and role_id = current_setting('tests.r_be')::uuid $$,
+  'back to a normal value for the tests below');
 
 -- --- it never goes negative ---------------------------------------------
 -- There is no third Frontend seat to take: team_size_target is 4 and the
