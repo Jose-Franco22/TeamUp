@@ -18,9 +18,17 @@ import {
   userSkills,
   buildProject,
   skillsForUser,
+  profileEvidence,
+  evidenceForUser,
 } from './mockData';
 import { supabase } from '../lib/supabaseClient';
-import { ValidationError, fieldErrorsFromDbError, validateProfile, validateProject } from '../lib/validation';
+import { isOpenProject } from '../lib/browseFilters';
+import {
+  ValidationError,
+  fieldErrorsFromDbError,
+  validateProfile,
+  validateProject,
+} from '../lib/validation';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
 
@@ -119,7 +127,13 @@ async function fetchViewerRequestMap(viewerId) {
 async function composeProject(row, viewerId, viewerRequestsByProject) {
   // `skills` embeds as null when skill_id is null — a role listed without a
   // specific skill attached, which the schema allows on purpose.
-  const roles_needed = (row.project_roles_needed || []).map((r) => ({
+  // A role whose seats have all been filled sits at quantity_needed = 0
+  // (see supabase/15_release_filled_roles.sql). It is kept rather than
+  // deleted so the creator does not lose the skill pinned to it, but it is
+  // not an open role any more.
+  const roles_needed = (row.project_roles_needed || [])
+    .filter((r) => r.quantity_needed > 0)
+    .map((r) => ({
     role_id: r.role_id,
     role_name: r.roles?.name ?? null,
     skill_id: r.skill_id ?? null,
@@ -194,10 +208,22 @@ function assertRolesMatchSkills(roles_needed) {
 
 // --- Projects ----------------------------------------------------------
 
-export async function getProjects() {
+// Open projects by default (issue #31): a full team cannot take anyone, so
+// listing it is a dead end for a seeker. Browse passes `{ onlyOpen: false }`
+// explicitly because it offers the switch and has to say how many projects
+// the switch is hiding — an empty screen with no explanation is worse than a
+// full project you can't join.
+//
+// The filter runs on composed rows rather than in the query so that mock mode
+// and real mode share one definition of "open" (lib/browseFilters.js). A
+// `.neq('status', 'full')` in the SQL would be a second, slightly different
+// rule that nothing tests.
+export async function getProjects({ onlyOpen = true } = {}) {
+  const keep = (list) => (onlyOpen ? list.filter(isOpenProject) : list);
+
   if (USE_MOCKS) {
     await delay();
-    return projects.map((p) => buildProject(p, sessionUserId));
+    return keep(projects.map((p) => buildProject(p, sessionUserId)));
   }
   const viewerId = await getViewerId();
   const [{ data: rows, error }, requestMap] = await Promise.all([
@@ -205,7 +231,7 @@ export async function getProjects() {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw error;
-  return Promise.all(rows.map((row) => composeProject(row, viewerId, requestMap)));
+  return keep(await Promise.all(rows.map((row) => composeProject(row, viewerId, requestMap))));
 }
 
 export async function getProject(id) {
@@ -454,6 +480,14 @@ export async function addResumeSkills(skillIds, evidence = []) {
       const already = userSkills.some((row) => row.user_id === id && row.skill_id === skillId);
       if (!already) userSkills.push({ user_id: id, skill_id: skillId, source: 'resume' });
     }
+    // Mirrors the real branch below, so an import in mock mode produces the
+    // same evidence the matching engine would score in production.
+    const confirmed = new Set(skillIds);
+    for (const e of evidence.filter((row) => confirmed.has(row.skill_id))) {
+      const existing = profileEvidence.find((row) => row.user_id === id && row.skill_id === e.skill_id);
+      if (existing) Object.assign(existing, e);
+      else profileEvidence.push({ user_id: id, ...e });
+    }
     return getCurrentUser();
   }
 
@@ -537,11 +571,47 @@ export async function removeSkill(skillId) {
 
 // --- Current user ------------------------------------------------------
 
-const USER_SELECT = 'id, email, name, bio, availability_hours, github_url, user_skills ( source, skills ( id, name, category ) )';
+// profile_evidence rides along with the profile. Its RLS policy is
+// own-rows-only and this select is always `.eq('id', viewerId)`, so a student
+// only ever gets their own months and projects — nobody else's resume lines
+// come back. The matching engine reads them as `depth`; without them every
+// skill scores as a bare tag and no student can reach a strong fit.
+// profile_evidence is nested under user_skills, NOT under users.
+//
+// PostgREST can only embed across a real foreign key, and profile_evidence
+// has exactly one: the composite (user_id, skill_id) -> user_skills. There
+// is no FK to users, so asking for it beside user_skills returns PGRST200
+// ("could not find a relationship") and the whole profile fails to load.
+// Mock mode cannot catch that, because its shape is built by hand — see the
+// test in client.test.js that reads 07_profile_evidence.sql and asserts this
+// nesting, so the two cannot drift again.
+export const USER_SELECT =
+  'id, email, name, bio, availability_hours, github_url, ' +
+  'user_skills ( source, skills ( id, name, category ), profile_evidence ( months, projects ) )';
+
+// PostgREST returns an embedded child as an object when it can tell the
+// relationship is one-to-one (profile_evidence's PK is its whole FK) and as
+// a one-element array otherwise. Which one depends on version and on how it
+// reads the keys, so accept both rather than betting on it.
+function embeddedEvidence(value) {
+  const row = Array.isArray(value) ? value[0] : value;
+  if (!row) return null;
+  return { months: row.months ?? 0, projects: row.projects ?? 0 };
+}
 
 function shapeUserRow(data) {
   const { user_skills, ...profile } = data;
-  return { ...profile, skills: (user_skills || []).map((us) => ({ ...us.skills, source: us.source })) };
+  const rows = user_skills || [];
+  const evidence = {};
+  for (const us of rows) {
+    const found = embeddedEvidence(us.profile_evidence);
+    if (found && us.skills?.id) evidence[us.skills.id] = found;
+  }
+  return {
+    ...profile,
+    skills: rows.map((us) => ({ ...us.skills, source: us.source })),
+    evidence,
+  };
 }
 
 export async function getCurrentUser() {
@@ -549,7 +619,7 @@ export async function getCurrentUser() {
     await delay();
     const id = requireSessionUserId();
     const u = users.find((x) => x.id === id);
-    return { ...u, skills: skillsForUser(id) };
+    return { ...u, skills: skillsForUser(id), evidence: evidenceForUser(id) };
   }
   const viewerId = requireViewerId(await getViewerId());
   const { data, error } = await supabase.from('users').select(USER_SELECT).eq('id', viewerId).single();
