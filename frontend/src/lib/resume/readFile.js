@@ -7,7 +7,7 @@
 // Nothing is uploaded: the file is read from the student's own disk, parsed in
 // their tab, and only the skills they confirm are ever sent to the server.
 
-import { detectKind, finishDocument } from './text.js';
+import { ResumeReadError, detectKind, finishDocument, unsupportedFileMessage } from './text.js';
 import { texToText } from './latex.js';
 
 // A resume is a page or two. Anything much bigger is a portfolio or a mistake,
@@ -15,7 +15,9 @@ import { texToText } from './latex.js';
 export const MAX_BYTES = 8 * 1024 * 1024;
 export const ACCEPTED = '.pdf,.docx,.tex,.txt,.md';
 
-export class ResumeReadError extends Error {}
+// Defined in text.js so the Node readers can throw the same error; re-exported
+// here because this is the file callers import from.
+export { ResumeReadError };
 
 async function readPdf(bytes) {
   const pdfjs = await import('pdfjs-dist');
@@ -74,6 +76,11 @@ export async function readResumeFile(file) {
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   const kind = detectKind(file.name, bytes);
+
+  // Refused before anything is decoded. The <input> has an `accept` list, but
+  // a student can always pick "All files" in the picker, and a drag-and-drop
+  // never honours it at all.
+  if (!kind) throw new ResumeReadError(unsupportedFileMessage(file.name));
 
   try {
     if (kind === 'pdf') return finishDocument(kind, await readPdf(bytes));

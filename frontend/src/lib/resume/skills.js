@@ -362,7 +362,18 @@ export function findSkills(lines, dictionary, { sectionOf = () => 'other' } = {}
 
 // Category labels a resume uses to group its skills list. Not skills.
 const LABELS =
-  /^((technical|core|key|relevant|additional|other|web|data|ml)\s*[&and]*\s*)*(skills?|languages?|tools?|frameworks?|libraries|databases?|technologies|data|other)$/i;
+  /^((technical|core|key|relevant|additional|other|web|data|ml|programming|spoken|software|development|developer|dev|operating|version|tools?|platforms?|frameworks?|libraries|cloud)\s*[&/]?\s*(and)?\s*)*(skills?|languages?|tools?|platforms?|frameworks?|libraries|databases?|technologies|concepts|systems?|control|data|other)$/i;
+
+// Words that describe a level, or a generic noun left over from splitting a
+// line. Neither belongs in the list of terms TeamUp is missing — suggesting
+// the team add "Fluent" or "Gateways" to the skills table helps nobody.
+const NOT_A_SKILL =
+  /^(fluent|native|intermediate|advanced|beginner|basic|proficient|desktop|service|services|gateway|gateways|etc)$/i;
+
+// Lines that are a list, but not a list of skills. "Spoken Languages: English
+// (Fluent), Spanish (Fluent)" sits in the skills section on plenty of resumes
+// and is none of TeamUp's business.
+const NOT_A_SKILLS_LIST = /\b(spoken|native|fluent|language proficienc|interests?|hobbies)\b/i;
 
 // Words in the skills section that matched nothing. These are the candidates
 // for growing the skills table — a resume saying "Docker" is a signal, even
@@ -378,11 +389,15 @@ export function unmatchedTerms(lines, dictionary, sectionOf) {
     const heading = headingInfo(line);
     if (heading && !heading.inline) return;
 
-    // Split on the separators a skills list actually uses, the colon after a
-    // category label included.
-    for (const raw of line.split(/[,;|•·:]| - /)) {
+    const label = line.includes(':') ? line.slice(0, line.indexOf(':')) : '';
+    if (NOT_A_SKILLS_LIST.test(label)) return;
+
+    // Split on the separators a skills list actually uses: the colon after a
+    // category label, and brackets, since "Python (pandas, NumPy)" hides real
+    // entries inside them.
+    for (const raw of line.split(/[,;|•·:()[\]]| - /)) {
       const term = raw.replace(/^[\s\-*]+|[\s.]+$/g, '').trim();
-      if (!term || term.length > 28 || LABELS.test(term)) continue;
+      if (!term || term.length > 28 || LABELS.test(term) || NOT_A_SKILL.test(term)) continue;
       if (term.split(/\s+/).length > 3) continue;
 
       // "Git/GitHub" is already covered by the git alias, so it is not unknown.

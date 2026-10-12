@@ -22,13 +22,20 @@ const BULLET = /^\s*[-*•·o]\s+/;
 // Returns { name, inline }. Inline means the heading and its content share a
 // line, as in "Technical Skills: Python, pandas" — common on one-page resumes,
 // and the content after the colon still has to be read.
+// Small-caps headings come out of a PDF with the big first letter split off
+// as its own text item: "SKILLS" arrives as "S KILLS" and "Professional
+// Experience" as "P ROFESSIONAL E XPERIENCE". Stitch those back together
+// before deciding what a line is — otherwise every section boundary is missed
+// and the whole resume reads as one undifferentiated block.
+const unsplitSmallCaps = (line) => line.replace(/\b([A-Z]) ([A-Z]{2,})\b/g, '$1$2');
+
 export function headingInfo(line) {
-  const text = line.trim().replace(/[:•]+$/, '');
+  const text = unsplitSmallCaps(line.trim()).replace(/[:•]+$/, '');
 
   // "Technical Skills: Python, pandas, Git"
   const colon = line.indexOf(':');
   if (colon > 2 && colon <= 30 && line.length > colon + 1) {
-    const label = line.slice(0, colon).trim();
+    const label = unsplitSmallCaps(line.slice(0, colon).trim());
     for (const [name, pattern] of HEADINGS) {
       if (pattern.test(label)) return { name, inline: true };
     }
