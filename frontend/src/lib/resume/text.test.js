@@ -96,7 +96,9 @@ describe('detectKind: no extension to go on', () => {
     expect(detectKind('', PNG)).toBeNull();
   });
 
-  test('no bytes at all is refused rather than throwing', () => {
+  // Not "refused": an empty file is caught earlier by the size check in
+  // readResumeFile. All this has to do is not throw.
+  test('no bytes at all does not throw, and is left to the empty-file check', () => {
     expect(() => detectKind('', undefined)).not.toThrow();
     expect(detectKind('', new Uint8Array())).toBe('txt');
   });
