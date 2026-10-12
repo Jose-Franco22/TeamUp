@@ -35,8 +35,12 @@ export function matchesKeyword(project, query) {
   return haystack.includes(needle);
 }
 
-// Does this project need any skill the student listed? The boolean version of
-// a non-zero fit score, and the thing the "Only show matches" switch asks.
+// Does this project list a role wanting one of the student's exact skills?
+//
+// This is NOT what "Only show matches" asks — see filterRanked below. It is
+// the narrower question RolesNeeded uses to highlight the specific chips a
+// student already has, where "React, and you have React" is the only honest
+// thing to light up.
 export function needsOneOfMySkills(project, mySkillIds = []) {
   if (!mySkillIds.length) return false;
   return (project?.roles_needed || []).some((r) => r.skill_id && mySkillIds.includes(r.skill_id));
@@ -54,15 +58,32 @@ export function needsRole(project, roleId) {
  */
 export function filterProjects(
   projects = [],
-  { query = '', roleId = '', onlyOpen = true, onlyMatches = false, mySkillIds = [] } = {}
+  { query = '', roleId = '', onlyOpen = true } = {}
 ) {
   return projects.filter((p) => {
     if (onlyOpen && !isOpenProject(p)) return false;
-    if (onlyMatches && !needsOneOfMySkills(p, mySkillIds)) return false;
     if (!needsRole(p, roleId)) return false;
     if (!matchesKeyword(p, query)) return false;
     return true;
   });
+}
+
+/**
+ * "Only show matches", applied after ranking.
+ *
+ * It filters on the score, not on an exact skill overlap, because the two
+ * disagree: scoreFit() also credits a same-category skill, so filtering on
+ * exact matches made a card reading "Partial fit — you could cover UI/UX
+ * Designer through React" vanish the moment a student asked to see their
+ * matches. One of the two had to move, and the score is the one the list is
+ * ordered by and the card explains itself with.
+ *
+ * A match is therefore "the engine can name a role you'd fill", which is the
+ * question the switch is really asking.
+ */
+export function filterRanked(ranked = [], { onlyMatches = false } = {}) {
+  if (!onlyMatches) return ranked;
+  return ranked.filter((entry) => (entry.fit?.points ?? 0) > 0);
 }
 
 /**
@@ -114,6 +135,14 @@ export function describeEmpty({ total = 0, openCount = 0, filters = {} } = {}) {
     return {
       title: 'No skills on your profile yet.',
       hint: 'Add skills or import your resume, then come back to see which projects need them.',
+      canClear: true,
+    };
+  }
+
+  if (onlyMatches) {
+    return {
+      title: "None of these projects match what you've listed.",
+      hint: 'Clear the filter to see everything, or add more skills to your profile.',
       canClear: true,
     };
   }

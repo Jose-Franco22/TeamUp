@@ -8,6 +8,7 @@ import { describe, expect, test } from 'vitest';
 import {
   describeEmpty,
   filterProjects,
+  filterRanked,
   isOpenProject,
   matchesKeyword,
   needsOneOfMySkills,
@@ -169,11 +170,6 @@ describe('filterProjects', () => {
     expect(filterProjects(ALL, { onlyOpen: false })).toHaveLength(3);
   });
 
-  test('the skill-match filter keeps only projects needing one of my skills', () => {
-    const mine = filterProjects(ALL, { onlyMatches: true, mySkillIds: ['s-react'] });
-    expect(mine.map((p) => p.id)).toEqual(['p-parking']);
-  });
-
   test('keyword and role stack with each other', () => {
     expect(filterProjects(ALL, { query: 'solver', roleId: 'r-backend' }).map((p) => p.id)).toEqual([
       'p-degree',
@@ -242,6 +238,59 @@ describe('rankProjects', () => {
   });
 });
 
+// --- filterRanked --------------------------------------------------------
+//
+// "Only show matches" filters on the score rather than on an exact skill
+// overlap. The two disagree, and filtering on exact matches made a card
+// reading "Partial fit, you could cover this through React" disappear the
+// moment a student asked to see their matches.
+
+describe('filterRanked', () => {
+  const reactStudent = { availability_hours: 12, skills: [{ ...REACT, source: 'manual' }] };
+  const ranked = () => rankProjects([parking, degree], { student: reactStudent });
+
+  test('off, it changes nothing', () => {
+    expect(filterRanked(ranked(), { onlyMatches: false }).map((r) => r.project.id)).toEqual([
+      'p-parking',
+      'p-degree',
+    ]);
+  });
+
+  test('on, it drops the projects scoring zero', () => {
+    expect(filterRanked(ranked(), { onlyMatches: true }).map((r) => r.project.id)).toEqual([
+      'p-parking',
+    ]);
+  });
+
+  test('a project matched only through a related skill is kept, because it is ranked', () => {
+    // Figma is Frontend, like React: scoreFit credits it, so the card says
+    // "Partial fit" — and the filter has to agree with the card.
+    const design = {
+      ...parking,
+      id: 'p-design',
+      title: 'Design system',
+      roles_needed: [role('r-design', 'UI/UX Designer', { id: 's-figma', name: 'Figma', category: 'Frontend' })],
+    };
+    const [entry] = filterRanked(rankProjects([design], { student: reactStudent }), {
+      onlyMatches: true,
+    });
+    expect(entry).toBeTruthy();
+    expect(entry.fit.points).toBeGreaterThan(0);
+    expect(entry.fit.primary.basis).toBe('same-category');
+    // ...and the narrower exact-skill question would have excluded it.
+    expect(needsOneOfMySkills(design, ['s-react'])).toBe(false);
+  });
+
+  test('a guest has no scores, so nothing is filtered away', () => {
+    const guestRanked = rankProjects([parking, degree], { student: null });
+    expect(filterRanked(guestRanked, { onlyMatches: true })).toEqual([]);
+  });
+
+  test('called with nothing it returns an empty list', () => {
+    expect(filterRanked()).toEqual([]);
+  });
+});
+
 // --- describeEmpty -------------------------------------------------------
 //
 // Four situations, four different next steps. Collapsing them is how an app
@@ -273,6 +322,16 @@ describe('describeEmpty', () => {
     });
     expect(title).toMatch(/every project is full/i);
     expect(hint).toMatch(/Open projects only/);
+  });
+
+  test('matches-only with skills says nothing matched, not that filters are wrong', () => {
+    const { title, hint } = describeEmpty({
+      total: 3,
+      openCount: 3,
+      filters: { onlyMatches: true, mySkillIds: ['s-react'] },
+    });
+    expect(title).toMatch(/none of these projects match/i);
+    expect(hint).toMatch(/clear the filter/i);
   });
 
   test('a search that found nothing offers to clear or widen', () => {

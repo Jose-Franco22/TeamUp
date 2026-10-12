@@ -50,6 +50,61 @@ describe('getProjects', () => {
   });
 });
 
+describe('profile evidence', () => {
+  test('getCurrentUser returns the months and projects behind each skill', async () => {
+    setSessionUserId('u-sofia');
+    const me = await getCurrentUser();
+    expect(me.evidence).toBeTruthy();
+    expect(me.evidence['s-react']).toEqual({ months: 14, projects: 3 });
+  });
+
+  test('a student with no evidence gets an empty map, not undefined', async () => {
+    setSessionUserId('u-rita');
+    const me = await getCurrentUser();
+    expect(me.evidence).toEqual({});
+  });
+
+  // Without this, depth is 0 for everyone and 65 is the best score anybody
+  // can reach — so the strong band is unreachable for the whole cohort.
+  test('the evidence is what lifts a well-backed skill into the strong band', async () => {
+    setSessionUserId('u-sofia');
+    const [all, me] = await Promise.all([getProjects({ onlyOpen: false }), getCurrentUser()]);
+    const parking = all.find((p) => p.id === 'p-parking');
+
+    const withEvidence = scoreFit({ project: parking, student: me });
+    const without = scoreFit({ project: parking, student: { ...me, evidence: {} } });
+
+    expect(withEvidence.points).toBeGreaterThan(without.points);
+    expect(withEvidence.band).toBe('strong');
+  });
+});
+
+describe('roles that have been filled', () => {
+  test('a role at quantity_needed 0 is not advertised', async () => {
+    const all = await getProjects({ onlyOpen: false });
+    const scam = all.find((p) => p.id === 'p-scam');
+    expect(scam.roles_needed.map((r) => r.role_id)).not.toContain('r-devops');
+  });
+
+  // The student has the exact skill the filled role wanted. They must not be
+  // credited for it: that seat is taken. (They still score against the QA
+  // role, which is open and in the same category — that part is correct.)
+  test('and nobody is credited for the skill it wanted', async () => {
+    const all = await getProjects({ onlyOpen: false });
+    const scam = all.find((p) => p.id === 'p-scam');
+    const gitStudent = {
+      availability_hours: 12,
+      skills: [{ id: 's-git', name: 'Git', category: 'Tools', source: 'manual' }],
+    };
+
+    const fit = scoreFit({ project: scam, student: gitStudent });
+    const everyRoleScored = [...fit.covered, ...fit.uncovered].map((r) => r.role_id);
+    expect(everyRoleScored).not.toContain('r-devops');
+    expect(fit.primary?.role_id).not.toBe('r-devops');
+    expect(fit.primary?.basis).toBe('same-category'); // the open QA role, not the filled one
+  });
+});
+
 describe('browse, end to end over the real fixtures', () => {
   test('a student is ranked above the projects that do not need them', async () => {
     setSessionUserId('u-sofia'); // React, JavaScript, Figma

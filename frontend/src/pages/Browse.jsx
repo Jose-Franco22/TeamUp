@@ -11,8 +11,8 @@ import FitChip from '../components/FitChip';
 import {
   describeEmpty,
   filterProjects,
+  filterRanked,
   isOpenProject,
-  needsOneOfMySkills,
   rankProjects,
 } from '../lib/browseFilters';
 
@@ -52,7 +52,13 @@ export default function Browse() {
   const student = useMemo(
     () =>
       me && hasSkills
-        ? { availability_hours: me.availability_hours, skills: me.skills }
+        ? {
+            availability_hours: me.availability_hours,
+            skills: me.skills,
+            // Months and projects per skill, loaded with the profile. Without
+            // them every skill scores as a bare tag.
+            evidence: me.evidence,
+          }
         : null,
     [me, hasSkills]
   );
@@ -87,10 +93,20 @@ export default function Browse() {
 
   const all = projectsState.data || [];
   const openCount = all.filter(isOpenProject).length;
-  const matchCount = all.filter((p) => needsOneOfMySkills(p, mySkillIds)).length;
   const hiddenFull = onlyOpen ? all.length - openCount : 0;
 
-  const visible = rankProjects(filterProjects(all, filters), { student });
+  // Rank first, then filter on the score, so "Only show matches" and the
+  // order of the list are answering the same question. Filtering on an exact
+  // skill overlap instead made a card reading "Partial fit" disappear when a
+  // student asked to see their matches.
+  const ranked = rankProjects(filterProjects(all, filters), { student });
+  const visible = filterRanked(ranked, { onlyMatches });
+
+  // Counted over every open project, not just the filtered ones, so the
+  // number does not move as the student types in the search box.
+  const matchCount = student
+    ? rankProjects(all.filter(isOpenProject), { student }).filter((r) => r.fit.points > 0).length
+    : 0;
 
   // A student can only be on one team. This is true across every project
   // in `all`, not just the one being rendered, so it's computed once here
@@ -107,7 +123,7 @@ export default function Browse() {
           <h1>Open projects</h1>
           <p>
             Showing {visible.length} of {all.length} project{all.length === 1 ? '' : 's'}
-            {isAuthenticated && hasSkills && ` · ${matchCount} need a skill you listed`}
+            {isAuthenticated && hasSkills && ` · ${matchCount} you could fill a role on`}
             {hiddenFull > 0 && ` · ${hiddenFull} full and hidden`}
           </p>
         </div>

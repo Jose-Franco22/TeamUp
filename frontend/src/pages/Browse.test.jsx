@@ -169,9 +169,22 @@ describe('ranking by fit', () => {
   test('shows the score, the band and a reason naming the skill', async () => {
     await renderBrowse();
     const card = screen.getByText('Campus parking tracker').closest('article');
-    expect(within(card).getByText('63')).toBeInTheDocument();
+    expect(within(card).getByText('50')).toBeInTheDocument();
     expect(within(card).getByText(/Partial fit/)).toBeInTheDocument();
     expect(within(card).getByText(/You cover Frontend Developer \(React\)/)).toBeInTheDocument();
+  });
+
+  test('the evidence loaded with the profile lifts a well-backed skill into the strong band', () => {
+    // Without profile_evidence every skill scores as a bare tag and nobody
+    // can reach 70, which is why getCurrentUser() loads it.
+    client.getCurrentUser.mockResolvedValue({
+      ...ME,
+      evidence: { 's-react': { months: 14, projects: 3 } },
+    });
+    return renderBrowse().then(() => {
+      const card = screen.getByText('Campus parking tracker').closest('article');
+      expect(within(card).getByText(/Strong fit/)).toBeInTheDocument();
+    });
   });
 
   test('a project nothing matches is scored as a long shot, with the reason why', async () => {
@@ -198,9 +211,27 @@ describe('filters', () => {
     expect(screen.getByText(/Showing 1 of 3 projects/)).toBeInTheDocument();
   });
 
-  test('the count of projects needing one of my skills is shown', async () => {
+  test('the count of projects the student could fill a role on is shown', async () => {
     await renderBrowse();
-    expect(screen.getByText(/1 need a skill you listed/)).toBeInTheDocument();
+    expect(screen.getByText(/1 you could fill a role on/)).toBeInTheDocument();
+  });
+
+  test('a project matched through a related skill survives "Only show matches"', async () => {
+    const user = userEvent.setup();
+    // Figma is Frontend, like React, so the engine credits it and the card
+    // says so. The filter has to agree with the card.
+    client.getProjects.mockResolvedValue([
+      {
+        ...PARKING,
+        id: 'p-design',
+        title: 'Design system',
+        roles_needed: [role('r-design', 'UI/UX Designer', { id: 's-figma', name: 'Figma', category: 'Frontend' })],
+      },
+      DEGREE,
+    ]);
+    await renderBrowse();
+    await user.click(screen.getByLabelText('Only show matches'));
+    expect(cardTitles()).toEqual(['Design system']);
   });
 
   test('the search box filters on title and description', async () => {

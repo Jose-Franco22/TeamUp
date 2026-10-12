@@ -18,6 +18,8 @@ import {
   userSkills,
   buildProject,
   skillsForUser,
+  profileEvidence,
+  evidenceForUser,
 } from './mockData';
 import { supabase } from '../lib/supabaseClient';
 import { isOpenProject } from '../lib/browseFilters';
@@ -120,7 +122,13 @@ async function fetchViewerRequestMap(viewerId) {
 async function composeProject(row, viewerId, viewerRequestsByProject) {
   // `skills` embeds as null when skill_id is null — a role listed without a
   // specific skill attached, which the schema allows on purpose.
-  const roles_needed = (row.project_roles_needed || []).map((r) => ({
+  // A role whose seats have all been filled sits at quantity_needed = 0
+  // (see supabase/15_release_filled_roles.sql). It is kept rather than
+  // deleted so the creator does not lose the skill pinned to it, but it is
+  // not an open role any more.
+  const roles_needed = (row.project_roles_needed || [])
+    .filter((r) => r.quantity_needed > 0)
+    .map((r) => ({
     role_id: r.role_id,
     role_name: r.roles?.name ?? null,
     skill_id: r.skill_id ?? null,
@@ -480,6 +488,14 @@ export async function addResumeSkills(skillIds, evidence = []) {
       const already = userSkills.some((row) => row.user_id === id && row.skill_id === skillId);
       if (!already) userSkills.push({ user_id: id, skill_id: skillId, source: 'resume' });
     }
+    // Mirrors the real branch below, so an import in mock mode produces the
+    // same evidence the matching engine would score in production.
+    const confirmed = new Set(skillIds);
+    for (const e of evidence.filter((row) => confirmed.has(row.skill_id))) {
+      const existing = profileEvidence.find((row) => row.user_id === id && row.skill_id === e.skill_id);
+      if (existing) Object.assign(existing, e);
+      else profileEvidence.push({ user_id: id, ...e });
+    }
     return getCurrentUser();
   }
 
@@ -563,11 +579,25 @@ export async function removeSkill(skillId) {
 
 // --- Current user ------------------------------------------------------
 
-const USER_SELECT = 'id, email, name, bio, availability_hours, github_url, user_skills ( source, skills ( id, name, category ) )';
+// profile_evidence rides along with the profile. Its RLS policy is
+// own-rows-only and this select is always `.eq('id', viewerId)`, so a student
+// only ever gets their own months and projects — nobody else's resume lines
+// come back. The matching engine reads them as `depth`; without them every
+// skill scores as a bare tag and no student can reach a strong fit.
+const USER_SELECT =
+  'id, email, name, bio, availability_hours, github_url, ' +
+  'user_skills ( source, skills ( id, name, category ) ), ' +
+  'profile_evidence ( skill_id, months, projects )';
 
 function shapeUserRow(data) {
-  const { user_skills, ...profile } = data;
-  return { ...profile, skills: (user_skills || []).map((us) => ({ ...us.skills, source: us.source })) };
+  const { user_skills, profile_evidence, ...profile } = data;
+  return {
+    ...profile,
+    skills: (user_skills || []).map((us) => ({ ...us.skills, source: us.source })),
+    evidence: Object.fromEntries(
+      (profile_evidence || []).map((e) => [e.skill_id, { months: e.months, projects: e.projects }])
+    ),
+  };
 }
 
 export async function getCurrentUser() {
@@ -575,7 +605,7 @@ export async function getCurrentUser() {
     await delay();
     const id = requireSessionUserId();
     const u = users.find((x) => x.id === id);
-    return { ...u, skills: skillsForUser(id) };
+    return { ...u, skills: skillsForUser(id), evidence: evidenceForUser(id) };
   }
   const viewerId = requireViewerId(await getViewerId());
   const { data, error } = await supabase.from('users').select(USER_SELECT).eq('id', viewerId).single();

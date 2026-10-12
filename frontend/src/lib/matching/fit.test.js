@@ -284,8 +284,37 @@ describe('scoreFit', () => {
       student: me,
     });
     expect(only.points).toBeGreaterThan(oneOfThree.points);
-    expect(only.parts.scarcity).toBe(1);
-    expect(oneOfThree.parts.scarcity).toBeCloseTo(1 / 3);
+    // Scaled by the strength of the student's claim on the role (0.5 for a
+    // bare tag), so the bonus is never paid out before the fit is.
+    expect(only.parts.scarcity).toBe(0.5);
+    expect(oneOfThree.parts.scarcity).toBeCloseTo(0.5 / 3);
+  });
+
+  // The defect this scaling exists to fix: a single-role project used to hand
+  // out a flat 25 points for scarcity and extraCoverage regardless of how
+  // well the student fitted, so a merely related skill (48) outranked an
+  // exact match on a busier project (43).
+  test('an exact match outranks a merely related one, whatever shape the project is', () => {
+    const relatedOnOneRole = scoreFit({
+      project: project({ roles: [FRONTEND_ROLE] }),
+      student: student({ skills: [{ id: 's-vue', name: 'Vue', category: 'Frontend' }] }),
+    });
+    const exactOnThreeRoles = scoreFit({
+      project: project({ roles: [FRONTEND_ROLE, BACKEND_ROLE, DATA_ROLE] }),
+      student: student({ skills: [REACT] }),
+    });
+    expect(relatedOnOneRole.primary.basis).toBe('same-category');
+    expect(exactOnThreeRoles.primary.basis).toBe('has-skill');
+    expect(exactOnThreeRoles.points).toBeGreaterThan(relatedOnOneRole.points);
+  });
+
+  test('the project-shape parts are never worth more than the claim behind them', () => {
+    const related = scoreFit({
+      project: project({ roles: [FRONTEND_ROLE] }),
+      student: student({ skills: [{ id: 's-vue', name: 'Vue', category: 'Frontend' }] }),
+    });
+    expect(related.parts.scarcity).toBeLessThanOrEqual(related.parts.primaryFit);
+    expect(related.parts.extraCoverage).toBeLessThanOrEqual(related.parts.primaryFit);
   });
 
   test('more months and more projects behind a skill raise the score', () => {
@@ -356,8 +385,24 @@ describe('scoreFit', () => {
       student: student({ skills: [REACT, PG, PYTHON] }),
     });
     expect(one.parts.extraCoverage).toBe(0);
-    expect(all.parts.extraCoverage).toBe(1);
+    // Full coverage of the other roles, scaled by the 0.5 claim behind them.
+    expect(all.parts.extraCoverage).toBe(0.5);
     expect(all.points).toBeGreaterThan(one.points);
+  });
+
+  // Before profile_evidence was loaded into getCurrentUser(), depth was 0 for
+  // everyone and the best reachable score was 65 — so the strong band was
+  // unreachable for every student in the cohort.
+  test('a well-evidenced skill reaches the strong band', () => {
+    const p = project({ roles: [FRONTEND_ROLE], avg: 12 });
+    const bare = scoreFit({ project: p, student: student({ skills: [REACT] }) });
+    const evidenced = scoreFit({
+      project: p,
+      student: student({ skills: [REACT], evidence: { 's-react': { months: 14, projects: 3 } } }),
+    });
+    expect(bare.band).not.toBe('strong');
+    expect(evidenced.band).toBe('strong');
+    expect(evidenced.points).toBeGreaterThanOrEqual(BAND_THRESHOLDS.strong);
   });
 
   test('the weights sum to 1, so a part can never be scaled out of range', () => {

@@ -252,8 +252,16 @@ export function scoreFit({ project, student, skillById = {} } = {}) {
 
   const primaryFit = best.fit;
 
+  // Scarcity and extraCoverage describe the *project*, not the student, so
+  // both are scaled by how strong the student's claim on the role actually
+  // is. Without that scaling a one-role project handed out 25 points before
+  // the student was considered at all, and someone with a merely related
+  // skill on a single-role project (48) outranked an exact match on a
+  // three-role project (43) — which is backwards.
+  const claim = primaryFit;
+
   // The last uncovered role is worth more than one of three.
-  const scarcity = clamp01(1 / skillRoles.length);
+  const scarcity = clamp01(1 / skillRoles.length) * claim;
 
   // Evidence behind whichever skill earned the primary fit.
   const bestEntry = best.basis === 'has-skill' ? owned[best.role.skill_id] : owned[best.via];
@@ -267,7 +275,7 @@ export function scoreFit({ project, student, skillById = {} } = {}) {
   // else open, covering the one role means covering all of it — otherwise a
   // perfect match on a single-role project could never reach 100.
   const others = skillRoles.length - 1;
-  const extraCoverage = others === 0 ? 1 : clamp01((covered.length - 1) / others);
+  const extraCoverage = (others === 0 ? 1 : clamp01((covered.length - 1) / others)) * claim;
 
   const parts = { primaryFit, scarcity, depth, hoursFit, extraCoverage };
   const total =
