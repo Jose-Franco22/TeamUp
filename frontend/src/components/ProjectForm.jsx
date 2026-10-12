@@ -1,5 +1,12 @@
 import { useState } from 'react';
 import { MAX_TEAM_SIZE, MIN_TEAM_SIZE } from '../api/client';
+import {
+  DESCRIPTION_MAX,
+  TITLE_MAX,
+  ValidationError,
+  charCount,
+  validateProject,
+} from '../lib/validation';
 
 // The project fields, shared by CreateProject and EditProject. Both screens
 // enforce the same rules — team size 2-4, no duplicate roles, and roles that
@@ -37,6 +44,15 @@ export default function ProjectForm({
       : [{ role_id: '', skill_id: '', quantity_needed: 1 }]
   );
   const [submitState, setSubmitState] = useState(null); // 'saving' | 'saved' | message
+  // Which fields the student has actually edited. A form that is red before
+  // it has been touched is just shouting; errors appear as each field is
+  // used, and all at once if Submit is pressed while something is wrong.
+  const [touched, setTouched] = useState(() => new Set());
+  // Per-field errors the server rejected, for rules the form cannot know
+  // about on its own.
+  const [serverErrors, setServerErrors] = useState({});
+
+  const touch = (...fields) => setTouched((t) => new Set([...t, ...fields]));
 
   // Skills are grouped by category in the dropdown — the taxonomy has four
   // categories and a flat list of twelve reads as an undifferentiated blob.
@@ -76,7 +92,9 @@ export default function ProjectForm({
         return next;
       })
     );
+    touch('roles_needed');
     setSubmitState(null);
+    setServerErrors({});
   }
 
   function addRow() {
@@ -90,7 +108,9 @@ export default function ProjectForm({
 
   function updateForm(patch) {
     setForm((f) => ({ ...f, ...patch }));
+    touch(...Object.keys(patch));
     setSubmitState(null);
+    setServerErrors({});
   }
 
   // project_roles_needed is keyed on (project_id, role_id), so the same
@@ -112,20 +132,40 @@ export default function ProjectForm({
   const assigned = rows.reduce((sum, r) => sum + (Number(r.quantity_needed) || 0), 0);
   const overSubscribed = sizeValid && assigned > openSeats;
 
-  // A row with a quantity but no role picked would be silently dropped on
-  // submit, so block the button instead of losing it without telling anyone.
-  const rowsComplete = rows.every((r) => r.role_id);
-  const canSubmit =
-    form.title.trim() &&
-    form.description.trim() &&
-    form.own_role_id &&
-    rowsComplete &&
-    !overSubscribed &&
-    sizeValid;
+  // One source of truth for every rule, shared with api/client.js and
+  // mirrored by the CHECK constraints and the raises in create_project() /
+  // update_project(). See supabase/16_project_validation.sql.
+  // Listing roles is optional, and the form starts with one blank row. An
+  // untouched row is not a mistake, so it is dropped rather than blocking
+  // Submit with an error about a field nobody filled in. A row with a skill
+  // or a changed quantity *has* been filled in, so a missing role on it is
+  // a real omission and gets reported.
+  const started = (r) => r.role_id || r.skill_id || Number(r.quantity_needed) !== 1;
+  const draft = {
+    title: form.title,
+    description: form.description,
+    team_size_target: form.team_size_target,
+    own_role_id: form.own_role_id,
+    roles_needed: rows.filter(started),
+  };
+  const { errors, isValid } = validateProject(draft, { memberCount });
+
+  // A field's error is shown once it has been used, or once Submit has been
+  // pressed with something wrong. Server errors always show: the student
+  // cannot have caused them by not having typed yet.
+  const errorFor = (field) =>
+    serverErrors[field] ?? (touched.has(field) ? errors[field] : undefined);
+  const describedBy = (field) => (errorFor(field) ? `${field}-error` : undefined);
 
   async function handleSubmit(e) {
     e.preventDefault();
+    // Pressing Submit counts as touching everything, so a field never stays
+    // silently invalid while the button sits disabled for no visible reason.
+    touch('title', 'description', 'team_size_target', 'own_role_id', 'roles_needed');
+    if (!isValid) return;
+
     setSubmitState('saving');
+    setServerErrors({});
     try {
       await onSubmit({
         title: form.title.trim(),
@@ -143,7 +183,14 @@ export default function ProjectForm({
       // A create navigates away, so this only ever shows on an edit.
       setSubmitState('saved');
     } catch (err) {
-      setSubmitState(err.message);
+      // A rule the database enforces and the form could not know about —
+      // put it next to the field it belongs to rather than at the bottom.
+      if (err instanceof ValidationError) {
+        setServerErrors(err.fieldErrors);
+        setSubmitState(null);
+      } else {
+        setSubmitState(err.message);
+      }
     }
   }
 
@@ -158,8 +205,19 @@ export default function ProjectForm({
             id="title"
             value={form.title}
             onChange={(e) => updateForm({ title: e.target.value })}
+            onBlur={() => touch('title')}
+            aria-invalid={errorFor('title') ? 'true' : undefined}
+            aria-describedby={describedBy('title')}
             required
           />
+          <p className="count">
+            {charCount(form.title.trim())}/{TITLE_MAX}
+          </p>
+          {errorFor('title') && (
+            <p className="inline-error" id="title-error" role="alert">
+              {errorFor('title')}
+            </p>
+          )}
         </div>
 
         <div className="field">
@@ -170,8 +228,19 @@ export default function ProjectForm({
             id="description"
             value={form.description}
             onChange={(e) => updateForm({ description: e.target.value })}
+            onBlur={() => touch('description')}
+            aria-invalid={errorFor('description') ? 'true' : undefined}
+            aria-describedby={describedBy('description')}
             required
           />
+          <p className="count">
+            {charCount(form.description.trim())}/{DESCRIPTION_MAX}
+          </p>
+          {errorFor('description') && (
+            <p className="inline-error" id="description-error" role="alert">
+              {errorFor('description')}
+            </p>
+          )}
         </div>
 
         <div className="field">
@@ -191,10 +260,18 @@ export default function ProjectForm({
               max={MAX_TEAM_SIZE}
               value={form.team_size_target}
               onChange={(e) => updateForm({ team_size_target: e.target.value })}
+              onBlur={() => touch('team_size_target')}
+              aria-invalid={errorFor('team_size_target') ? 'true' : undefined}
+              aria-describedby={describedBy('team_size_target')}
               required
             />
             <span>people</span>
           </div>
+          {errorFor('team_size_target') && (
+            <p className="inline-error" id="team_size_target-error" role="alert">
+              {errorFor('team_size_target')}
+            </p>
+          )}
         </div>
 
         <div className="field">
@@ -206,6 +283,9 @@ export default function ProjectForm({
             id="role"
             value={form.own_role_id}
             onChange={(e) => updateForm({ own_role_id: e.target.value })}
+            onBlur={() => touch('own_role_id')}
+            aria-invalid={errorFor('own_role_id') ? 'true' : undefined}
+            aria-describedby={describedBy('own_role_id')}
             required
           >
             <option value="">Choose a role…</option>
@@ -215,6 +295,11 @@ export default function ProjectForm({
               </option>
             ))}
           </select>
+          {errorFor('own_role_id') && (
+            <p className="inline-error" id="own_role_id-error" role="alert">
+              {errorFor('own_role_id')}
+            </p>
+          )}
         </div>
       </section>
 
@@ -240,6 +325,12 @@ export default function ProjectForm({
             </>
           )}
         </p>
+
+        {errorFor('roles_needed') && (
+          <p className="inline-error" id="roles_needed-error" role="alert">
+            {errorFor('roles_needed')}
+          </p>
+        )}
 
         <div className="role-rows">
           {rows.map((r, i) => (
@@ -304,7 +395,7 @@ export default function ProjectForm({
       </section>
 
       <div className="foot">
-        <button className="btn" type="submit" disabled={!canSubmit || submitState === 'saving'}>
+        <button className="btn" type="submit" disabled={!isValid || submitState === 'saving'}>
           {submitState === 'saving' ? savingLabel : submitLabel}
         </button>
         {children}
