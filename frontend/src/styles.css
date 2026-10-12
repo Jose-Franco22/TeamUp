@@ -587,3 +587,71 @@ button:disabled { opacity: 0.45; cursor: default; }
   border-top: 1px solid var(--line);
 }
 .tour-foot .btn.quiet { margin-right: auto; border-color: transparent; padding-left: 0; }
+
+/* ---------- browse filters (issue #31) ---------- */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 18px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.filters .filter { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.filters .filter.grow { flex: 1 1 220px; }
+.filters .filter > span { font-size: 11.5px; color: var(--mute); }
+.filters .filter input,
+.filters .filter select {
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+}
+.filters .filter input:focus,
+.filters .filter select:focus { outline: 2px solid var(--open); outline-offset: -1px; }
+.filters .switch { padding-bottom: 9px; }
+.filters .switch input:disabled { cursor: default; }
+
+.hint {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--slate);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ---------- fit score (the matching engine, shown on the card) ---------- */
+.fit { margin: 12px 0 0; }
+.fit-score { margin: 0; font-size: 13px; color: var(--slate); }
+.fit-score strong {
+  display: inline-block;
+  min-width: 34px;
+  padding: 2px 7px;
+  margin-right: 7px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  border: 1px solid var(--line);
+  background: var(--canvas);
+  color: var(--slate);
+}
+.fit-band { font-weight: 500; color: var(--ink); }
+.fit-why { margin: 5px 0 0; font-size: 12.5px; color: var(--mute); line-height: 1.5; }
+.fit-none { font-size: 12.5px; color: var(--mute); line-height: 1.5; }
+
+.fit-strong .fit-score strong {
+  border-color: var(--open-line);
+  background: var(--open-bg);
+  color: var(--open);
+}
+.fit-strong .fit-band { color: var(--open); }
+.fit-partial .fit-score strong { border-color: var(--mute); }

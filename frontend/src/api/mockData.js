@@ -153,6 +153,36 @@ export function skillsForUser(userId) {
     .map((us) => ({ ...skillById[us.skill_id], source: us.source }));
 }
 
+// --- PROFILE_EVIDENCE --------------------------------------------------
+// profile_evidence: user_id, skill_id, months, projects, quote
+//
+// What the resume importer writes once a student confirms, and what the
+// matching engine scores as `depth`. Own-rows-only in the real schema, so
+// only ever read for the signed-in student.
+//
+// Deliberately partial: most students here have bare skill tags and no
+// evidence at all, which is the common case and the one the engine has to
+// handle without punishing anyone.
+export const profileEvidence = [
+  { user_id: 'u-sofia', skill_id: 's-react', months: 14, projects: 3, quote: 'Rebuilt the club site in React over two semesters.' },
+  { user_id: 'u-sofia', skill_id: 's-js', months: 20, projects: 4, quote: 'JavaScript across every project since sophomore year.' },
+  { user_id: 'u-sofia', skill_id: 's-figma', months: 6, projects: 1, quote: 'Designed the parking app screens in Figma.' },
+
+  { user_id: 'u-jose', skill_id: 's-python', months: 24, projects: 5, quote: 'Python for every data course and two research projects.' },
+  { user_id: 'u-jose', skill_id: 's-opencv', months: 9, projects: 2, quote: 'Counted cars in campus camera footage using OpenCV.' },
+
+  { user_id: 'u-marcus', skill_id: 's-node', months: 11, projects: 2, quote: 'Node and Express APIs for the inventory tool.' },
+  { user_id: 'u-ana', skill_id: 's-pandas', months: 8, projects: 2, quote: 'pandas pipelines over messy survey exports.' },
+];
+
+export function evidenceForUser(userId) {
+  return Object.fromEntries(
+    profileEvidence
+      .filter((e) => e.user_id === userId)
+      .map((e) => [e.skill_id, { months: e.months, projects: e.projects }])
+  );
+}
+
 // --- PROJECTS ----------------------------------------------------------
 // projects: id, creator_id, title, description, team_size_target, status
 export const projects = [
@@ -218,6 +248,10 @@ export const projectRolesNeeded = [
   // A role with no skill attached — skill_id is nullable, which is what
   // makes "we need a project manager" expressible at all.
   { project_id: 'p-scam', role_id: 'r-pm', skill_id: null, quantity_needed: 1 },
+  // A role whose seat has been filled. The row is kept so the creator does
+  // not lose the skill pinned to it, but at 0 it is no longer open and is
+  // never advertised — see supabase/15_release_filled_roles.sql.
+  { project_id: 'p-scam', role_id: 'r-devops', skill_id: 's-git', quantity_needed: 0 },
 ];
 
 // --- TEAMS / TEAM_MEMBERS ---------------------------------------------
@@ -298,8 +332,11 @@ export function buildProject(project, viewerId = null) {
 
   // skill_id is nullable, so skill_name/category come back null for a role
   // listed without a specific skill attached to it.
+  // quantity_needed drops to 0 as seats are filled (15_release_filled_roles).
+  // A role at 0 is no longer open, so it is not advertised and the matching
+  // engine never scores anyone against it.
   const roles_needed = projectRolesNeeded
-    .filter((r) => r.project_id === project.id)
+    .filter((r) => r.project_id === project.id && r.quantity_needed > 0)
     .map((r) => ({
       role_id: r.role_id,
       role_name: roleById[r.role_id].name,
