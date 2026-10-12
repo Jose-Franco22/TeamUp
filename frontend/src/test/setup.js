@@ -17,6 +17,22 @@ if (!window.matchMedia) {
   });
 }
 
+// jsdom's Blob (and so File) has no arrayBuffer(). Every browser has had it
+// for years and the resume reader is built on it, so without this a test that
+// hands the import a file fails with "file.arrayBuffer is not a function"
+// instead of testing anything. FileReader is the jsdom-supported way to get
+// the same bytes.
+if (typeof Blob !== 'undefined' && !Blob.prototype.arrayBuffer) {
+  Blob.prototype.arrayBuffer = function arrayBuffer() {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(this);
+    });
+  };
+}
+
 // React Router v6 prints v7 upgrade notices on every render; they're not
 // about anything a test checks, so keep them out of the output.
 const warn = console.warn;

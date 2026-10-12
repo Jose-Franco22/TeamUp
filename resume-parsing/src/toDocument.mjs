@@ -5,10 +5,15 @@
 // a test in this package asserts that for every format.
 
 import mammoth from 'mammoth';
-import { detectKind, finishDocument } from '../../frontend/src/lib/resume/text.js';
+import {
+  ResumeReadError,
+  detectKind,
+  finishDocument,
+  unsupportedFileMessage,
+} from '../../frontend/src/lib/resume/text.js';
 import { texToText } from '../../frontend/src/lib/resume/latex.js';
 
-export { detectKind };
+export { detectKind, ResumeReadError };
 
 const asBuffer = (input) =>
   Buffer.isBuffer(input) ? input : Buffer.from(input instanceof Uint8Array ? input : new Uint8Array(input));
@@ -64,6 +69,10 @@ async function readPdf(bytes) {
 
 export async function toDocument(input, { name = '' } = {}) {
   const kind = detectKind(name, input);
+
+  // Same refusal as the browser reader: an unreadable format is an error with
+  // a message, not an empty parse the caller has to guess at.
+  if (!kind) throw new ResumeReadError(unsupportedFileMessage(name));
 
   if (kind === 'pdf') return finishDocument(kind, await readPdf(input));
   if (kind === 'docx') {
