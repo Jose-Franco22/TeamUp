@@ -144,6 +144,28 @@ button:disabled { opacity: 0.45; cursor: default; }
 .switch input { accent-color: var(--open); width: 15px; height: 15px; margin: 0; }
 
 /* ---------- cards ---------- */
+/* Admin tables scroll within the page on small screens. */
+.admin-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0 0 24px; }
+.admin-summary > div { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.admin-summary dt { font-size: 13px; color: var(--slate); }
+.admin-summary dd { margin: 8px 0 0; font-size: 28px; font-weight: 600; }
+.admin-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 24px; }
+.admin-table { width: 100%; border-collapse: collapse; background: var(--paper); text-align: left; font-size: 13.5px; }
+.admin-table th, .admin-table td { padding: 16px; vertical-align: top; border-bottom: 1px solid var(--line); }
+.admin-table thead { background: var(--canvas); color: var(--slate); }
+.admin-table th { font-weight: 500; }
+.admin-table tbody tr:last-child > * { border-bottom: 0; }
+.admin-table .pill { margin-left: 0; }
+.admin-list { list-style: none; padding: 0; margin: 0; }
+.admin-list li + li { margin-top: 10px; }
+.card > .admin-list { margin-top: 12px; }
+.admin-secondary { display: block; margin-top: 3px; font-weight: 400; font-size: 12.5px; color: var(--slate); }
+.admin-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 620px) {
+  .admin-summary { grid-template-columns: 1fr; gap: 8px; }
+  .admin-table { min-width: 540px; }
+}
+
 .card {
   background: var(--paper);
   border: 1px solid var(--line);

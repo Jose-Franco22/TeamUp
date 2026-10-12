@@ -1,5 +1,16 @@
 # Backend
 
+> **Admin access (#36):** `supabase/16_admin_access.sql` adds the admin flag,
+> role-change protection, private roster policies, and the `require_admin()` /
+> `project_recruiting_stats()` RPCs. Apply it before deploying this frontend.
+> See [Admin access in README](README.md#admin-access-36) for instructor setup.
+> The handoff notes below describe earlier database work and are historical.
+
+> **Admin dashboard (#37):** apply `supabase/17_admin_dashboard.sql` after `16`.
+> It provides guarded read-only dashboard, team-detail and student-detail RPCs
+> for `/admin`, `/admin/teams/:teamId` and `/admin/students/:studentId`.
+> See [Admin dashboard in README](README.md#admin-dashboard-37).
+
 > **Handoff — who does what.** The frontend is done and is not waiting on design decisions. Every
 > feature below already works end to end against the mocks (`VITE_USE_MOCKS=true`), and
 > `client.js` already contains the real Supabase call for each one. **What's left is the database
@@ -329,13 +340,16 @@ Guests (no session) can still browse — this is `supabase/02_rls_policies.sql`,
 
 - `projects`, `project_roles_needed`, `skills`, `roles`, and `teams` all have an `anon`-readable
   SELECT policy.
-- `team_members` has **no** `anon` policy at all — a guest's query returns zero rows, so no names,
-  no `user_id`s, ever reach the client. `composeProject()` in `client.js` only returns a populated
-  `members` array when there's a signed-in viewer.
-- The public `member_count` a guest still needs comes from `project_member_count()`, a
-  `SECURITY DEFINER` function that returns only a count (see `03_functions.sql`) — the one
-  sanctioned way past the `team_members` restriction, because a count alone doesn't identify
-  anyone.
+- After `16_admin_access.sql`, `team_members` is readable only by teammates and admins.
+  Guests and other students get no raw membership rows. `composeProject()` returns names
+  only when the roster is available through RLS.
+- `project_recruiting_stats()` supplies public seat counts and signed-in availability
+  averages when roster identities are unavailable, so Browse and outgoing requests still
+  show accurate counts. Guests get no availability data. The older `project_member_count()`
+  count-only RPC remains available.
+- Only trusted database/service-role access can change `users.is_admin`. Admins can read
+  every roster and request, but cannot create or join student teams. Student queries exclude
+  instructor profiles and skills; student requests remain limited to their own/incoming rows.
 
 The frontend already hides member names from guests in the UI (`MemberStrip.jsx`), but **that was
 always a UX nicety, not the security boundary** — the boundary is the RLS policy above, which

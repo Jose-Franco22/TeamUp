@@ -100,7 +100,8 @@ export const users = [
   { id: 'u-marcus', email: 'mhall01@utrgv.edu', name: 'Marcus Hall', bio: 'Backend and APIs. Happy to own deployment too.', availability_hours: 11, github_url: '' },
   { id: 'u-ana', email: 'avillarreal01@utrgv.edu', name: 'Ana Villarreal', bio: 'Data and notebooks. Looking for something with messy real data.', availability_hours: 9, github_url: '' },
   { id: 'u-derek', email: 'dcho01@utrgv.edu', name: 'Derek Cho', bio: 'I like testing and keeping a project organized.', availability_hours: 8, github_url: '' },
-];
+  { id: 'u-instructor', email: 'instructor@utrgv.edu', name: 'Course Instructor', bio: '', availability_hours: 0, github_url: '', is_admin: true },
+].map((u) => ({ is_admin: false, ...u }));
 
 const userById = Object.fromEntries(users.map((u) => [u.id, u]));
 
@@ -319,9 +320,9 @@ function viewerRequestStatus(projectId, viewerId) {
 
 export function buildProject(project, viewerId = null) {
   const team = teams.find((t) => t.project_id === project.id);
-  const members = team
+  const allMembers = team
     ? teamMembers
-        .filter((tm) => tm.team_id === team.id)
+        .filter((tm) => tm.team_id === team.id && !userById[tm.user_id].is_admin)
         .map((tm) => ({
           user_id: tm.user_id,
           name: userById[tm.user_id].name,
@@ -329,6 +330,8 @@ export function buildProject(project, viewerId = null) {
           role: roleById[tm.role_id]?.name ?? null,
         }))
     : [];
+  const canReadRoster = userById[viewerId]?.is_admin || allMembers.some((m) => m.user_id === viewerId);
+  const members = canReadRoster ? allMembers : [];
 
   // skill_id is nullable, so skill_name/category come back null for a role
   // listed without a specific skill attached to it.
@@ -346,8 +349,8 @@ export function buildProject(project, viewerId = null) {
       quantity_needed: r.quantity_needed,
     }));
 
-  const avgHours = members.length
-    ? Math.round(members.reduce((sum, m) => sum + userById[m.user_id].availability_hours, 0) / members.length)
+  const avgHours = allMembers.length
+    ? Math.round(allMembers.reduce((sum, m) => sum + userById[m.user_id].availability_hours, 0) / allMembers.length)
     : 0;
 
   return {
@@ -357,8 +360,8 @@ export function buildProject(project, viewerId = null) {
     formed_at: team ? team.formed_at : null,
     members,
     roles_needed,
-    member_count: members.length,
-    avg_availability_hours: avgHours,
+    member_count: allMembers.length,
+    avg_availability_hours: viewerId ? avgHours : null,
     viewer_request_status: viewerRequestStatus(project.id, viewerId),
   };
 }

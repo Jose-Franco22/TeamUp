@@ -6,6 +6,9 @@ import EditProject from './pages/EditProject';
 import Profile from './pages/Profile';
 import Requests from './pages/Requests';
 import Team from './pages/Team';
+import Admin from './pages/Admin';
+import AdminTeam from './pages/AdminTeam';
+import AdminStudent from './pages/AdminStudent';
 import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
 import Walkthrough from './components/Walkthrough';
@@ -24,7 +27,10 @@ const TABS = [
 export default function App() {
   const { status, user, onboarded, signOut } = useSession();
   const navigate = useNavigate();
-  const tabs = status === 'authenticated' ? TABS : [];
+  const isAdmin = user?.is_admin === true;
+  const tabs = status !== 'authenticated' ? [] : isAdmin
+    ? [{ to: '/admin', label: 'Admin' }, { to: '/profile', label: 'Your profile' }]
+    : TABS;
 
   // Every page but /login needs a session, so signing out goes straight to
   // the sign-in page. Navigating first means ProtectedRoute never records
@@ -38,7 +44,7 @@ export default function App() {
   return (
     <>
       <header className="bar">
-        <Link className="mark" to="/browse">
+        <Link className="mark" to={isAdmin ? '/admin' : '/browse'}>
           Team<span>Up</span>
         </Link>
         <nav className="nav">
@@ -65,19 +71,27 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<Navigate to="/browse" replace />} />
-            <Route path="/browse" element={<Browse />} />
-            <Route path="/projects/new" element={<CreateProject />} />
-            <Route path="/projects/:id/edit" element={<EditProject />} />
+            <Route path="/" element={<Navigate to={isAdmin ? '/admin' : '/browse'} replace />} />
+            <Route element={<ProtectedRoute studentOnly />}>
+              <Route path="/browse" element={<Browse />} />
+              <Route path="/projects/new" element={<CreateProject />} />
+              <Route path="/projects/:id/edit" element={<EditProject />} />
+              <Route path="/requests" element={<Requests />} />
+              <Route path="/team" element={<Team />} />
+            </Route>
+            <Route element={<ProtectedRoute adminOnly />}>
+              <Route path="/admin" element={<Admin />} />
+              <Route path="/admin/teams/:teamId" element={<AdminTeam />} />
+              <Route path="/admin/students/:studentId" element={<AdminStudent />} />
+              <Route path="/admin/*" element={<p className="empty">Page not found.</p>} />
+            </Route>
             <Route path="/profile" element={<Profile />} />
-            <Route path="/requests" element={<Requests />} />
-            <Route path="/team" element={<Team />} />
             <Route path="*" element={<p className="empty">Page not found.</p>} />
           </Route>
         </Routes>
       </main>
 
-      {status === 'authenticated' && !onboarded && <Walkthrough />}
+      {status === 'authenticated' && !isAdmin && !onboarded && <Walkthrough />}
     </>
   );
 }

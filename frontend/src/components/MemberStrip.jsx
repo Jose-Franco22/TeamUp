@@ -1,16 +1,10 @@
 import { Link } from 'react-router-dom';
 import Avatar from './Avatar';
 
-// Current roster plus placeholder seats up to team_size_target. Guests only
-// get the seat count — member identities require signing in. This is a UX
-// nicety, not a security boundary: the real API must not send member names
-// to unauthenticated requests in the first place (see TODO-backend.md).
-//
-// The guest count comes from memberCount, NOT members.length: in real mode
-// composeProject() leaves members empty for an unauthenticated viewer and
-// fills member_count from the project_member_count RPC instead. Note this
-// can't be reproduced with VITE_USE_MOCKS=true — the mocks have no RLS, so
-// buildProject() returns a full members array to guests too.
+// Current roster plus placeholder seats up to team_size_target. Roster
+// identities are available to teammates and admins; everyone else gets
+// aggregate seat counts. memberCount stays accurate when members is empty
+// because RLS hid the identities (16_admin_access.sql).
 export default function MemberStrip({
   members,
   targetSize,
@@ -24,16 +18,19 @@ export default function MemberStrip({
           {memberCount} of {targetSize} seats filled
         </span>
         <Link className="guest-note" to="/login">
-          Sign in to see who's on this team
+          Sign in to find a team
         </Link>
       </div>
     );
   }
 
-  const empty = Math.max(0, targetSize - members.length);
+  const empty = Math.max(0, targetSize - memberCount);
 
   return (
     <div className="members">
+      {memberCount > members.length && (
+        <span className="seat-count">{memberCount} of {targetSize} seats filled</span>
+      )}
       {members.map((m) => (
         <div className="mem" key={m.user_id}>
           <Avatar name={m.name} size={34} />

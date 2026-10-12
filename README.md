@@ -70,6 +70,64 @@ Supabase project instead, set `VITE_USE_MOCKS=false` and fill in `VITE_SUPABASE_
 Supabase setup (schema, RLS policies, Microsoft/Entra sign-in). Never commit `.env` — it's already
 covered in `.gitignore`.
 
+## Admin access (#36)
+
+Apply `supabase/16_admin_access.sql` after the earlier numbered SQL files, followed
+by `supabase/17_admin_dashboard.sql`, before running this frontend against Supabase.
+The first adds `users.is_admin` (false for every existing/new account), protects
+role changes, and installs the admin RLS policies.
+
+An instructor first signs in with their UTRGV Microsoft account. A database
+administrator can then grant access through the Supabase SQL editor:
+
+```sql
+-- Replace with the instructor's actual email, then confirm the returned row.
+update public.users
+set is_admin = true
+where email = 'instructor@utrgv.edu'
+returning id, email, is_admin;
+```
+
+Sign out and back in to load the role. Admins land on `/admin`, with admin
+navigation and no student onboarding or team participation. Admin access cannot
+be changed through a profile form or browser API, including by an admin. Remove
+any existing student membership, owned project and pending join requests before
+promoting a student account. #36 supplies the protected navigation and server
+guard (`require_admin()`); #37 adds the dashboard and read-only detail views.
+
+Public project listings and team existence remain recruiting information. Only
+teammates and admins can query raw roster rows; other viewers get seat counts
+and signed-in availability averages through `project_recruiting_stats()`.
+Requests remain visible to their requester, the project owner, and admins.
+Instructor profiles and skills are excluded from student queries/matching.
+
+For local mock testing, use `VITE_USE_MOCKS=true` and choose **Course Instructor**
+under **Administrators** on the sign-in screen. Existing student fixtures keep
+their student roles. No production account is promoted by the migration.
+
+## Admin dashboard (#37)
+
+`/admin` lists every team with its members, roles, seats filled and status, plus
+every non-admin student with no team membership and their pending requests.
+Summary counts show formed teams (`status = full`), open teams and unplaced
+students. Students with no requests still appear in the unplaced list.
+
+Click a team or a request's project name to open `/admin/teams/:teamId`. Click
+any student's name to open `/admin/students/:studentId`, including students
+already on a team. These views show project/roster details or student profile,
+skills, current team and pending requests. They do not change student data.
+Use **Refresh** on the dashboard to reload formation progress.
+
+`supabase/17_admin_dashboard.sql` supplies `admin_dashboard()`,
+`admin_team_details(uuid)` and `admin_student_details(uuid)`. Each RPC checks
+`require_admin()` before reading data; students and guests cannot access the
+admin views through direct API calls. Apply it after `16_admin_access.sql`.
+
+In mock mode, **Course Instructor** starts with 1 formed team, 3 open teams,
+and 6 unplaced students. Dashboard, detail and permission tests run with
+`cd frontend && npm test`; the database suite automatically includes
+`supabase/tests/admin_dashboard.test.sql`.
+
 ## Testing
 
 Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.
