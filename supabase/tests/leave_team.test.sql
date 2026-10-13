@@ -59,9 +59,12 @@ select is(
 select lives_ok(
   $$ select public.mark_notifications_read(array(select id from public.notifications)) $$,
   'the creator can mark it read');
+-- Filtered to the creator's rows: the member has their own
+-- 'request_accepted' notification from joining (21_join_request_responses.sql).
 select tests.authenticate_as(current_setting('tests.member')::uuid);
 select is(
-  (select count(*)::int from public.notifications),
+  (select count(*)::int from public.notifications
+   where user_id = current_setting('tests.owner')::uuid),
   0,
   'nobody else can read the creator''s notifications');
 select tests.clear_authentication();
