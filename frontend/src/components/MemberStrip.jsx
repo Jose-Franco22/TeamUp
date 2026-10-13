@@ -8,9 +8,8 @@ import Avatar from './Avatar';
 //
 // The guest count comes from memberCount, NOT members.length: in real mode
 // composeProject() leaves members empty for an unauthenticated viewer and
-// fills member_count from the project_member_count RPC instead. Note this
-// can't be reproduced with VITE_USE_MOCKS=true — the mocks have no RLS, so
-// buildProject() returns a full members array to guests too.
+// fills member_count from the batched project_member_counts RPC instead
+// (18_admin_access.sql). buildProject() mirrors that in mock mode.
 export default function MemberStrip({
   members,
   targetSize,
