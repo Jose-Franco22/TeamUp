@@ -262,6 +262,10 @@ export const joinRequests = [
   { id: 'jr-4', project_id: 'p-lab', user_id: 'u-adan', status: 'declined', created_at: '2026-08-26T11:00:00Z' },
 ];
 
+// Stand-in for the notifications table (15_join_request_responses.sql):
+// one row per accept/decline, addressed to the requester.
+export const notifications = [];
+
 // --- Composition helpers ----------------------------------------------
 // These stand in for the joins the backend will do. Keeping them here
 // documents exactly what each endpoint is expected to return.
