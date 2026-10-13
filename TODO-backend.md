@@ -479,11 +479,14 @@ that lies about who's working on the project, and a seat the owner can't refill 
 occupies it. The seat reopening immediately is what lets a team recover; the deliberate confirm
 step on `Team.jsx` is what addresses someone leaving on a whim.
 
-**Nothing tells the owner.** There is no notification system — a member leaving is visible only as
-a changed roster on `Team.jsx` and a project that has gone back to `'open'`. Telling teammates is
-left to the students, which the leave dialog says outright. If that turns out to be too quiet, an
-in-app activity feed is the cheap version (one table, no infrastructure); real push or email would
-need a service worker or a mail provider, neither of which this project has.
+**The owner is notified, and rosters lock at a deadline.** `15_leave_team_rules.sql` (issue #35)
+adds a `notifications` table: `leave_team()` writes a `'member_left'` row for the project's creator,
+which `Team.jsx` shows them until they dismiss it. It's an in-app feed only — real push or email
+would need a service worker or a mail provider, neither of which this project has. The same file
+adds a class-wide `app_settings.formation_deadline`: after it, `leave_team()` refuses unless the
+caller is in `public.admins`, and an admin can take a student off with `leave_team(p_user_id)`.
+Admins live in their own table because `users_update_own` would let a student set a
+`users.is_admin` column on themselves.
 
 ## Deleting a team — `delete_team()`
 
@@ -705,7 +708,7 @@ Then work through the checks below.
 - **No RLS write policy was added for `projects`, and none is needed.** `create_project`,
   `update_project` and `delete_team` are `SECURITY DEFINER` and do their own authorization — the
   same template `respond_to_join_request` already uses.
-- **`notifications` was considered and deliberately dropped.** Nothing tells an owner that a member
-  left; see [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
+- **`notifications` was added later** (`15_leave_team_rules.sql`, issue #35) so an owner hears when a
+  member leaves; see [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
 - **No way to remove yourself as owner** other than deleting the team, and no way to transfer
   ownership. Both are fine for now; flagged in case the scope grows.

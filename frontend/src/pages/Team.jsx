@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { deleteTeam, getMyTeam, leaveTeam, removeMember } from '../api/client';
+import {
+  deleteTeam,
+  getMyTeam,
+  getNotifications,
+  leaveTeam,
+  markNotificationsRead,
+  removeMember,
+} from '../api/client';
 import { useSession } from '../auth/SessionContext';
 import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
@@ -11,6 +18,7 @@ export default function Team() {
   const { data, loading, error, reload } = useAsync(getMyTeam, []);
   const { user } = useSession();
   const navigate = useNavigate();
+  const notices = useAsync(getNotifications, []);
   // null | 'confirming' | 'deleting' | error message
   const [deleteState, setDeleteState] = useState(null);
   // null | 'confirming' | 'leaving' | error message
@@ -38,6 +46,12 @@ export default function Team() {
     } catch (err) {
       setRemoveState((r) => ({ ...r, [userId]: err.message }));
     }
+  }
+
+  async function handleDismiss(ids) {
+    notices.setData((list) => list.filter((n) => !ids.includes(n.id)));
+    // If this fails the notice just comes back on the next visit.
+    await markNotificationsRead(ids).catch(() => {});
   }
 
   async function handleDelete() {
@@ -72,6 +86,16 @@ export default function Team() {
   const isOwner = data.creator_id === user?.id;
   const isAlone = data.members.length <= 1;
 
+  // Rosters lock at the formation deadline; after it only an admin can
+  // leave. leave_team() enforces this — hiding the button just saves a
+  // round trip that would fail.
+  const deadline = data.formation_deadline ? new Date(data.formation_deadline) : null;
+  const leaveLocked = Boolean(deadline && deadline <= new Date() && !data.viewer_is_admin);
+
+  const leftNotices = isOwner
+    ? (notices.data || []).filter((n) => n.kind === 'member_left' && n.project_id === data.id)
+    : [];
+
   return (
     <>
       <div className="head">
@@ -84,6 +108,25 @@ export default function Team() {
           </p>
         </div>
       </div>
+
+      {leftNotices.length > 0 && (
+        <section className="card" aria-label="Team updates">
+          <h2>Team updates</h2>
+          <ul className="notices">
+            {leftNotices.map((n) => (
+              <li key={n.id}>
+                {n.by_admin ? `An admin took ${n.member_name} off the team` : `${n.member_name} left the team`}{' '}
+                on {new Date(n.created_at).toLocaleDateString()}. Their seat is open again.
+              </li>
+            ))}
+          </ul>
+          <div className="foot">
+            <button className="btn quiet" onClick={() => handleDismiss(leftNotices.map((n) => n.id))}>
+              Dismiss
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="card">
         <h2>
@@ -188,12 +231,18 @@ export default function Team() {
         <section className="card danger-zone">
           <h2>Leave this team</h2>
           <p className="desc">
-            Your seat opens back up right away so the team can recruit a replacement, and you'll be
-            free to join or start something else. Let your team know yourself — the app won't tell
-            them.
+            {leaveLocked
+              ? `The team formation deadline passed on ${deadline.toLocaleDateString()}, so rosters are locked. If you need to leave, ask an admin to take you off the team.`
+              : `Your seat opens back up right away so the team can recruit a replacement, and you'll be free to join or start something else. ${data.creator_name} will be notified that you left.`}
           </p>
+          {!leaveLocked && deadline && (
+            <p className="hint">
+              Rosters lock on {deadline.toLocaleDateString()} — after that only an admin can take
+              you off a team.
+            </p>
+          )}
 
-          {leaveState === 'confirming' ? (
+          {leaveLocked ? null : leaveState === 'confirming' ? (
             <div className="foot">
               <span className="btn-label">Leave “{data.title}”?</span>
               <button className="btn danger" onClick={handleLeave}>

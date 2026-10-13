@@ -296,6 +296,17 @@ export const joinRequests = [
   { id: 'jr-4', project_id: 'p-lab', user_id: 'u-adan', status: 'declined', created_at: '2026-08-26T11:00:00Z' },
 ];
 
+// --- APP_SETTINGS / ADMINS / NOTIFICATIONS ----------------------------
+// See supabase/15_leave_team_rules.sql. app_settings is a single row;
+// formation_deadline null means rosters never lock. admins lists user_ids
+// allowed past that deadline. notifications: id, user_id (recipient), kind,
+// project_id, member_id, by_admin, created_at, read_at.
+export const appSettings = { formation_deadline: null };
+
+export const admins = [];
+
+export const notifications = [];
+
 // --- Composition helpers ----------------------------------------------
 // These stand in for the joins the backend will do. Keeping them here
 // documents exactly what each endpoint is expected to return.

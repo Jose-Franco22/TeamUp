@@ -16,6 +16,9 @@ import {
   roles as allRoles,
   skills,
   userSkills,
+  appSettings,
+  admins,
+  notifications,
   buildProject,
   skillsForUser,
   profileEvidence,
@@ -870,6 +873,8 @@ export async function getMyTeam() {
     const project = buildProject(projects.find((p) => p.id === team.project_id), id);
     return {
       ...project,
+      formation_deadline: appSettings.formation_deadline,
+      viewer_is_admin: admins.includes(id),
       members: project.members.map((m) => {
         const u = users.find((x) => x.id === m.user_id);
         return {
@@ -898,9 +903,10 @@ export async function getMyTeam() {
     .single();
   if (teamErr) throw teamErr;
 
-  const [{ data: projectRow, error: projErr }, requestMap] = await Promise.all([
+  const [{ data: projectRow, error: projErr }, requestMap, leaveRules] = await Promise.all([
     supabase.from('projects').select(PROJECT_SELECT).eq('id', teamRow.project_id).single(),
     fetchViewerRequestMap(viewerId),
+    fetchLeaveRules(viewerId),
   ]);
   if (projErr) throw projErr;
   const project = await composeProject(projectRow, viewerId, requestMap);
@@ -915,6 +921,7 @@ export async function getMyTeam() {
 
   return {
     ...project,
+    ...leaveRules,
     members: memberRows.map((tm) => ({
       user_id: tm.user_id,
       name: tm.users.name,
@@ -923,6 +930,21 @@ export async function getMyTeam() {
       availability_hours: tm.users.availability_hours,
       skills: (tm.users.user_skills || []).map((us) => us.skills.name),
     })),
+  };
+}
+
+// When rosters lock, and whether the viewer is an admin who can still leave
+// after that (supabase/15_leave_team_rules.sql). Read separately and
+// forgiving of errors so a database that hasn't run 15_ yet still shows the
+// team page — leave_team() is what actually enforces the deadline.
+async function fetchLeaveRules(viewerId) {
+  const [{ data: settings }, { data: adminRow }] = await Promise.all([
+    supabase.from('app_settings').select('formation_deadline').maybeSingle(),
+    supabase.from('admins').select('user_id').eq('user_id', viewerId).maybeSingle(),
+  ]);
+  return {
+    formation_deadline: settings?.formation_deadline ?? null,
+    viewer_is_admin: Boolean(adminRow),
   };
 }
 
@@ -974,7 +996,9 @@ export async function deleteTeam(teamId) {
 // for why this isn't gated on the owner approving it.
 //
 // A project's creator can't leave their own project (projects.creator_id
-// points at them); for them the equivalent is deleteTeam().
+// points at them); for them the equivalent is deleteTeam(). After the team
+// formation deadline only an admin can leave, and the creator is notified
+// either way.
 export async function leaveTeam() {
   if (USE_MOCKS) {
     await delay();
@@ -986,9 +1010,23 @@ export async function leaveTeam() {
     if (project.creator_id === id) {
       throw new Error('You created this project, so you cannot leave it — delete the team instead');
     }
+    const deadline = appSettings.formation_deadline;
+    if (deadline && new Date(deadline) <= new Date() && !admins.includes(id)) {
+      throw new Error('The team formation deadline has passed — ask an admin if you need to leave');
+    }
 
     teamMembers.splice(teamMembers.indexOf(membership), 1);
     syncProjectFillState(project, team);
+    notifications.push({
+      id: `n-${Date.now()}-${notifications.length}`,
+      user_id: project.creator_id,
+      kind: 'member_left',
+      project_id: project.id,
+      member_id: id,
+      by_admin: false,
+      created_at: new Date().toISOString(),
+      read_at: null,
+    });
     return;
   }
 
@@ -1014,6 +1052,45 @@ export async function removeMember(userId) {
   }
 
   const { error } = await supabase.rpc('remove_member', { p_user_id: userId });
+  if (error) throw error;
+}
+
+// --- Notifications -------------------------------------------------------
+
+// The viewer's unread notifications, newest first. Today the only kind is
+// 'member_left' (someone left a project the viewer created); member_name is
+// who left.
+export async function getNotifications() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return notifications
+      .filter((n) => n.user_id === id && !n.read_at)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map((n) => ({ ...n, member_name: users.find((u) => u.id === n.member_id)?.name ?? 'Someone' }));
+  }
+
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('id, kind, project_id, member_id, by_admin, created_at, read_at, member:users!member_id ( name )')
+    .is('read_at', null)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data.map(({ member, ...n }) => ({ ...n, member_name: member?.name ?? 'Someone' }));
+}
+
+export async function markNotificationsRead(ids) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const now = new Date().toISOString();
+    for (const n of notifications) {
+      if (n.user_id === id && ids.includes(n.id) && !n.read_at) n.read_at = now;
+    }
+    return;
+  }
+
+  const { error } = await supabase.rpc('mark_notifications_read', { p_ids: ids });
   if (error) throw error;
 }
 
