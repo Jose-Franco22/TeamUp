@@ -52,5 +52,29 @@ begin
 end;
 $$;
 
+-- A two-seat project created by p_creator with p_member accepted onto it,
+-- built through the same functions the app calls — so it comes back full,
+-- with teams.formed_at set. Returns the project id. Leaves the transaction
+-- unauthenticated.
+create or replace function tests.create_full_team(p_creator uuid, p_member uuid)
+returns uuid
+language plpgsql
+as $$
+declare
+  v_role uuid := (select id from public.roles where name = 'Backend Developer');
+  v_project public.projects;
+  v_request public.join_requests;
+begin
+  perform tests.authenticate_as(p_creator);
+  v_project := public.create_project('Test project', 'A two-seat project used by the tests.', 2::smallint, v_role, '[]'::jsonb);
+  perform tests.authenticate_as(p_member);
+  v_request := public.create_join_request(v_project.id);
+  perform tests.authenticate_as(p_creator);
+  perform public.respond_to_join_request(v_request.id, 'accepted', v_role);
+  perform tests.clear_authentication();
+  return v_project.id;
+end;
+$$;
+
 grant usage on schema tests to authenticated, anon;
 grant execute on all functions in schema tests to authenticated, anon;

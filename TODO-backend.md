@@ -492,11 +492,17 @@ that lies about who's working on the project, and a seat the owner can't refill 
 occupies it. The seat reopening immediately is what lets a team recover; the deliberate confirm
 step on `Team.jsx` is what addresses someone leaving on a whim.
 
-**Nothing tells the owner.** There is no notification system — a member leaving is visible only as
-a changed roster on `Team.jsx` and a project that has gone back to `'open'`. Telling teammates is
-left to the students, which the leave dialog says outright. If that turns out to be too quiet, an
-in-app activity feed is the cheap version (one table, no infrastructure); real push or email would
-need a service worker or a mail provider, neither of which this project has.
+**The owner is notified, and rosters lock at a deadline.** `20_leave_team_rules.sql` (issue #35)
+adds a `notifications` table: `leave_team()` writes a `'member_left'` row for the project's creator,
+which `Team.jsx` shows them until they dismiss it. It's an in-app feed only — real push or email
+would need a service worker or a mail provider, neither of which this project has. The same file
+adds a class-wide formation deadline, read only through `formation_deadline()` (today it returns
+`app_settings.formation_deadline`; #38 will point it at its milestones table). After it,
+`leave_team()` refuses students. Taking a student off is an admin's job (#39), and both paths share
+`private.remove_from_team(p_user_id, p_by_admin)` — the one place a seat is given up: it deletes the
+membership, restores the role, resyncs the project and notifies the creator. Only an admin
+(`users.is_admin`, checked with `private.is_admin()` from `18_admin_access.sql`, #36) can set the
+deadline.
 
 ## Deleting a team — `delete_team()`
 
@@ -718,7 +724,7 @@ Then work through the checks below.
 - **No RLS write policy was added for `projects`, and none is needed.** `create_project`,
   `update_project` and `delete_team` are `SECURITY DEFINER` and do their own authorization — the
   same template `respond_to_join_request` already uses.
-- **`notifications` was considered and deliberately dropped.** Nothing tells an owner that a member
-  left; see [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
+- **`notifications` was added later** (`20_leave_team_rules.sql`, issue #35) so an owner hears when a
+  member leaves; see [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
 - **No way to remove yourself as owner** other than deleting the team, and no way to transfer
   ownership. Both are fine for now; flagged in case the scope grows.
