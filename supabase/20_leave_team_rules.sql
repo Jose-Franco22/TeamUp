@@ -1,46 +1,17 @@
--- Leaving a team, part two (issue #35). Run after 17_keep_filled_roles_on_edit.sql.
+-- Leaving a team, part two (issue #35). Run after 19_admin_dashboard.sql.
 --
 -- 05_membership.sql already lets a student leave and reopens a full
 -- project. This adds the rest of the issue:
 --   * the project's creator gets a notification when someone leaves;
 --   * leaving is blocked once the team formation deadline has passed;
---   * an admin can still do it after the deadline, for the student or on
---     their behalf.
+--   * an admin can still take a student off after the deadline. Admins
+--     can't be on teams (18_admin_access.sql), so an admin never leaves
+--     for themselves.
 --
 -- The creator still can't leave — delete_team() is their equivalent.
 
--- --- admins --------------------------------------------------------------
--- Its own table rather than a users.is_admin column: users_update_own
--- (02_rls_policies.sql) lets a student update every column of their own
--- row, so a flag there would be one PATCH away from self-promotion. Nobody
--- can write here through the API; add admins from the Supabase dashboard:
---
---   insert into public.admins (user_id)
---   select id from public.users where email = 'someone@utrgv.edu';
-create table public.admins (
-  user_id    uuid primary key references public.users(id) on delete cascade,
-  created_at timestamptz not null default now()
-);
-
-alter table public.admins enable row level security;
-
--- Each student can see whether they are an admin, and nothing else.
-create policy "admins_select_own"
-  on public.admins for select
-  to authenticated
-  using (auth.uid() = user_id);
-
-create or replace function public.is_admin(p_user_id uuid default auth.uid())
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (select 1 from public.admins where user_id = p_user_id)
-$$;
-
-grant execute on function public.is_admin(uuid) to authenticated;
+-- Admins are users.is_admin, checked with private.is_admin()
+-- (18_admin_access.sql, issue #36). This file adds no admin system of its own.
 
 -- --- app_settings --------------------------------------------------------
 -- One row of class-wide settings. formation_deadline is when rosters lock:
@@ -65,8 +36,8 @@ create policy "app_settings_select_all"
 create policy "app_settings_update_admin"
   on public.app_settings for update
   to authenticated
-  using (public.is_admin())
-  with check (public.is_admin());
+  using (private.is_admin())
+  with check (private.is_admin());
 
 -- --- notifications -------------------------------------------------------
 -- Written only by SECURITY DEFINER functions (no INSERT policy). Today the
@@ -139,7 +110,7 @@ begin
     raise exception 'Not signed in';
   end if;
 
-  v_is_admin := public.is_admin(caller);
+  v_is_admin := private.is_admin();
 
   if v_target <> caller and not v_is_admin then
     raise exception 'Only an admin can take someone else off a team';

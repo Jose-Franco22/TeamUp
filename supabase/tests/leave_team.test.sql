@@ -1,6 +1,6 @@
 -- Leaving a team (issue #35): 05_membership.sql and 20_leave_team_rules.sql.
 begin;
-select plan(18);
+select plan(21);
 
 -- --- leave_team() removes the caller from the team ------------------------
 select set_config('tests.owner',  tests.sign_in_with_microsoft('owner01@utrgv.edu', 'Owner')::text, true);
@@ -90,9 +90,27 @@ select set_config('tests.member2', tests.sign_in_with_microsoft('member02@utrgv.
 select set_config('tests.admin',   tests.sign_in_with_microsoft('admin01@utrgv.edu', 'Admin')::text, true);
 select set_config('tests.project2',
   tests.create_full_team(current_setting('tests.owner2')::uuid, current_setting('tests.member2')::uuid)::text, true);
-insert into public.admins (user_id) values (current_setting('tests.admin')::uuid);
+-- An instructor account, made the same way 18_admin_access.sql says to.
+update public.users set is_admin = true where id = current_setting('tests.admin')::uuid;
 
+-- Only an admin can move the deadline.
+select tests.authenticate_as(current_setting('tests.member2')::uuid);
 update public.app_settings set formation_deadline = now() - interval '1 day';
+select tests.clear_authentication();
+select is(
+  (select formation_deadline from public.app_settings),
+  null,
+  'a student can''t set the formation deadline');
+
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select lives_ok(
+  $$ update public.app_settings set formation_deadline = now() - interval '1 day' $$,
+  'an admin can set the formation deadline');
+select tests.clear_authentication();
+select isnt(
+  (select formation_deadline from public.app_settings),
+  null,
+  'the admin''s deadline is saved');
 
 select tests.authenticate_as(current_setting('tests.member2')::uuid);
 select throws_ok(
