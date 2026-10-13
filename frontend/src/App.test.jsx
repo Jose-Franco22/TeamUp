@@ -174,3 +174,58 @@ describe('admin access (#36)', () => {
     expect(screen.getByText('Not on a team.')).toBeInTheDocument();
   });
 });
+
+// Issue #46 — on a phone the tabs and Sign out sit in a slide-out menu.
+// jsdom doesn't apply the stylesheet, so these check the menu's state, not
+// whether it's on screen.
+describe('phone menu (#46)', () => {
+  const menuButton = (name) => screen.getByRole('button', { name });
+
+  test('guests get no menu button', async () => {
+    renderApp('/login');
+    await screen.findByRole('heading', { name: 'Sign in to get started' });
+    expect(screen.queryByRole('button', { name: 'Open menu' })).not.toBeInTheDocument();
+  });
+
+  test('picking a tab closes the menu', async () => {
+    renderApp('/browse', { signedInAs: 'u-jose' });
+    await screen.findByRole('heading', { name: 'Open projects' });
+    const user = userEvent.setup();
+
+    await user.click(menuButton('Open menu'));
+    expect(menuButton('Close menu')).toHaveAttribute('aria-expanded', 'true');
+    expect(document.getElementById('site-menu')).toHaveClass('open');
+
+    await user.click(screen.getByRole('link', { name: 'Your profile' }));
+    await waitFor(() => expect(path()).toBe('/profile'));
+    expect(menuButton('Open menu')).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById('site-menu')).not.toHaveClass('open');
+  });
+
+  test('Escape and the backdrop close the menu', async () => {
+    renderApp('/browse', { signedInAs: 'u-jose' });
+    await screen.findByRole('heading', { name: 'Open projects' });
+    const user = userEvent.setup();
+
+    await user.click(menuButton('Open menu'));
+    await user.keyboard('{Escape}');
+    expect(menuButton('Open menu')).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(menuButton('Open menu'));
+    await user.click(document.querySelector('.menu-backdrop'));
+    expect(menuButton('Open menu')).toHaveAttribute('aria-expanded', 'false');
+    expect(document.querySelector('.menu-backdrop')).toBeNull();
+  });
+
+  test('Sign out works from inside the menu', async () => {
+    renderApp('/browse', { signedInAs: 'u-jose' });
+    await screen.findByRole('heading', { name: 'Open projects' });
+    const user = userEvent.setup();
+
+    await user.click(menuButton('Open menu'));
+    await user.click(within(document.getElementById('site-menu')).getByRole('button', { name: 'Sign out' }));
+
+    await waitFor(() => expect(path()).toBe('/login'));
+    expect(screen.queryByRole('button', { name: /menu/ })).not.toBeInTheDocument();
+  });
+});

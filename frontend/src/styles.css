@@ -84,16 +84,73 @@ button:disabled { opacity: 0.45; cursor: default; }
 .mark { font-weight: 600; font-size: 17px; letter-spacing: -0.02em; color: var(--ink); text-decoration: none; }
 .mark span { color: var(--open); }
 
+.menu { flex: 1; min-width: 0; display: flex; align-items: center; gap: 32px; }
 .nav { display: flex; gap: 24px; font-size: 14px; }
 .nav a {
   color: var(--slate);
   text-decoration: none;
+  white-space: nowrap;
   padding: 20px 0;
   border-bottom: 2px solid transparent;
 }
 .nav a.on { color: var(--ink); font-weight: 500; border-bottom-color: var(--ink); }
 
 .me { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--slate); }
+.who { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Phone-width menu (issue #46): hidden until the bar runs out of room. */
+.menu-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-left: auto;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0;
+}
+.menu-backdrop { display: none; }
+
+@media (max-width: 960px) {
+  .has-menu .menu-toggle { display: inline-flex; }
+  .has-menu .menu-backdrop {
+    display: block;
+    position: fixed;
+    inset: 60px 0 0;
+    background: rgba(0, 0, 0, 0.35);
+  }
+  .has-menu .menu {
+    position: fixed;
+    top: 60px;
+    right: 0;
+    bottom: 0;
+    width: min(300px, 85vw);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+    padding: 16px;
+    background: var(--paper);
+    border-left: 1px solid var(--line);
+    overflow-y: auto;
+    transform: translateX(100%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0.2s;
+  }
+  .has-menu .menu.open { transform: none; visibility: visible; }
+  .has-menu .nav { flex-direction: column; gap: 2px; font-size: 15px; }
+  .has-menu .nav a { padding: 10px 12px; border-bottom: 0; border-radius: 7px; }
+  .has-menu .nav a.on { background: var(--canvas); }
+  .has-menu .me { margin: 0; padding-top: 16px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .has-menu .me .avatar { order: -2; }
+  .has-menu .who { order: -1; flex: 1 1 calc(100% - 42px); max-width: none; color: var(--ink); }
+  .has-menu .me .btn { margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .has-menu .menu { transition: none; }
+}
 
 .theme-toggle {
   display: inline-flex;
