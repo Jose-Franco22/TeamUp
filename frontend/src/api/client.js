@@ -23,7 +23,12 @@ import {
 } from './mockData';
 import { supabase } from '../lib/supabaseClient';
 import { isOpenProject } from '../lib/browseFilters';
-import { ValidationError, fieldErrorsFromDbError, validateProfile } from '../lib/validation';
+import {
+  ValidationError,
+  fieldErrorsFromDbError,
+  validateProfile,
+  validateProject,
+} from '../lib/validation';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
 
@@ -391,36 +396,21 @@ export async function createProject({
   creator_role_id,
   roles_needed,
 }) {
-  // A senior project team is 2 to 4 students. Checked here so both modes
-  // reject it the same way; create_project() must re-check server-side.
-  if (team_size_target < MIN_TEAM_SIZE || team_size_target > MAX_TEAM_SIZE) {
-    throw new Error(`A team has to be between ${MIN_TEAM_SIZE} and ${MAX_TEAM_SIZE} people`);
-  }
+  // Title length, description length, team size, duplicate roles and the
+  // seat arithmetic all live in lib/validation.js, so the form and this
+  // last check before sending cannot disagree. `create_project()` re-checks
+  // every one of them server-side — see supabase/16_project_validation.sql,
+  // which is the real boundary.
+  //
+  // The creator is seated by create_project itself, so memberCount is 1:
+  // the roles listed here recruit for the *remaining* seats.
+  const { values, errors, isValid } = validateProject(
+    { title, description, team_size_target, own_role_id: creator_role_id, roles_needed },
+    { memberCount: 1 }
+  );
+  if (!isValid) throw new ValidationError(errors);
 
-  if (!creator_role_id) throw new Error('A role is required to create a project');
-
-  // (project_id, role_id) is the primary key — the same role twice would be
-  // a constraint violation, so reject it here with a readable message. The
-  // form prevents it too, but this is the shared check both modes run.
-  const seen = new Set();
-  for (const r of roles_needed) {
-    if (!r.role_id) throw new Error('Every role you list needs a role selected');
-    if (seen.has(r.role_id)) throw new Error('You listed the same role twice');
-    seen.add(r.role_id);
-  }
   assertRolesMatchSkills(roles_needed);
-
-  // The creator is seated by createProject itself, so the roles listed here
-  // are recruiting for the *remaining* seats — one fewer than the target.
-  // Without this you could set a team of 3 and then ask for eight people.
-  const openSeats = team_size_target - 1;
-  const assigned = roles_needed.reduce((sum, r) => sum + (Number(r.quantity_needed) || 0), 0);
-  if (assigned > openSeats) {
-    throw new Error(
-      `A team of ${team_size_target} has ${openSeats} open seat${openSeats === 1 ? '' : 's'} ` +
-        `besides you, but you listed ${assigned} people`
-    );
-  }
 
   if (USE_MOCKS) {
     await delay();
@@ -433,9 +423,11 @@ export async function createProject({
     const project = {
       id: projectId,
       creator_id: id,
-      title,
-      description,
-      team_size_target,
+      // The validated, trimmed values — create_project() btrims server-side,
+      // so mock mode has to store the same thing.
+      title: values.title,
+      description: values.description,
+      team_size_target: values.team_size_target,
       status: 'open',
       created_at: new Date().toISOString(),
     };
@@ -472,9 +464,9 @@ export async function createProject({
   // caller already on any team) plus the project/team/roster/roles inserts,
   // all in one transaction — see TODO-backend.md and supabase/03_functions.sql.
   const { data, error } = await supabase.rpc('create_project', {
-    p_title: title,
-    p_description: description,
-    p_team_size_target: team_size_target,
+    p_title: values.title,
+    p_description: values.description,
+    p_team_size_target: values.team_size_target,
     p_creator_role_id: creator_role_id,
     p_roles_needed: roles_needed,
   });
@@ -500,18 +492,27 @@ export async function createProject({
 // Raising the target on a project that had filled reopens it, and lowering
 // it onto the current roster closes it — projects.status and teams.formed_at
 // both follow from the same comparison respond_to_join_request makes.
-export async function updateProject(projectId, { title, description, team_size_target, own_role_id, roles_needed }) {
-  if (team_size_target < MIN_TEAM_SIZE || team_size_target > MAX_TEAM_SIZE) {
-    throw new Error(`A team has to be between ${MIN_TEAM_SIZE} and ${MAX_TEAM_SIZE} people`);
-  }
-  if (!own_role_id) throw new Error('A role is required');
+export async function updateProject(
+  projectId,
+  { title, description, team_size_target, own_role_id, roles_needed },
+  { memberCount = 1 } = {}
+) {
+  // The same rules as createProject, from the same function — an edit must
+  // not be able to save what a create would have refused.
+  //
+  // `memberCount` is how many people already hold a seat. The caller knows
+  // it (EditProject has it from getProject) and the client cannot without
+  // an extra round trip, so it is passed in. It only affects the two rules
+  // that depend on the roster — the target can't drop below it, and the
+  // open seats are counted from it — and update_project() re-checks both
+  // server-side from the real roster, so a wrong value here cannot let a
+  // bad edit through.
+  const { values, errors, isValid } = validateProject(
+    { title, description, team_size_target, own_role_id, roles_needed },
+    { memberCount }
+  );
+  if (!isValid) throw new ValidationError(errors);
 
-  const seen = new Set();
-  for (const r of roles_needed) {
-    if (!r.role_id) throw new Error('Every role you list needs a role selected');
-    if (seen.has(r.role_id)) throw new Error('You listed the same role twice');
-    seen.add(r.role_id);
-  }
   assertRolesMatchSkills(roles_needed);
 
   if (USE_MOCKS) {
@@ -540,9 +541,10 @@ export async function updateProject(projectId, { title, description, team_size_t
     }
 
     Object.assign(project, {
-      title,
-      description,
-      team_size_target,
+      // The validated, trimmed values — update_project() btrims server-side.
+      title: values.title,
+      description: values.description,
+      team_size_target: values.team_size_target,
       status: roster.length >= team_size_target ? 'full' : 'open',
     });
     team.formed_at = roster.length >= team_size_target ? team.formed_at || new Date().toISOString() : null;
@@ -550,8 +552,18 @@ export async function updateProject(projectId, { title, description, team_size_t
     const mine = roster.find((tm) => tm.user_id === id);
     mine.role_id = own_role_id;
 
+    // Roles whose seats are all filled sit at quantity_needed = 0 and are
+    // hidden from the form (composeProject filters them out), so the
+    // creator never saw them and cannot have meant to remove them. Keeping
+    // them preserves the skill pinned to each one, so the seat can reopen
+    // if that member leaves. Mirrors update_project() in
+    // supabase/17_keep_filled_roles_on_edit.sql.
+    const submitted = new Set(roles_needed.map((r) => r.role_id));
     for (let i = projectRolesNeeded.length - 1; i >= 0; i -= 1) {
-      if (projectRolesNeeded[i].project_id === projectId) projectRolesNeeded.splice(i, 1);
+      const row = projectRolesNeeded[i];
+      if (row.project_id !== projectId) continue;
+      if (row.quantity_needed === 0 && !submitted.has(row.role_id)) continue;
+      projectRolesNeeded.splice(i, 1);
     }
     for (const r of roles_needed) {
       projectRolesNeeded.push({
@@ -567,9 +579,9 @@ export async function updateProject(projectId, { title, description, team_size_t
 
   const { error } = await supabase.rpc('update_project', {
     p_project_id: projectId,
-    p_title: title,
-    p_description: description,
-    p_team_size_target: team_size_target,
+    p_title: values.title,
+    p_description: values.description,
+    p_team_size_target: values.team_size_target,
     p_own_role_id: own_role_id,
     p_roles_needed: roles_needed,
   });
