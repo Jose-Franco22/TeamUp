@@ -15,7 +15,7 @@ const SessionContext = createContext(null);
 async function loadProfile(authUserId) {
   const { data, error } = await supabase
     .from('users')
-    .select('id, email, name, bio, availability_hours, github_url')
+    .select('id, email, name, bio, availability_hours, github_url, is_admin')
     .eq('id', authUserId)
     .single();
   if (error) return null;

@@ -2,7 +2,7 @@
 // needs a session, signing out goes to the sign-in page, and the
 // first-sign-in walkthrough shows once per student.
 import { describe, expect, test } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import App from './App';
@@ -116,5 +116,61 @@ describe('first-sign-in walkthrough', () => {
     await user.click(screen.getByRole('button', { name: 'Browse projects' }));
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(path()).toBe('/browse');
+  });
+});
+
+describe('admin access (#36)', () => {
+  test.each(['/admin', '/admin/students', '/admin/teams/t-parking', '/admin/students/u-adan'])('students opening %s are redirected without admin navigation', async (start) => {
+    renderApp(start, { signedInAs: 'u-adan' });
+    await waitFor(() => expect(path()).toBe('/browse'));
+    expect(screen.queryByRole('heading', { name: 'Administration' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
+  test('guests opening /admin must sign in', async () => {
+    renderApp('/admin');
+    await waitFor(() => expect(path()).toBe('/login'));
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
+  test('an instructor sees the admin page and navigation without the student walkthrough', async () => {
+    renderApp('/admin', { signedInAs: 'u-instructor', onboarded: false });
+    expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(screen.queryByRole('link', { name: 'Create a project' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Your team' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  test.each(['/', '/login', '/browse', '/projects/new', '/requests', '/team'])('an instructor opening %s lands on /admin', async (start) => {
+    renderApp(start, { signedInAs: 'u-instructor' });
+    await waitFor(() => expect(path()).toBe('/admin'));
+    expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
+  });
+
+  test('admin sign-out removes admin navigation and returns to login', async () => {
+    renderApp('/admin', { signedInAs: 'u-instructor' });
+    await screen.findByRole('heading', { name: 'Administration' });
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(path()).toBe('/login'));
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
+  test('an admin can follow dashboard links into any team and student details (#37)', async () => {
+    renderApp('/admin', { signedInAs: 'u-instructor' });
+    const teams = await screen.findByRole('table', { name: 'All teams' });
+    const user = userEvent.setup();
+    await user.click(within(teams).getByRole('link', { name: 'Campus parking tracker' }));
+    expect(await screen.findByRole('heading', { name: 'Campus parking tracker' })).toBeInTheDocument();
+    expect(path()).toBe('/admin/teams/t-parking');
+    await user.click(screen.getByRole('link', { name: 'Jose Franco Garza' }));
+    expect(await screen.findByRole('heading', { name: 'Jose Franco Garza' })).toBeInTheDocument();
+    expect(path()).toBe('/admin/students/u-jose');
+    await user.click(screen.getByRole('link', { name: 'Back to dashboard' }));
+    expect(await screen.findByRole('table', { name: 'Unplaced students' })).toBeInTheDocument();
+    const students = screen.getByRole('table', { name: 'Unplaced students' });
+    await user.click(within(students).getByRole('link', { name: 'Adan Barrera' }));
+    expect(await screen.findByRole('heading', { name: 'Adan Barrera' })).toBeInTheDocument();
+    expect(screen.getByText('Not on a team.')).toBeInTheDocument();
   });
 });
