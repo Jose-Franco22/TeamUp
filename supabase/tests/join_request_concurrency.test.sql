@@ -1,4 +1,4 @@
--- Two accepts racing for the last seat (15_join_request_responses.sql):
+-- Two accepts racing for the last seat (21_join_request_responses.sql):
 -- one succeeds and the other is refused, never both.
 --
 -- A race needs two real connections, and each has to see data the other
@@ -22,8 +22,8 @@ select set_config('tests.ben', tests.sign_in_with_microsoft('race-ben@utrgv.edu'
 select set_config('tests.role', (select id from public.roles where name = 'Frontend Developer')::text, false);
 
 with p as (
-  insert into public.projects (creator_id, title, team_size_target)
-  values (current_setting('tests.owner')::uuid, 'Race Project', 2)
+  insert into public.projects (creator_id, title, description, team_size_target)
+  values (current_setting('tests.owner')::uuid, 'Race Project', 'Two accepts racing for one seat.', 2)
   returning id
 )
 select set_config('tests.project', id::text, false) from p;

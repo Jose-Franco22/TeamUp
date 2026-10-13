@@ -1,7 +1,7 @@
 -- Accepting/declining join requests: full-team check, a race-safe last
--- seat, and notifying the requester. Run after 14_validate_profile_rules.sql.
+-- seat, and notifying the requester. Run after 20_leave_team_rules.sql.
 --
--- Supersedes respond_to_join_request() from 04_roles_and_team_deletion.sql
+-- Supersedes respond_to_join_request() from 15_release_filled_roles.sql
 -- (same signature, so the frontend call doesn't change). What's new:
 --
 --   * Accepting into a team that's already full is refused. Before, a
@@ -11,47 +11,21 @@
 --     last seat at the same moment: exactly one wins. The project row is
 --     locked before the roster is counted, so the second accept waits for
 --     the first to commit, then counts again and sees the team is full.
---   * The requester gets one notification row either way.
+--   * The requester gets one notification either way.
 --
--- This reverses TODO-backend.md's "notifications was considered and
--- deliberately dropped" for this one case: the join-request story requires
--- the requester to hear back. It's the "one table, no infrastructure"
--- activity-feed version that note describes, not push or email.
+-- Accepting still releases the role the student fills, as in
+-- 15_release_filled_roles.sql.
 
 -- --- notifications -------------------------------------------------------
--- message is written at insert time, with the project title in it, so a
--- notification still reads correctly after the project is renamed or
--- deleted — which is also why the foreign keys SET NULL instead of
--- cascading: a declined student should still see "declined" after the
--- owner deletes the project.
-create table if not exists public.notifications (
-  id              uuid primary key default gen_random_uuid(),
-  user_id         uuid not null references public.users(id) on delete cascade,
-  kind            text not null check (kind in ('request_accepted', 'request_declined')),
-  join_request_id uuid references public.join_requests(id) on delete set null,
-  project_id      uuid references public.projects(id) on delete set null,
-  message         text not null,
-  read_at         timestamptz,
-  created_at      timestamptz not null default now()
-);
-create index if not exists notifications_user_id_idx on public.notifications(user_id, created_at desc);
-
--- Students read and mark-as-read their own notifications. There's no
--- INSERT/DELETE policy: rows are only written by respond_to_join_request.
-alter table public.notifications enable row level security;
-
-drop policy if exists "notifications_select_own" on public.notifications;
-create policy "notifications_select_own"
-  on public.notifications for select
-  to authenticated
-  using (user_id = auth.uid());
-
-drop policy if exists "notifications_update_own" on public.notifications;
-create policy "notifications_update_own"
-  on public.notifications for update
-  to authenticated
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
+-- The shared table from 20_leave_team_rules.sql gains this story's two
+-- kinds. actor_id is the project's creator (who responded); the app works
+-- out the text from kind + project_id, as it does for 'member_left'. No
+-- table or policies here: marking read is 20's mark_notifications_read().
+alter table public.notifications
+  drop constraint if exists notifications_kind_check;
+alter table public.notifications
+  add constraint notifications_kind_check
+  check (kind in ('member_left', 'request_accepted', 'request_declined'));
 
 -- --- respond_to_join_request ---------------------------------------------
 -- Lock order, always the same so concurrent calls can't deadlock each
@@ -133,6 +107,9 @@ begin
     insert into public.team_members (user_id, team_id, role_id)
     values (v_request.user_id, v_team.id, p_role_id);
 
+    -- The seat they just took is no longer open (15_release_filled_roles.sql).
+    perform public.release_project_role(v_project.id, p_role_id);
+
     if v_count + 1 >= v_project.team_size_target then
       update public.projects set status = 'full' where id = v_project.id;
       update public.teams set formed_at = coalesce(formed_at, now()) where id = v_team.id;
@@ -148,16 +125,12 @@ begin
         and id <> p_request_id;
   end if;
 
-  insert into public.notifications (user_id, kind, join_request_id, project_id, message)
+  insert into public.notifications (user_id, kind, project_id, actor_id)
   values (
     v_request.user_id,
     case p_status when 'accepted' then 'request_accepted' else 'request_declined' end,
-    v_request.id,
     v_project.id,
-    case p_status
-      when 'accepted' then format('You were accepted onto %s', v_project.title)
-      else format('Your request to join %s was declined', v_project.title)
-    end
+    caller
   );
 
   select * into v_request from public.join_requests where id = p_request_id;

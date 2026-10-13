@@ -23,7 +23,7 @@ const fake = vi.hoisted(() => {
       let id;
       let patch = null;
       const query = {
-        select: () => query,
+        select: vi.fn(() => query),
         update: (values) => {
           patch = values;
           return query;
@@ -98,6 +98,24 @@ beforeEach(() => {
 });
 
 describe('SessionContext (real mode)', () => {
+  test('loads admin status from the database profile, not OAuth metadata', async () => {
+    signedInAs({ ...JANE, is_admin: true });
+    const { api } = await renderSession();
+    await waitFor(() => expect(api().status).toBe('authenticated'));
+    expect(api().user.is_admin).toBe(true);
+    expect(fake.supabase.from.mock.results.some(({ value }) =>
+      value.select.mock.calls.some(([columns]) => columns.includes('is_admin'))
+    )).toBe(true);
+  });
+
+  test('OAuth metadata cannot turn a database student into an admin', async () => {
+    signedInAs({ ...JANE, is_admin: false });
+    fake.state.session.user.user_metadata = { is_admin: true };
+    const { api } = await renderSession();
+    await waitFor(() => expect(api().status).toBe('authenticated'));
+    expect(api().user.is_admin).toBe(false);
+  });
+
   test('no session means guest', async () => {
     await renderSession();
     await waitFor(() => expect(status()).toMatch(/^guest:none/));

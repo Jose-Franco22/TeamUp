@@ -38,7 +38,7 @@ function MicrosoftLogin() {
     <section className="card auth-card">
       <h2>Sign in to get started</h2>
       <p className="desc">
-        TeamUp is only open to UTRGV students — sign in with your @utrgv.edu Microsoft account.
+        Sign in with your @utrgv.edu Microsoft account.
       </p>
       {error && (
         <p className="inline-error" role="alert">
@@ -68,8 +68,9 @@ function MockLogin() {
   const [selected, setSelected] = useState(users[0].id);
 
   const onATeam = (id) => teamMembers.some((tm) => tm.user_id === id);
-  const free = users.filter((u) => !onATeam(u.id));
-  const seated = users.filter((u) => onATeam(u.id));
+  const free = users.filter((u) => !u.is_admin && !onATeam(u.id));
+  const seated = users.filter((u) => !u.is_admin && onATeam(u.id));
+  const admins = users.filter((u) => u.is_admin);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -103,6 +104,13 @@ function MockLogin() {
                 </option>
               ))}
             </optgroup>
+            <optgroup label="Administrators">
+              {admins.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} — {u.email}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </div>
 
@@ -119,12 +127,12 @@ function MockLogin() {
 // The only page a guest can reach — every other route redirects here — so it
 // also has to explain what TeamUp is.
 export default function Login() {
-  const { status } = useSession();
+  const { status, user } = useSession();
   const location = useLocation();
 
   if (status === 'loading') return <Loading label="Checking session" />;
   if (status === 'authenticated') {
-    return <Navigate to={location.state?.from?.pathname || '/browse'} replace />;
+    return <Navigate to={location.state?.from?.pathname || (user?.is_admin ? '/admin' : '/browse')} replace />;
   }
 
   return (

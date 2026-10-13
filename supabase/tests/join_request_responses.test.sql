@@ -1,8 +1,8 @@
--- Accepting/declining join requests (15_join_request_responses.sql).
+-- Accepting/declining join requests (21_join_request_responses.sql).
 -- The two-accepts-at-once race is in join_request_concurrency.test.sql,
 -- since it needs a second connection and data that's actually committed.
 begin;
-select plan(19);
+select plan(20);
 
 select set_config('tests.owner', tests.sign_in_with_microsoft('owner01@utrgv.edu', 'Owner')::text, true);
 select set_config('tests.owner2', tests.sign_in_with_microsoft('owner02@utrgv.edu', 'Owner Two')::text, true);
@@ -16,10 +16,10 @@ select set_config('tests.be', (select id from public.roles where name = 'Backend
 -- Owner's project: team of 3 (owner + 2 seats). Owner Two's: team of 4.
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select set_config('tests.p1',
-  (public.create_project('Trail Finder', '', 3::smallint, current_setting('tests.pm')::uuid, '[]'::jsonb)).id::text, true);
+  (public.create_project('Trail Finder', 'Find hiking trails near campus.', 3::smallint, current_setting('tests.pm')::uuid, '[]'::jsonb)).id::text, true);
 select tests.authenticate_as(current_setting('tests.owner2')::uuid);
 select set_config('tests.p2',
-  (public.create_project('Study Buddy', '', 4::smallint, current_setting('tests.pm')::uuid, '[]'::jsonb)).id::text, true);
+  (public.create_project('Study Buddy', 'Match classmates into study groups.', 4::smallint, current_setting('tests.pm')::uuid, '[]'::jsonb)).id::text, true);
 
 -- Ana asks to join both; Ben and Cal ask to join the owner's.
 select tests.authenticate_as(current_setting('tests.ana')::uuid);
@@ -140,6 +140,11 @@ select results_eq(
   format($q$select kind from public.notifications where user_id = %L$q$, current_setting('tests.cal')),
   $$values ('request_declined')$$,
   'a declined requester gets exactly one notification');
+
+select results_eq(
+  format($q$select actor_id, project_id from public.notifications where user_id = %L$q$, current_setting('tests.cal')),
+  format($q$values (%L::uuid, %L::uuid)$q$, current_setting('tests.owner'), current_setting('tests.p1')),
+  'the notification names the owner who responded, and the project');
 
 select tests.authenticate_as(current_setting('tests.ben')::uuid);
 select results_eq(

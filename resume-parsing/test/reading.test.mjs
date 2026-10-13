@@ -92,6 +92,39 @@ describe('small-caps headings from a PDF', () => {
     assert.equal(headingInfo('Nicolas Guerra'), null);
   });
 
+  // Stitching removes a space, so an all-capitals line of five words that
+  // begins with a one-letter word shrinks to four and starts passing the
+  // "<= 4 words" test the all-capitals fallback uses. That turned a bullet
+  // into a heading, which ended the real section it sat in and sent the
+  // months and projects below it to the wrong place — the exact bug the
+  // small-caps fix exists to prevent.
+  test('an all-capitals sentence does not become a heading once stitched', () => {
+    for (const line of [
+      'I AM A TEAM LEAD',
+      'A GREAT TEAM PLAYER HERE',
+      'WORKED AT A BIG COMPANY',
+      'I RAN A SMALL TEAM',
+    ]) {
+      assert.equal(headingInfo(line), null, `"${line}" was read as a heading`);
+    }
+  });
+
+  test('a genuinely short all-capitals line is still a heading', () => {
+    assert.equal(headingInfo('AWARDS').name, 'other');
+    assert.equal(headingInfo('VOLUNTEER WORK').name, 'other');
+  });
+
+  test('a section it sits in survives an all-capitals bullet', () => {
+    const lines = [
+      'E XPERIENCE',
+      'Research Assistant, Jan 2024 - May 2025',
+      'I AM A TEAM LEAD',
+      'Built a pipeline with OpenCV.',
+    ];
+    const { sectionOf } = sectionMap(lines);
+    assert.equal(sectionOf(3), 'experience', 'the bullet ended the experience section');
+  });
+
   test('the sections of a small-caps resume are found', () => {
     const lines = [
       'Nicolas Guerra',
@@ -138,6 +171,21 @@ describe('terms the catalog does not have', () => {
 
   test('a spoken-languages line is not a skills list', () => {
     assert.deepEqual(termsIn(['Spoken Languages: English (Fluent), Spanish (Native)']), []);
+  });
+
+  test('and neither is the same line with no label in front of it', () => {
+    assert.deepEqual(termsIn(['English (Fluent), Spanish (Native)']), []);
+  });
+
+  // The reason the unlabelled check looks for a proficiency word in
+  // brackets rather than anywhere on the line: "Native" is part of real
+  // skills, and a looser test would discard the whole line it sits on.
+  // ("React Native" itself is absorbed by the React alias, which is
+  // separate, long-standing behaviour — Kubernetes is the one that must
+  // survive here.)
+  test('a skills line mentioning Native is not thrown away', () => {
+    assert.ok(termsIn(['React Native, Kubernetes']).includes('Kubernetes'));
+    assert.ok(termsIn(['Native app development, Terraform']).includes('Terraform'));
   });
 
   test('proficiency words are not skills', () => {

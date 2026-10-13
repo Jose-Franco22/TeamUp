@@ -145,7 +145,14 @@ describe('list updates', () => {
     expect(screen.getByLabelText('Role for Rita Cano')).toBeInTheDocument();
     expect(client.respondToRequest).toHaveBeenCalledWith('jr-1', 'accepted', 'r-design');
     expect(teamMembers).toContainEqual({ team_id: 't-parking', user_id: 'u-adan', role_id: 'r-design' });
-    expect(notifications).toEqual([expect.objectContaining({ user_id: 'u-adan', kind: 'request_accepted' })]);
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        user_id: 'u-adan',
+        kind: 'request_accepted',
+        project_id: 'p-parking',
+        actor_id: 'u-nicolas',
+      }),
+    ]);
     // The page refreshed in place; it never fell back to the loading screen.
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });

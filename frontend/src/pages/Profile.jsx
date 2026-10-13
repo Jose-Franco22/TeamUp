@@ -110,7 +110,7 @@ export default function Profile() {
       <div className="head">
         <div>
           <h1>Your profile</h1>
-          <p>What teams see when your name comes up</p>
+          <p>{data.is_admin ? 'Your instructor account' : 'What teams see when your name comes up'}</p>
         </div>
       </div>
 
@@ -188,7 +188,7 @@ export default function Profile() {
         </div>
       </section>
 
-      <section className="card">
+      {!data.is_admin && <section className="card">
         <h2>Skills</h2>
         <p className="desc">
           Teams are matched to you on these. Items marked <em>imported</em> came from your resume — check
@@ -224,7 +224,7 @@ export default function Profile() {
           <SkillPicker mySkills={data.skills} onAdded={setData} />
           <ResumeImport mySkills={data.skills} onImported={setData} />
         </div>
-      </section>
+      </section>}
     </>
   );
 }

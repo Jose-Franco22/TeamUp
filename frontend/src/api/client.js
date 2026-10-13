@@ -10,18 +10,27 @@ import {
   projects,
   projectRolesNeeded,
   joinRequests,
-  notifications,
   teams,
   teamMembers,
   users,
   roles as allRoles,
   skills,
   userSkills,
+  appSettings,
+  notifications,
   buildProject,
   skillsForUser,
+  profileEvidence,
+  evidenceForUser,
 } from './mockData';
 import { supabase } from '../lib/supabaseClient';
-import { ValidationError, fieldErrorsFromDbError, validateProfile } from '../lib/validation';
+import { isOpenProject } from '../lib/browseFilters';
+import {
+  ValidationError,
+  fieldErrorsFromDbError,
+  validateProfile,
+  validateProject,
+} from '../lib/validation';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
 
@@ -46,6 +55,137 @@ export function setSessionUserId(id) {
 function requireSessionUserId() {
   if (!sessionUserId) throw new Error('Not signed in');
   return sessionUserId;
+}
+
+function requireStudentSessionUserId() {
+  const id = requireSessionUserId();
+  if (users.find((u) => u.id === id)?.is_admin) {
+    throw new Error('Admin accounts cannot create or join student teams');
+  }
+  return id;
+}
+
+function requireAdminSessionUserId() {
+  const id = requireSessionUserId();
+  if (!users.find((u) => u.id === id)?.is_admin) throw new Error('Admin access required');
+  return id;
+}
+
+// The database checks the caller's own role, never a browser-supplied user id.
+export async function getAdminAccess() {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    return true;
+  }
+  const { error } = await supabase.rpc('require_admin');
+  if (error) throw error;
+  return true;
+}
+
+// --- Admin dashboard (#37) ---------------------------------------------
+// Detail objects use team ids for /admin/teams/:id and keep project_id
+// separately. No admin view writes to student profiles, requests or rosters.
+function mockPendingRequests(predicate) {
+  return joinRequests
+    .filter((r) => r.status === 'pending' && predicate(r))
+    .slice()
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || a.id.localeCompare(b.id));
+}
+
+function mockAdminTeam(team) {
+  const p = buildProject(projects.find((project) => project.id === team.project_id), sessionUserId);
+  return {
+    id: team.id, project_id: p.id, title: p.title, description: p.description,
+    creator_id: p.creator_id, creator_name: p.creator_name,
+    team_size_target: p.team_size_target, status: p.status, formed_at: p.formed_at,
+    member_count: p.member_count,
+    members: p.members.map((m) => {
+      const u = users.find((student) => student.id === m.user_id);
+      return {
+        user_id: m.user_id, name: m.name, email: u.email,
+        role_id: m.role_id, role_name: m.role, availability_hours: u.availability_hours,
+      };
+    }),
+    roles_needed: p.roles_needed,
+    pending_requests: mockPendingRequests((r) => r.project_id === p.id)
+      .filter((r) => !users.find((u) => u.id === r.user_id)?.is_admin)
+      .map((r) => ({
+        id: r.id, user_id: r.user_id,
+        user_name: users.find((u) => u.id === r.user_id).name, created_at: r.created_at,
+      })),
+  };
+}
+
+function mockAdminStudent(student) {
+  const membership = teamMembers.find((m) => m.user_id === student.id);
+  const team = membership && teams.find((t) => t.id === membership.team_id);
+  const project = team && projects.find((p) => p.id === team.project_id);
+  return {
+    id: student.id, name: student.name, email: student.email, bio: student.bio,
+    availability_hours: student.availability_hours, github_url: student.github_url,
+    skills: skillsForUser(student.id),
+    membership: membership ? {
+      team_id: team.id, project_id: project.id, project_title: project.title,
+      role_id: membership.role_id, role_name: allRoles.find((r) => r.id === membership.role_id)?.name ?? null,
+    } : null,
+    pending_requests: mockPendingRequests((r) => r.user_id === student.id).map((r) => {
+      const p = projects.find((project) => project.id === r.project_id);
+      return {
+        id: r.id, project_id: p.id, team_id: teams.find((t) => t.project_id === p.id)?.id ?? null,
+        project_title: p.title, created_at: r.created_at,
+      };
+    }),
+  };
+}
+
+export async function getAdminDashboard() {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const teamList = teams.map(mockAdminTeam).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+    const unplaced = users
+      .filter((u) => !u.is_admin && !teamMembers.some((m) => m.user_id === u.id))
+      .map(mockAdminStudent)
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    return {
+      teams: teamList, unplaced_students: unplaced,
+      summary: {
+        formed_teams: teamList.filter((t) => t.status === 'full').length,
+        open_teams: teamList.filter((t) => t.status === 'open').length,
+        unplaced_students: unplaced.length,
+      },
+    };
+  }
+  const { data, error } = await supabase.rpc('admin_dashboard');
+  if (error) throw error;
+  return data;
+}
+
+export async function getAdminTeam(teamId) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const team = teams.find((t) => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+    return mockAdminTeam(team);
+  }
+  const { data, error } = await supabase.rpc('admin_team_details', { p_team_id: teamId });
+  if (error) throw error;
+  return data;
+}
+
+export async function getAdminStudent(studentId) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const student = users.find((u) => u.id === studentId && !u.is_admin);
+    if (!student) throw new Error('Student not found');
+    return mockAdminStudent(student);
+  }
+  const { data, error } = await supabase.rpc('admin_student_details', { p_student_id: studentId });
+  if (error) throw error;
+  return data;
 }
 
 async function getViewerId() {
@@ -115,12 +255,30 @@ async function fetchViewerRequestMap(viewerId) {
   return byProject;
 }
 
+// Guests cannot read team_members at all, so their seat counts come from one
+// batched aggregate for every project on the page (18_admin_access.sql).
+// Signed-in viewers read the roster itself and need no extra call.
+async function fetchGuestMemberCounts(viewerId, rows) {
+  if (viewerId) return {};
+  const ids = rows.filter((row) => embeddedOne(row.teams)).map((row) => row.id);
+  if (ids.length === 0) return {};
+  const { data, error } = await supabase.rpc('project_member_counts', { p_project_ids: ids });
+  if (error) throw error;
+  return Object.fromEntries((data ?? []).map((r) => [r.project_id, r.member_count]));
+}
+
 // Shapes one `projects` row (as fetched via PROJECT_SELECT) into the same
 // object buildProject() produces from the mocks.
-async function composeProject(row, viewerId, viewerRequestsByProject) {
+function composeProject(row, viewerId, viewerRequestsByProject, guestMemberCounts) {
   // `skills` embeds as null when skill_id is null — a role listed without a
   // specific skill attached, which the schema allows on purpose.
-  const roles_needed = (row.project_roles_needed || []).map((r) => ({
+  // A role whose seats have all been filled sits at quantity_needed = 0
+  // (see supabase/15_release_filled_roles.sql). It is kept rather than
+  // deleted so the creator does not lose the skill pinned to it, but it is
+  // not an open role any more.
+  const roles_needed = (row.project_roles_needed || [])
+    .filter((r) => r.quantity_needed > 0)
+    .map((r) => ({
     role_id: r.role_id,
     role_name: r.roles?.name ?? null,
     skill_id: r.skill_id ?? null,
@@ -137,7 +295,7 @@ async function composeProject(row, viewerId, viewerRequestsByProject) {
   let avg_availability_hours = null;
 
   if (viewerId) {
-    // Authenticated: full member list, per TODO-backend.md.
+    // Any signed-in viewer can read the roster; RLS leaves out admin accounts.
     members = rawMembers.map((tm) => ({
       user_id: tm.user_id,
       name: tm.users.name,
@@ -149,11 +307,8 @@ async function composeProject(row, viewerId, viewerRequestsByProject) {
       ? Math.round(rawMembers.reduce((sum, tm) => sum + (tm.users.availability_hours || 0), 0) / rawMembers.length)
       : 0;
   } else if (team) {
-    // Guest: team_members RLS returns nothing, so get the count from the
-    // one function that's allowed to see past that (see 03_functions.sql).
-    const { data: count, error } = await supabase.rpc('project_member_count', { p_project_id: row.id });
-    if (error) throw error;
-    member_count = count ?? 0;
+    // Guest: seat count only, no identities or availability.
+    member_count = guestMemberCounts?.[row.id] ?? 0;
   }
 
   return {
@@ -195,10 +350,22 @@ function assertRolesMatchSkills(roles_needed) {
 
 // --- Projects ----------------------------------------------------------
 
-export async function getProjects() {
+// Open projects by default (issue #31): a full team cannot take anyone, so
+// listing it is a dead end for a seeker. Browse passes `{ onlyOpen: false }`
+// explicitly because it offers the switch and has to say how many projects
+// the switch is hiding — an empty screen with no explanation is worse than a
+// full project you can't join.
+//
+// The filter runs on composed rows rather than in the query so that mock mode
+// and real mode share one definition of "open" (lib/browseFilters.js). A
+// `.neq('status', 'full')` in the SQL would be a second, slightly different
+// rule that nothing tests.
+export async function getProjects({ onlyOpen = true } = {}) {
+  const keep = (list) => (onlyOpen ? list.filter(isOpenProject) : list);
+
   if (USE_MOCKS) {
     await delay();
-    return projects.map((p) => buildProject(p, sessionUserId));
+    return keep(projects.map((p) => buildProject(p, sessionUserId)));
   }
   const viewerId = await getViewerId();
   const [{ data: rows, error }, requestMap] = await Promise.all([
@@ -206,7 +373,8 @@ export async function getProjects() {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw error;
-  return Promise.all(rows.map((row) => composeProject(row, viewerId, requestMap)));
+  const guestCounts = await fetchGuestMemberCounts(viewerId, rows);
+  return keep(rows.map((row) => composeProject(row, viewerId, requestMap, guestCounts)));
 }
 
 export async function getProject(id) {
@@ -222,7 +390,7 @@ export async function getProject(id) {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw new Error('Project not found');
-  return composeProject(row, viewerId, requestMap);
+  return composeProject(row, viewerId, requestMap, await fetchGuestMemberCounts(viewerId, [row]));
 }
 
 // `roles_needed` is an array of { role_id, skill_id, quantity_needed }, where
@@ -238,40 +406,25 @@ export async function createProject({
   creator_role_id,
   roles_needed,
 }) {
-  // A senior project team is 2 to 4 students. Checked here so both modes
-  // reject it the same way; create_project() must re-check server-side.
-  if (team_size_target < MIN_TEAM_SIZE || team_size_target > MAX_TEAM_SIZE) {
-    throw new Error(`A team has to be between ${MIN_TEAM_SIZE} and ${MAX_TEAM_SIZE} people`);
-  }
+  // Title length, description length, team size, duplicate roles and the
+  // seat arithmetic all live in lib/validation.js, so the form and this
+  // last check before sending cannot disagree. `create_project()` re-checks
+  // every one of them server-side — see supabase/16_project_validation.sql,
+  // which is the real boundary.
+  //
+  // The creator is seated by create_project itself, so memberCount is 1:
+  // the roles listed here recruit for the *remaining* seats.
+  const { values, errors, isValid } = validateProject(
+    { title, description, team_size_target, own_role_id: creator_role_id, roles_needed },
+    { memberCount: 1 }
+  );
+  if (!isValid) throw new ValidationError(errors);
 
-  if (!creator_role_id) throw new Error('A role is required to create a project');
-
-  // (project_id, role_id) is the primary key — the same role twice would be
-  // a constraint violation, so reject it here with a readable message. The
-  // form prevents it too, but this is the shared check both modes run.
-  const seen = new Set();
-  for (const r of roles_needed) {
-    if (!r.role_id) throw new Error('Every role you list needs a role selected');
-    if (seen.has(r.role_id)) throw new Error('You listed the same role twice');
-    seen.add(r.role_id);
-  }
   assertRolesMatchSkills(roles_needed);
-
-  // The creator is seated by createProject itself, so the roles listed here
-  // are recruiting for the *remaining* seats — one fewer than the target.
-  // Without this you could set a team of 3 and then ask for eight people.
-  const openSeats = team_size_target - 1;
-  const assigned = roles_needed.reduce((sum, r) => sum + (Number(r.quantity_needed) || 0), 0);
-  if (assigned > openSeats) {
-    throw new Error(
-      `A team of ${team_size_target} has ${openSeats} open seat${openSeats === 1 ? '' : 's'} ` +
-        `besides you, but you listed ${assigned} people`
-    );
-  }
 
   if (USE_MOCKS) {
     await delay();
-    const id = requireSessionUserId();
+    const id = requireStudentSessionUserId();
     // A student can only be on one team — same rule as createJoinRequest.
     const onAnyTeam = teamMembers.some((tm) => tm.user_id === id);
     if (onAnyTeam) throw new Error('You are already on a team and cannot create another project');
@@ -280,9 +433,11 @@ export async function createProject({
     const project = {
       id: projectId,
       creator_id: id,
-      title,
-      description,
-      team_size_target,
+      // The validated, trimmed values — create_project() btrims server-side,
+      // so mock mode has to store the same thing.
+      title: values.title,
+      description: values.description,
+      team_size_target: values.team_size_target,
       status: 'open',
       created_at: new Date().toISOString(),
     };
@@ -319,9 +474,9 @@ export async function createProject({
   // caller already on any team) plus the project/team/roster/roles inserts,
   // all in one transaction — see TODO-backend.md and supabase/03_functions.sql.
   const { data, error } = await supabase.rpc('create_project', {
-    p_title: title,
-    p_description: description,
-    p_team_size_target: team_size_target,
+    p_title: values.title,
+    p_description: values.description,
+    p_team_size_target: values.team_size_target,
     p_creator_role_id: creator_role_id,
     p_roles_needed: roles_needed,
   });
@@ -347,18 +502,27 @@ export async function createProject({
 // Raising the target on a project that had filled reopens it, and lowering
 // it onto the current roster closes it — projects.status and teams.formed_at
 // both follow from the same comparison respond_to_join_request makes.
-export async function updateProject(projectId, { title, description, team_size_target, own_role_id, roles_needed }) {
-  if (team_size_target < MIN_TEAM_SIZE || team_size_target > MAX_TEAM_SIZE) {
-    throw new Error(`A team has to be between ${MIN_TEAM_SIZE} and ${MAX_TEAM_SIZE} people`);
-  }
-  if (!own_role_id) throw new Error('A role is required');
+export async function updateProject(
+  projectId,
+  { title, description, team_size_target, own_role_id, roles_needed },
+  { memberCount = 1 } = {}
+) {
+  // The same rules as createProject, from the same function — an edit must
+  // not be able to save what a create would have refused.
+  //
+  // `memberCount` is how many people already hold a seat. The caller knows
+  // it (EditProject has it from getProject) and the client cannot without
+  // an extra round trip, so it is passed in. It only affects the two rules
+  // that depend on the roster — the target can't drop below it, and the
+  // open seats are counted from it — and update_project() re-checks both
+  // server-side from the real roster, so a wrong value here cannot let a
+  // bad edit through.
+  const { values, errors, isValid } = validateProject(
+    { title, description, team_size_target, own_role_id, roles_needed },
+    { memberCount }
+  );
+  if (!isValid) throw new ValidationError(errors);
 
-  const seen = new Set();
-  for (const r of roles_needed) {
-    if (!r.role_id) throw new Error('Every role you list needs a role selected');
-    if (seen.has(r.role_id)) throw new Error('You listed the same role twice');
-    seen.add(r.role_id);
-  }
   assertRolesMatchSkills(roles_needed);
 
   if (USE_MOCKS) {
@@ -387,9 +551,10 @@ export async function updateProject(projectId, { title, description, team_size_t
     }
 
     Object.assign(project, {
-      title,
-      description,
-      team_size_target,
+      // The validated, trimmed values — update_project() btrims server-side.
+      title: values.title,
+      description: values.description,
+      team_size_target: values.team_size_target,
       status: roster.length >= team_size_target ? 'full' : 'open',
     });
     team.formed_at = roster.length >= team_size_target ? team.formed_at || new Date().toISOString() : null;
@@ -397,8 +562,18 @@ export async function updateProject(projectId, { title, description, team_size_t
     const mine = roster.find((tm) => tm.user_id === id);
     mine.role_id = own_role_id;
 
+    // Roles whose seats are all filled sit at quantity_needed = 0 and are
+    // hidden from the form (composeProject filters them out), so the
+    // creator never saw them and cannot have meant to remove them. Keeping
+    // them preserves the skill pinned to each one, so the seat can reopen
+    // if that member leaves. Mirrors update_project() in
+    // supabase/17_keep_filled_roles_on_edit.sql.
+    const submitted = new Set(roles_needed.map((r) => r.role_id));
     for (let i = projectRolesNeeded.length - 1; i >= 0; i -= 1) {
-      if (projectRolesNeeded[i].project_id === projectId) projectRolesNeeded.splice(i, 1);
+      const row = projectRolesNeeded[i];
+      if (row.project_id !== projectId) continue;
+      if (row.quantity_needed === 0 && !submitted.has(row.role_id)) continue;
+      projectRolesNeeded.splice(i, 1);
     }
     for (const r of roles_needed) {
       projectRolesNeeded.push({
@@ -414,9 +589,9 @@ export async function updateProject(projectId, { title, description, team_size_t
 
   const { error } = await supabase.rpc('update_project', {
     p_project_id: projectId,
-    p_title: title,
-    p_description: description,
-    p_team_size_target: team_size_target,
+    p_title: values.title,
+    p_description: values.description,
+    p_team_size_target: values.team_size_target,
     p_own_role_id: own_role_id,
     p_roles_needed: roles_needed,
   });
@@ -467,6 +642,14 @@ export async function addResumeSkills(skillIds, evidence = []) {
     for (const skillId of skillIds) {
       const already = userSkills.some((row) => row.user_id === id && row.skill_id === skillId);
       if (!already) userSkills.push({ user_id: id, skill_id: skillId, source: 'resume' });
+    }
+    // Mirrors the real branch below, so an import in mock mode produces the
+    // same evidence the matching engine would score in production.
+    const confirmed = new Set(skillIds);
+    for (const e of evidence.filter((row) => confirmed.has(row.skill_id))) {
+      const existing = profileEvidence.find((row) => row.user_id === id && row.skill_id === e.skill_id);
+      if (existing) Object.assign(existing, e);
+      else profileEvidence.push({ user_id: id, ...e });
     }
     return getCurrentUser();
   }
@@ -551,11 +734,47 @@ export async function removeSkill(skillId) {
 
 // --- Current user ------------------------------------------------------
 
-const USER_SELECT = 'id, email, name, bio, availability_hours, github_url, user_skills ( source, skills ( id, name, category ) )';
+// profile_evidence rides along with the profile. Its RLS policy is
+// own-rows-only and this select is always `.eq('id', viewerId)`, so a student
+// only ever gets their own months and projects — nobody else's resume lines
+// come back. The matching engine reads them as `depth`; without them every
+// skill scores as a bare tag and no student can reach a strong fit.
+// profile_evidence is nested under user_skills, NOT under users.
+//
+// PostgREST can only embed across a real foreign key, and profile_evidence
+// has exactly one: the composite (user_id, skill_id) -> user_skills. There
+// is no FK to users, so asking for it beside user_skills returns PGRST200
+// ("could not find a relationship") and the whole profile fails to load.
+// Mock mode cannot catch that, because its shape is built by hand — see the
+// test in client.test.js that reads 07_profile_evidence.sql and asserts this
+// nesting, so the two cannot drift again.
+export const USER_SELECT =
+  'id, email, name, bio, availability_hours, github_url, is_admin, ' +
+  'user_skills ( source, skills ( id, name, category ), profile_evidence ( months, projects ) )';
+
+// PostgREST returns an embedded child as an object when it can tell the
+// relationship is one-to-one (profile_evidence's PK is its whole FK) and as
+// a one-element array otherwise. Which one depends on version and on how it
+// reads the keys, so accept both rather than betting on it.
+function embeddedEvidence(value) {
+  const row = Array.isArray(value) ? value[0] : value;
+  if (!row) return null;
+  return { months: row.months ?? 0, projects: row.projects ?? 0 };
+}
 
 function shapeUserRow(data) {
   const { user_skills, ...profile } = data;
-  return { ...profile, skills: (user_skills || []).map((us) => ({ ...us.skills, source: us.source })) };
+  const rows = user_skills || [];
+  const evidence = {};
+  for (const us of rows) {
+    const found = embeddedEvidence(us.profile_evidence);
+    if (found && us.skills?.id) evidence[us.skills.id] = found;
+  }
+  return {
+    ...profile,
+    skills: rows.map((us) => ({ ...us.skills, source: us.source })),
+    evidence,
+  };
 }
 
 export async function getCurrentUser() {
@@ -563,7 +782,7 @@ export async function getCurrentUser() {
     await delay();
     const id = requireSessionUserId();
     const u = users.find((x) => x.id === id);
-    return { ...u, skills: skillsForUser(id) };
+    return { ...u, skills: skillsForUser(id), evidence: evidenceForUser(id) };
   }
   const viewerId = requireViewerId(await getViewerId());
   const { data, error } = await supabase.from('users').select(USER_SELECT).eq('id', viewerId).single();
@@ -692,7 +911,7 @@ export async function getRequests() {
 export async function createJoinRequest(projectId) {
   if (USE_MOCKS) {
     await delay();
-    const id = requireSessionUserId();
+    const id = requireStudentSessionUserId();
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new Error('Project not found');
     if (project.creator_id === id) throw new Error('You cannot request to join your own project');
@@ -729,7 +948,7 @@ export async function createJoinRequest(projectId) {
 export async function respondToRequest(requestId, status, roleId) {
   if (USE_MOCKS) {
     await delay();
-    const me = requireSessionUserId();
+    const me = requireStudentSessionUserId();
     if (status === 'accepted' && !roleId) throw new Error('A role is required to accept a request');
     const r = joinRequests.find((x) => x.id === requestId);
     if (!r) throw new Error('Request not found');
@@ -737,7 +956,7 @@ export async function respondToRequest(requestId, status, roleId) {
     const team = teams.find((t) => t.project_id === r.project_id);
 
     // Every check runs before anything is mutated, in the same order as
-    // respond_to_join_request (15_join_request_responses.sql), which is one
+    // respond_to_join_request (21_join_request_responses.sql), which is one
     // transaction: a rejected accept must not leave the request marked
     // 'accepted' with nobody actually on the roster.
     if (project.creator_id !== me) throw new Error('Only the project creator can respond to this request');
@@ -745,6 +964,9 @@ export async function respondToRequest(requestId, status, roleId) {
     if (status === 'accepted') {
       if (teamMembers.filter((tm) => tm.team_id === team.id).length >= project.team_size_target) {
         throw new Error('This team is already full');
+      }
+      if (users.find((u) => u.id === r.user_id)?.is_admin) {
+        throw new Error('Admin accounts cannot create or join student teams');
       }
       // team_members.user_id is the primary key, so a stale request would
       // otherwise fail the insert with a raw constraint violation.
@@ -778,22 +1000,19 @@ export async function respondToRequest(requestId, status, roleId) {
     }
 
     notifications.push({
-      id: `n-${notifications.length + 1}`,
+      id: `n-${Date.now()}-${notifications.length}`,
       user_id: r.user_id,
       kind: status === 'accepted' ? 'request_accepted' : 'request_declined',
-      join_request_id: r.id,
       project_id: project.id,
-      message:
-        status === 'accepted'
-          ? `You were accepted onto ${project.title}`
-          : `Your request to join ${project.title} was declined`,
-      read_at: null,
+      actor_id: me,
+      by_admin: false,
       created_at: new Date().toISOString(),
+      read_at: null,
     });
     return r;
   }
   // respond_to_join_request() is the one-transaction accept/decline flow —
-  // see supabase/15_join_request_responses.sql for the current version.
+  // see supabase/21_join_request_responses.sql for the current version.
   const { data, error } = await supabase.rpc('respond_to_join_request', {
     p_request_id: requestId,
     p_status: status,
@@ -815,6 +1034,7 @@ export async function getMyTeam() {
     const project = buildProject(projects.find((p) => p.id === team.project_id), id);
     return {
       ...project,
+      formation_deadline: appSettings.formation_deadline,
       members: project.members.map((m) => {
         const u = users.find((x) => x.id === m.user_id);
         return {
@@ -843,12 +1063,13 @@ export async function getMyTeam() {
     .single();
   if (teamErr) throw teamErr;
 
-  const [{ data: projectRow, error: projErr }, requestMap] = await Promise.all([
+  const [{ data: projectRow, error: projErr }, requestMap, leaveRules] = await Promise.all([
     supabase.from('projects').select(PROJECT_SELECT).eq('id', teamRow.project_id).single(),
     fetchViewerRequestMap(viewerId),
+    fetchLeaveRules(),
   ]);
   if (projErr) throw projErr;
-  const project = await composeProject(projectRow, viewerId, requestMap);
+  const project = composeProject(projectRow, viewerId, requestMap);
 
   // GET /api/me/team enriches each teammate with availability_hours/skills,
   // unlike the plain project views — see TODO-backend.md.
@@ -860,6 +1081,7 @@ export async function getMyTeam() {
 
   return {
     ...project,
+    ...leaveRules,
     members: memberRows.map((tm) => ({
       user_id: tm.user_id,
       name: tm.users.name,
@@ -869,6 +1091,17 @@ export async function getMyTeam() {
       skills: (tm.users.user_skills || []).map((us) => us.skills.name),
     })),
   };
+}
+
+// When rosters lock (supabase/20_leave_team_rules.sql). Read through
+// formation_deadline() rather than a table, so #38 can move where the date
+// lives without touching this. Forgiving of errors so a database that
+// hasn't run 20_ yet still shows the team page — leave_team() is what
+// actually enforces the deadline. Only students are ever on a team
+// (18_admin_access.sql), so whoever reads this is subject to the lock.
+async function fetchLeaveRules() {
+  const { data: deadline } = await supabase.rpc('formation_deadline');
+  return { formation_deadline: deadline ?? null };
 }
 
 // Deletes the team *and* the project it belongs to — a team exists only to
@@ -919,7 +1152,9 @@ export async function deleteTeam(teamId) {
 // for why this isn't gated on the owner approving it.
 //
 // A project's creator can't leave their own project (projects.creator_id
-// points at them); for them the equivalent is deleteTeam().
+// points at them); for them the equivalent is deleteTeam(). After the team
+// formation deadline a student can't leave (an admin can take them off —
+// #39), and the creator is notified either way.
 export async function leaveTeam() {
   if (USE_MOCKS) {
     await delay();
@@ -931,9 +1166,23 @@ export async function leaveTeam() {
     if (project.creator_id === id) {
       throw new Error('You created this project, so you cannot leave it — delete the team instead');
     }
+    const deadline = appSettings.formation_deadline;
+    if (deadline && new Date(deadline) <= new Date()) {
+      throw new Error('The team formation deadline has passed — ask an admin if you need to leave');
+    }
 
     teamMembers.splice(teamMembers.indexOf(membership), 1);
     syncProjectFillState(project, team);
+    notifications.push({
+      id: `n-${Date.now()}-${notifications.length}`,
+      user_id: project.creator_id,
+      kind: 'member_left',
+      project_id: project.id,
+      actor_id: id,
+      by_admin: false,
+      created_at: new Date().toISOString(),
+      read_at: null,
+    });
     return;
   }
 
@@ -959,6 +1208,45 @@ export async function removeMember(userId) {
   }
 
   const { error } = await supabase.rpc('remove_member', { p_user_id: userId });
+  if (error) throw error;
+}
+
+// --- Notifications -------------------------------------------------------
+
+// The viewer's unread notifications, newest first. Today the only kind is
+// 'member_left' (someone left a project the viewer created). actor_name is
+// whoever caused the notification — for 'member_left', who left.
+export async function getNotifications() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return notifications
+      .filter((n) => n.user_id === id && !n.read_at)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map((n) => ({ ...n, actor_name: users.find((u) => u.id === n.actor_id)?.name ?? 'Someone' }));
+  }
+
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('id, kind, project_id, actor_id, by_admin, created_at, read_at, actor:users!actor_id ( name )')
+    .is('read_at', null)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data.map(({ actor, ...n }) => ({ ...n, actor_name: actor?.name ?? 'Someone' }));
+}
+
+export async function markNotificationsRead(ids) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const now = new Date().toISOString();
+    for (const n of notifications) {
+      if (n.user_id === id && ids.includes(n.id) && !n.read_at) n.read_at = now;
+    }
+    return;
+  }
+
+  const { error } = await supabase.rpc('mark_notifications_read', { p_ids: ids });
   if (error) throw error;
 }
 

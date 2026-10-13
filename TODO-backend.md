@@ -1,5 +1,16 @@
 # Backend
 
+> **Admin access (#36):** `supabase/18_admin_access.sql` adds the admin flag,
+> role-change protection, admin-free roster policies, and the `require_admin()` /
+> `project_member_counts()` RPCs. Apply it before deploying this frontend.
+> See [Admin access in README](README.md#admin-access-36) for instructor setup.
+> The handoff notes below describe earlier database work and are historical.
+
+> **Admin dashboard (#37):** apply `supabase/19_admin_dashboard.sql` after `18`.
+> It provides guarded read-only dashboard, team-detail and student-detail RPCs
+> for `/admin`, `/admin/teams/:teamId` and `/admin/students/:studentId`.
+> See [Admin dashboard in README](README.md#admin-dashboard-37).
+
 > **Handoff — who does what.** The frontend is done and is not waiting on design decisions. Every
 > feature below already works end to end against the mocks (`VITE_USE_MOCKS=true`), and
 > `client.js` already contains the real Supabase call for each one. **What's left is the database
@@ -329,13 +340,15 @@ Guests (no session) can still browse — this is `supabase/02_rls_policies.sql`,
 
 - `projects`, `project_roles_needed`, `skills`, `roles`, and `teams` all have an `anon`-readable
   SELECT policy.
-- `team_members` has **no** `anon` policy at all — a guest's query returns zero rows, so no names,
-  no `user_id`s, ever reach the client. `composeProject()` in `client.js` only returns a populated
-  `members` array when there's a signed-in viewer.
-- The public `member_count` a guest still needs comes from `project_member_count()`, a
-  `SECURITY DEFINER` function that returns only a count (see `03_functions.sql`) — the one
-  sanctioned way past the `team_members` restriction, because a count alone doesn't identify
-  anyone.
+- After `18_admin_access.sql`, every signed-in user can read `team_members` rows except
+  those of admin accounts, so students see who is on a team before asking to join. Guests
+  still get no raw membership rows.
+- `project_member_counts(uuid[])` gives guests the seat count for every listed project in
+  one call. Signed-in viewers count from the roster and make no extra call. Guests get no
+  availability data. The older single-project `project_member_count()` remains available.
+- Only trusted database/service-role access can change `users.is_admin`. Admins can read
+  every roster and request, but cannot create or join student teams. Student queries exclude
+  instructor profiles and skills; student requests remain limited to their own/incoming rows.
 
 The frontend already hides member names from guests in the UI (`MemberStrip.jsx`), but **that was
 always a UX nicety, not the security boundary** — the boundary is the RLS policy above, which
@@ -479,11 +492,17 @@ that lies about who's working on the project, and a seat the owner can't refill 
 occupies it. The seat reopening immediately is what lets a team recover; the deliberate confirm
 step on `Team.jsx` is what addresses someone leaving on a whim.
 
-**Nothing tells the owner.** There is no notification system — a member leaving is visible only as
-a changed roster on `Team.jsx` and a project that has gone back to `'open'`. Telling teammates is
-left to the students, which the leave dialog says outright. If that turns out to be too quiet, an
-in-app activity feed is the cheap version (one table, no infrastructure); real push or email would
-need a service worker or a mail provider, neither of which this project has.
+**The owner is notified, and rosters lock at a deadline.** `20_leave_team_rules.sql` (issue #35)
+adds a `notifications` table: `leave_team()` writes a `'member_left'` row for the project's creator,
+which `Team.jsx` shows them until they dismiss it. It's an in-app feed only — real push or email
+would need a service worker or a mail provider, neither of which this project has. The same file
+adds a class-wide formation deadline, read only through `formation_deadline()` (today it returns
+`app_settings.formation_deadline`; #38 will point it at its milestones table). After it,
+`leave_team()` refuses students. Taking a student off is an admin's job (#39), and both paths share
+`private.remove_from_team(p_user_id, p_by_admin)` — the one place a seat is given up: it deletes the
+membership, restores the role, resyncs the project and notifies the creator. Only an admin
+(`users.is_admin`, checked with `private.is_admin()` from `18_admin_access.sql`, #36) can set the
+deadline.
 
 ## Deleting a team — `delete_team()`
 
@@ -705,9 +724,9 @@ Then work through the checks below.
 - **No RLS write policy was added for `projects`, and none is needed.** `create_project`,
   `update_project` and `delete_team` are `SECURITY DEFINER` and do their own authorization — the
   same template `respond_to_join_request` already uses.
-- **`notifications` exists only for join-request responses.** `15_join_request_responses.sql` adds
-  the table so a requester hears back when their request is accepted or declined. Nothing else
-  writes to it — nothing tells an owner that a member left; see
-  [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
+- **`notifications` was added later** (`20_leave_team_rules.sql`, issue #35) so an owner hears when a
+  member leaves; see [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
+  `21_join_request_responses.sql` adds the `request_accepted` / `request_declined` kinds so a
+  requester hears back when their request is answered.
 - **No way to remove yourself as owner** other than deleting the team, and no way to transfer
   ownership. Both are fine for now; flagged in case the scope grows.
