@@ -253,9 +253,21 @@ async function fetchViewerRequestMap(viewerId) {
   return byProject;
 }
 
+// Guests cannot read team_members at all, so their seat counts come from one
+// batched aggregate for every project on the page (18_admin_access.sql).
+// Signed-in viewers read the roster itself and need no extra call.
+async function fetchGuestMemberCounts(viewerId, rows) {
+  if (viewerId) return {};
+  const ids = rows.filter((row) => embeddedOne(row.teams)).map((row) => row.id);
+  if (ids.length === 0) return {};
+  const { data, error } = await supabase.rpc('project_member_counts', { p_project_ids: ids });
+  if (error) throw error;
+  return Object.fromEntries((data ?? []).map((r) => [r.project_id, r.member_count]));
+}
+
 // Shapes one `projects` row (as fetched via PROJECT_SELECT) into the same
 // object buildProject() produces from the mocks.
-async function composeProject(row, viewerId, viewerRequestsByProject) {
+function composeProject(row, viewerId, viewerRequestsByProject, guestMemberCounts) {
   // `skills` embeds as null when skill_id is null — a role listed without a
   // specific skill attached, which the schema allows on purpose.
   // A role whose seats have all been filled sits at quantity_needed = 0
@@ -280,8 +292,8 @@ async function composeProject(row, viewerId, viewerRequestsByProject) {
   let member_count = 0;
   let avg_availability_hours = null;
 
-  if (viewerId && rawMembers.length > 0) {
-    // RLS returns the full roster only to a teammate or an admin.
+  if (viewerId) {
+    // Any signed-in viewer can read the roster; RLS leaves out admin accounts.
     members = rawMembers.map((tm) => ({
       user_id: tm.user_id,
       name: tm.users.name,
@@ -293,13 +305,8 @@ async function composeProject(row, viewerId, viewerRequestsByProject) {
       ? Math.round(rawMembers.reduce((sum, tm) => sum + (tm.users.availability_hours || 0), 0) / rawMembers.length)
       : 0;
   } else if (team) {
-    // Seekers and guests cannot read raw rosters. The aggregate exposes
-    // counts and signed-in availability averages without member identities.
-    const { data: stats, error } = await supabase.rpc('project_recruiting_stats', { p_project_id: row.id });
-    if (error) throw error;
-    const summary = embeddedOne(stats);
-    member_count = summary?.member_count ?? 0;
-    avg_availability_hours = summary?.avg_availability_hours ?? null;
+    // Guest: seat count only, no identities or availability.
+    member_count = guestMemberCounts?.[row.id] ?? 0;
   }
 
   return {
@@ -364,7 +371,8 @@ export async function getProjects({ onlyOpen = true } = {}) {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw error;
-  return keep(await Promise.all(rows.map((row) => composeProject(row, viewerId, requestMap))));
+  const guestCounts = await fetchGuestMemberCounts(viewerId, rows);
+  return keep(rows.map((row) => composeProject(row, viewerId, requestMap, guestCounts)));
 }
 
 export async function getProject(id) {
@@ -380,7 +388,7 @@ export async function getProject(id) {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw new Error('Project not found');
-  return composeProject(row, viewerId, requestMap);
+  return composeProject(row, viewerId, requestMap, await fetchGuestMemberCounts(viewerId, [row]));
 }
 
 // `roles_needed` is an array of { role_id, skill_id, quantity_needed }, where
@@ -881,24 +889,18 @@ export async function getRequests() {
       })),
     }));
 
-  const outgoing = await Promise.all(rows
+  const outgoing = rows
     .filter((r) => r.user_id === viewerId)
-    .map(async (r) => {
-      const { data: stats, error: statsError } = await supabase.rpc('project_recruiting_stats', {
-        p_project_id: r.project_id,
-      });
-      if (statsError) throw statsError;
-      return {
-        id: r.id,
-        project_id: r.project_id,
-        user_id: r.user_id,
-        status: r.status,
-        created_at: r.created_at,
-        project_title: r.project.title,
-        creator_name: r.project.creator.name,
-        member_count: embeddedOne(stats)?.member_count ?? 0,
-        team_size_target: r.project.team_size_target,
-      };
+    .map((r) => ({
+      id: r.id,
+      project_id: r.project_id,
+      user_id: r.user_id,
+      status: r.status,
+      created_at: r.created_at,
+      project_title: r.project.title,
+      creator_name: r.project.creator.name,
+      member_count: embeddedOne(r.project.teams)?.team_members?.length ?? 0,
+      team_size_target: r.project.team_size_target,
     }));
 
   return { incoming, outgoing };
@@ -1046,7 +1048,7 @@ export async function getMyTeam() {
     fetchViewerRequestMap(viewerId),
   ]);
   if (projErr) throw projErr;
-  const project = await composeProject(projectRow, viewerId, requestMap);
+  const project = composeProject(projectRow, viewerId, requestMap);
 
   // GET /api/me/team enriches each teammate with availability_hours/skills,
   // unlike the plain project views — see TODO-backend.md.

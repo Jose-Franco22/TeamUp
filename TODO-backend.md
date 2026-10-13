@@ -1,12 +1,12 @@
 # Backend
 
-> **Admin access (#36):** `supabase/16_admin_access.sql` adds the admin flag,
-> role-change protection, private roster policies, and the `require_admin()` /
-> `project_recruiting_stats()` RPCs. Apply it before deploying this frontend.
+> **Admin access (#36):** `supabase/18_admin_access.sql` adds the admin flag,
+> role-change protection, admin-free roster policies, and the `require_admin()` /
+> `project_member_counts()` RPCs. Apply it before deploying this frontend.
 > See [Admin access in README](README.md#admin-access-36) for instructor setup.
 > The handoff notes below describe earlier database work and are historical.
 
-> **Admin dashboard (#37):** apply `supabase/17_admin_dashboard.sql` after `16`.
+> **Admin dashboard (#37):** apply `supabase/19_admin_dashboard.sql` after `18`.
 > It provides guarded read-only dashboard, team-detail and student-detail RPCs
 > for `/admin`, `/admin/teams/:teamId` and `/admin/students/:studentId`.
 > See [Admin dashboard in README](README.md#admin-dashboard-37).
@@ -340,13 +340,12 @@ Guests (no session) can still browse — this is `supabase/02_rls_policies.sql`,
 
 - `projects`, `project_roles_needed`, `skills`, `roles`, and `teams` all have an `anon`-readable
   SELECT policy.
-- After `16_admin_access.sql`, `team_members` is readable only by teammates and admins.
-  Guests and other students get no raw membership rows. `composeProject()` returns names
-  only when the roster is available through RLS.
-- `project_recruiting_stats()` supplies public seat counts and signed-in availability
-  averages when roster identities are unavailable, so Browse and outgoing requests still
-  show accurate counts. Guests get no availability data. The older `project_member_count()`
-  count-only RPC remains available.
+- After `18_admin_access.sql`, every signed-in user can read `team_members` rows except
+  those of admin accounts, so students see who is on a team before asking to join. Guests
+  still get no raw membership rows.
+- `project_member_counts(uuid[])` gives guests the seat count for every listed project in
+  one call. Signed-in viewers count from the roster and make no extra call. Guests get no
+  availability data. The older single-project `project_member_count()` remains available.
 - Only trusted database/service-role access can change `users.is_admin`. Admins can read
   every roster and request, but cannot create or join student teams. Student queries exclude
   instructor profiles and skills; student requests remain limited to their own/incoming rows.

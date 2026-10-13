@@ -72,8 +72,8 @@ covered in `.gitignore`.
 
 ## Admin access (#36)
 
-Apply `supabase/16_admin_access.sql` after the earlier numbered SQL files, followed
-by `supabase/17_admin_dashboard.sql`, before running this frontend against Supabase.
+Apply `supabase/18_admin_access.sql` after the earlier numbered SQL files, followed
+by `supabase/19_admin_dashboard.sql`, before running this frontend against Supabase.
 The first adds `users.is_admin` (false for every existing/new account), protects
 role changes, and installs the admin RLS policies.
 
@@ -95,9 +95,10 @@ any existing student membership, owned project and pending join requests before
 promoting a student account. #36 supplies the protected navigation and server
 guard (`require_admin()`); #37 adds the dashboard and read-only detail views.
 
-Public project listings and team existence remain recruiting information. Only
-teammates and admins can query raw roster rows; other viewers get seat counts
-and signed-in availability averages through `project_recruiting_stats()`.
+Public project listings and team existence remain recruiting information. Any
+signed-in student can read team rosters, so they can see who is on a team before
+asking to join; admin accounts are never included. Guests get seat counts only,
+for every project in one `project_member_counts(uuid[])` call.
 Requests remain visible to their requester, the project owner, and admins.
 Instructor profiles and skills are excluded from student queries/matching.
 
@@ -118,10 +119,10 @@ already on a team. These views show project/roster details or student profile,
 skills, current team and pending requests. They do not change student data.
 Use **Refresh** on the dashboard to reload formation progress.
 
-`supabase/17_admin_dashboard.sql` supplies `admin_dashboard()`,
+`supabase/19_admin_dashboard.sql` supplies `admin_dashboard()`,
 `admin_team_details(uuid)` and `admin_student_details(uuid)`. Each RPC checks
 `require_admin()` before reading data; students and guests cannot access the
-admin views through direct API calls. Apply it after `16_admin_access.sql`.
+admin views through direct API calls. Apply it after `18_admin_access.sql`.
 
 In mock mode, **Course Instructor** starts with 1 formed team, 3 open teams,
 and 6 unplaced students. Dashboard, detail and permission tests run with

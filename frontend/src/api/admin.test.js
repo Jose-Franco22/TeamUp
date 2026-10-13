@@ -34,18 +34,16 @@ test('admin accounts never get student match scores or appear on rosters', async
     .every((entry) => entry.fit === null)).toBe(true);
 });
 
-test('a seeker sees counts without other teams raw membership rows', async () => {
+test('a seeker sees who is on other teams before asking to join', async () => {
   setSessionUserId('u-adan');
-  const all = await getProjects({ onlyOpen: false });
-  expect(all.every((p) => p.members.length === 0)).toBe(true);
-  expect(all.find((p) => p.id === 'p-parking').member_count).toBe(2);
+  const parking = (await getProjects({ onlyOpen: false })).find((p) => p.id === 'p-parking');
+  expect(parking.members).toHaveLength(2);
+  expect(parking.member_count).toBe(2);
 });
 
-test('teammates can still see their own full roster', async () => {
-  setSessionUserId('u-jose');
-  const all = await getProjects({ onlyOpen: false });
-  expect(all.find((p) => p.id === 'p-parking').members).toHaveLength(2);
-  expect(all.find((p) => p.id === 'p-degree').members).toEqual([]);
+test('guests get seat counts but no roster identities', async () => {
+  const parking = (await getProjects({ onlyOpen: false })).find((p) => p.id === 'p-parking');
+  expect(parking).toMatchObject({ members: [], member_count: 2, avg_availability_hours: null });
 });
 
 test('profile updates never grant admin access', async () => {

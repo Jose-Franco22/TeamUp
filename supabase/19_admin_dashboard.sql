@@ -1,5 +1,5 @@
 -- Issue #37: read-only team formation dashboard and detail views.
--- Run after 16_admin_access.sql. Every exposed RPC checks the caller's role.
+-- Run after 18_admin_access.sql. Every exposed RPC checks the caller's role.
 begin;
 
 -- Internal builders keep dashboard cards and detail pages on the same shape.

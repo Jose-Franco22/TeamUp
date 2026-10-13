@@ -330,8 +330,9 @@ export function buildProject(project, viewerId = null) {
           role: roleById[tm.role_id]?.name ?? null,
         }))
     : [];
-  const canReadRoster = userById[viewerId]?.is_admin || allMembers.some((m) => m.user_id === viewerId);
-  const members = canReadRoster ? allMembers : [];
+  // Same rule as team_members RLS: any signed-in viewer sees the roster, guests
+  // only the seat count.
+  const members = viewerId ? allMembers : [];
 
   // skill_id is nullable, so skill_name/category come back null for a role
   // listed without a specific skill attached to it.

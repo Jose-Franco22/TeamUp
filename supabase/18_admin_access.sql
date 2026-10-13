@@ -1,12 +1,12 @@
--- Issue #36: database-controlled admin access. Run after 15_release_filled_roles.sql.
+-- Issue #36: database-controlled admin access. Run after 17_keep_filled_roles_on_edit.sql.
 -- Existing accounts remain students. Promote an instructor only through the
 -- SQL editor/service role after they have signed in; never through a browser.
 begin;
 
 alter table public.users add column is_admin boolean not null default false;
 
--- Keep policy helpers outside PostgREST's exposed public schema. Definer
--- helpers avoid recursive RLS when checking users or team_members themselves.
+-- Keep policy helpers outside PostgREST's exposed public schema. The definer
+-- helper avoids recursive RLS when the users policy checks users itself.
 create schema if not exists private;
 revoke all on schema private from public;
 grant usage on schema private to authenticated;
@@ -17,16 +17,8 @@ as $$
   select coalesce((select is_admin from public.users where id = auth.uid()), false);
 $$;
 
-create or replace function private.is_team_member(p_team_id uuid)
-returns boolean language sql stable security definer set search_path = ''
-as $$
-  select exists (select 1 from public.team_members
-                 where team_id = p_team_id and user_id = auth.uid());
-$$;
-
 revoke all on function private.is_admin() from public, anon, authenticated;
-revoke all on function private.is_team_member(uuid) from public, anon, authenticated;
-grant execute on function private.is_admin(), private.is_team_member(uuid) to authenticated;
+grant execute on function private.is_admin() to authenticated;
 
 -- Own-row UPDATE policies alone do not stop someone changing their role.
 -- Check the request role too: SECURITY DEFINER functions run as their owner
@@ -97,31 +89,33 @@ drop policy user_skills_select_authenticated on public.user_skills;
 create policy user_skills_select_students_or_admin on public.user_skills for select to authenticated
 using (exists (select 1 from public.users u where u.id = user_id));
 
--- Projects, role requirements and team existence remain public recruiting
--- information. Private roster rows are available to teammates and admins.
+-- Signed-in students still see who is on a team before asking to join, so
+-- roster rows stay readable to every authenticated user. Admin accounts are
+-- excluded explicitly, even though the triggers above already keep them off
+-- rosters. Guests still get no policy at all (see 02_rls_policies.sql).
 drop policy team_members_select_authenticated on public.team_members;
-create policy team_members_select_team_or_admin on public.team_members for select to authenticated
-using (private.is_admin() or private.is_team_member(team_id));
+create policy team_members_select_students on public.team_members for select to authenticated
+using (exists (select 1 from public.users u where u.id = user_id and not u.is_admin));
 
 create policy join_requests_select_admin on public.join_requests for select to authenticated
 using (private.is_admin());
 
--- Aggregate recruiting information keeps Browse counts/matching accurate
--- without granting seekers access to every team's raw membership rows.
-create or replace function public.project_recruiting_stats(p_project_id uuid)
-returns table (member_count integer, avg_availability_hours integer)
+-- Guests cannot read rosters, so Browse gets their seat counts from this
+-- aggregate: one call for every project on the page instead of one
+-- project_member_count() call per project. Counts only, never identities.
+create or replace function public.project_member_counts(p_project_ids uuid[])
+returns table (project_id uuid, member_count integer)
 language sql stable security definer set search_path = ''
 as $$
-  select count(*)::integer,
-         case when auth.uid() is not null
-              then coalesce(round(avg(u.availability_hours)), 0)::integer end
+  select t.project_id, count(*)::integer
     from public.team_members tm
     join public.teams t on t.id = tm.team_id
     join public.users u on u.id = tm.user_id
-   where t.project_id = p_project_id and not u.is_admin;
+   where t.project_id = any (p_project_ids) and not u.is_admin
+   group by t.project_id;
 $$;
-revoke all on function public.project_recruiting_stats(uuid) from public;
-grant execute on function public.project_recruiting_stats(uuid) to anon, authenticated;
+revoke all on function public.project_member_counts(uuid[]) from public;
+grant execute on function public.project_member_counts(uuid[]) to anon, authenticated;
 
 -- All subsequent admin RPCs must call this guard before accessing data or
 -- writing anything, so stale/forged UI state cannot make a student pass the

@@ -1,9 +1,10 @@
 // Issue #36: real-mode RPC authorization and Browse after roster RLS.
+// Signed-in students read rosters directly; guests get one batched count.
 import { beforeEach, expect, test, vi } from 'vitest';
 import { DASHBOARD, OPEN_TEAM, UNPLACED_STUDENT } from '../test/adminFixtures';
 
 const fake = vi.hoisted(() => {
-  const state = { viewerId: 'seeker', projects: [], requests: [], stats: {}, adminError: null };
+  const state = { viewerId: 'seeker', projects: [], requests: [], counts: [], adminError: null };
   const supabase = {
     auth: { getSession: vi.fn(async () => ({ data: {
       session: state.viewerId ? { user: { id: state.viewerId } } : null,
@@ -24,13 +25,21 @@ const fake = vi.hoisted(() => {
       if (['admin_dashboard', 'admin_team_details', 'admin_student_details'].includes(name)) {
         return { data: state.adminResponse, error: state.adminError };
       }
-      return { data: [state.stats[args.p_project_id]], error: null };
+      if (name === 'project_member_counts') {
+        return { data: state.counts.filter((c) => args.p_project_ids.includes(c.project_id)), error: null };
+      }
+      throw new Error(`unexpected rpc ${name}`);
     }),
   };
   return { state, supabase };
 });
 
 vi.mock('../lib/supabaseClient', () => ({ supabase: fake.supabase }));
+
+const ROSTER = [
+  { user_id: 'owner', role_id: 'pm', roles: { name: 'Project Manager' }, users: { name: 'Owner', availability_hours: 10 } },
+  { user_id: 'mate', role_id: 'fe', roles: { name: 'Frontend Developer' }, users: { name: 'Mate', availability_hours: 15 } },
+];
 
 let client;
 beforeEach(async () => {
@@ -44,9 +53,13 @@ beforeEach(async () => {
   fake.state.projects = [{
     id: 'project', creator_id: 'owner', title: 'A project', description: 'Recruiting students.',
     team_size_target: 4, status: 'open', creator: { name: 'Owner' },
-    project_roles_needed: [], teams: { id: 'team', formed_at: null, team_members: [] },
+    project_roles_needed: [], teams: { id: 'team', formed_at: null, team_members: ROSTER },
+  }, {
+    id: 'project-2', creator_id: 'owner-2', title: 'Another project', description: 'Also recruiting.',
+    team_size_target: 3, status: 'open', creator: { name: 'Owner Two' },
+    project_roles_needed: [], teams: { id: 'team-2', formed_at: null, team_members: [] },
   }];
-  fake.state.stats = { project: { member_count: 3, avg_availability_hours: 12 } };
+  fake.state.counts = [{ project_id: 'project', member_count: 2 }, { project_id: 'project-2', member_count: 1 }];
   client = await import('./client');
 });
 
@@ -57,38 +70,40 @@ test('admin access is checked by the server without accepting a caller-supplied 
   await expect(client.getAdminAccess()).rejects.toMatchObject({ code: '42501' });
 });
 
-test('a seeker gets correct seat counts and matching hours when RLS hides the roster', async () => {
+test('a signed-in seeker sees other teams rosters without any count RPC', async () => {
   const [project] = await client.getProjects();
-  expect(project).toMatchObject({ members: [], member_count: 3, avg_availability_hours: 12 });
-  expect(fake.supabase.rpc).toHaveBeenCalledWith('project_recruiting_stats', { p_project_id: 'project' });
+  expect(project.members).toEqual([
+    { user_id: 'owner', name: 'Owner', role_id: 'pm', role: 'Project Manager' },
+    { user_id: 'mate', name: 'Mate', role_id: 'fe', role: 'Frontend Developer' },
+  ]);
+  expect(project).toMatchObject({ member_count: 2, avg_availability_hours: 13 });
+  expect(fake.supabase.rpc).not.toHaveBeenCalled();
 });
 
-test('members still get their own roster names and roles', async () => {
-  fake.state.projects[0].teams.team_members = [{
-    user_id: 'seeker', role_id: 'pm', roles: { name: 'Project Manager' },
-    users: { name: 'Student', availability_hours: 10 },
-  }];
-  const project = await client.getProject('project');
-  expect(project.members).toEqual([{
-    user_id: 'seeker', name: 'Student', role_id: 'pm', role: 'Project Manager',
-  }]);
-  expect(project.member_count).toBe(1);
-});
-
-test('guest aggregate results expose seat counts without roster identities or availability', async () => {
+test('guests get every seat count from one batched call, without identities or availability', async () => {
   fake.state.viewerId = null;
-  fake.state.stats.project.avg_availability_hours = null;
-  const project = await client.getProject('project');
-  expect(project).toMatchObject({ members: [], member_count: 3, avg_availability_hours: null });
+  const list = await client.getProjects();
+  expect(fake.supabase.rpc).toHaveBeenCalledTimes(1);
+  expect(fake.supabase.rpc).toHaveBeenCalledWith('project_member_counts', { p_project_ids: ['project', 'project-2'] });
+  expect(list.map((p) => [p.id, p.member_count])).toEqual([['project', 2], ['project-2', 1]]);
+  for (const p of list) expect(p).toMatchObject({ members: [], avg_availability_hours: null });
 });
 
-test('outgoing requests keep the real seat count even when the embedded roster is empty', async () => {
+test('a guest viewing one project also gets its count from the batched call', async () => {
+  fake.state.viewerId = null;
+  const project = await client.getProject('project');
+  expect(fake.supabase.rpc).toHaveBeenCalledWith('project_member_counts', { p_project_ids: ['project'] });
+  expect(project).toMatchObject({ members: [], member_count: 2, avg_availability_hours: null });
+});
+
+test('outgoing requests count seats from the roster, with no per-request RPC', async () => {
   fake.state.requests = [{
     id: 'request', project_id: 'project', user_id: 'seeker', status: 'pending',
     project: fake.state.projects[0],
   }];
   const { outgoing } = await client.getRequests();
-  expect(outgoing[0].member_count).toBe(3);
+  expect(outgoing[0].member_count).toBe(2);
+  expect(fake.supabase.rpc).not.toHaveBeenCalled();
 });
 
 test.each([

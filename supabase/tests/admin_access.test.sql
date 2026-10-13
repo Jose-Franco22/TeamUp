@@ -1,6 +1,6 @@
 -- Issue #36: exercise real database permissions as API roles, never just UI flags.
 begin;
-select plan(31);
+select plan(32);
 
 select set_config('tests.admin', tests.sign_in_with_microsoft('instructor01@utrgv.edu', 'Instructor')::text, true);
 select set_config('tests.owner', tests.sign_in_with_microsoft('owner01@utrgv.edu', 'Owner')::text, true);
@@ -59,18 +59,16 @@ select is((select count(*)::int from public.users where id = current_setting('te
   0, 'student Browse and matching queries cannot select instructor profiles');
 select is((select count(*)::int from public.user_skills where user_id = current_setting('tests.admin')::uuid),
   0, 'student matching queries cannot read instructor skills');
-select is((select count(*)::int from public.team_members), 1, 'student can read their own roster only');
+select is((select count(*)::int from public.team_members), 2, 'student can read every student roster');
 select is((select count(*)::int from public.team_members tm join public.teams t on t.id = tm.team_id
-  where t.project_id = current_setting('tests.other_project')::uuid), 0, 'other teams raw membership rows stay private');
+  where t.project_id = current_setting('tests.other_project')::uuid), 1, 'another teams roster is visible before joining');
 select is((select count(*)::int from public.join_requests), 1, 'owner can still see incoming requests');
-select is((select member_count from public.project_recruiting_stats(current_setting('tests.other_project')::uuid)),
-  1, 'Browse still gets accurate counts for another team');
 
 select tests.authenticate_as(current_setting('tests.other')::uuid);
 select is((select count(*)::int from public.join_requests), 0, 'unrelated student cannot read another projects requests');
 select tests.authenticate_as(current_setting('tests.seeker')::uuid);
 select is((select count(*)::int from public.join_requests), 1, 'seeker still sees their own request');
-select is((select count(*)::int from public.team_members), 0, 'unplaced seeker cannot dump all rosters');
+select is((select count(*)::int from public.team_members), 2, 'unplaced seeker sees who is on each team');
 
 -- The table triggers also protect writes by SECURITY DEFINER functions.
 select tests.clear_authentication();
@@ -84,21 +82,41 @@ select throws_ok($$ update public.users set is_admin = true where id = current_s
 select throws_ok($$ update public.users set is_admin = true where id = current_setting('tests.seeker')::uuid $$,
   '23514', 'Remove student memberships, projects and pending requests before granting admin access',
   'promotion cannot leave an admin with an active join request');
+
+-- The triggers keep admins off rosters, so plant a row with them disabled to
+-- prove the roster policy and guest counts leave admin accounts out too.
+alter table public.team_members disable trigger team_members_require_student;
+insert into public.team_members (team_id, user_id, role_id)
+select id, current_setting('tests.admin')::uuid, current_setting('tests.role')::uuid from public.teams
+ where project_id = current_setting('tests.project')::uuid;
+alter table public.team_members enable trigger team_members_require_student;
+select tests.authenticate_as(current_setting('tests.seeker')::uuid);
+select is((select count(*)::int from public.team_members where user_id = current_setting('tests.admin')::uuid),
+  0, 'students never see an admin roster row');
+select is((select count(*)::int from public.team_members), 2, 'student rosters stay visible next to a hidden admin row');
+select tests.clear_authentication();
+set local role anon;
+select set_eq($$ select project_id, member_count from public.project_member_counts(array[
+    current_setting('tests.project')::uuid, current_setting('tests.other_project')::uuid
+  ]) $$,
+  $$ values (current_setting('tests.project')::uuid, 1), (current_setting('tests.other_project')::uuid, 1) $$,
+  'guest gets every seat count from one call, without the admin row');
+reset role;
+delete from public.team_members where user_id = current_setting('tests.admin')::uuid;
+
 set local role service_role;
 select lives_ok($$ update public.users set is_admin = false where id = current_setting('tests.admin')::uuid $$,
   'the trusted service role can change admin access');
 reset role;
 
--- Guests get public recruiting counts, not private data or admin RPC access.
+-- Guests still get no rosters and no admin RPC access.
 set local role anon;
 select throws_ok($$ select public.require_admin() $$, '42501', 'permission denied for function require_admin',
   'guest cannot execute admin functions');
 select is((select count(*)::int from public.team_members), 0, 'guest cannot read rosters');
-select is((select member_count from public.project_recruiting_stats(current_setting('tests.project')::uuid)),
-  1, 'guest sees the public seat count');
-select is((select avg_availability_hours from public.project_recruiting_stats(current_setting('tests.project')::uuid)),
-  null::integer, 'guest gets no private availability data');
-
 reset role;
+select hasnt_function('public', 'project_recruiting_stats', array['uuid'],
+  'the per-project stats RPC is gone; Browse no longer needs it');
+
 select * from finish();
 rollback;
