@@ -297,14 +297,12 @@ export const joinRequests = [
   { id: 'jr-4', project_id: 'p-lab', user_id: 'u-adan', status: 'declined', created_at: '2026-08-26T11:00:00Z' },
 ];
 
-// --- APP_SETTINGS / ADMINS / NOTIFICATIONS ----------------------------
+// --- APP_SETTINGS / NOTIFICATIONS -------------------------------------
 // See supabase/20_leave_team_rules.sql. app_settings is a single row;
-// formation_deadline null means rosters never lock. admins lists user_ids
-// allowed past that deadline. notifications: id, user_id (recipient), kind,
-// project_id, member_id, by_admin, created_at, read_at.
+// formation_deadline null means rosters never lock. Admins are users with
+// is_admin (above), as in 18_admin_access.sql. notifications: id, user_id
+// (recipient), kind, project_id, actor_id, by_admin, created_at, read_at.
 export const appSettings = { formation_deadline: null };
-
-export const admins = [];
 
 export const notifications = [];
 

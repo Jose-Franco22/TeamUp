@@ -86,11 +86,12 @@ export default function Team() {
   const isOwner = data.creator_id === user?.id;
   const isAlone = data.members.length <= 1;
 
-  // Rosters lock at the formation deadline; after it only an admin can
-  // leave. leave_team() enforces this — hiding the button just saves a
-  // round trip that would fail.
+  // Rosters lock at the formation deadline; after it only an admin can take
+  // a student off. leave_team() enforces this — hiding the button just saves
+  // a round trip that would fail. Admins are never on a team, so whoever
+  // sees this page is a student.
   const deadline = data.formation_deadline ? new Date(data.formation_deadline) : null;
-  const leaveLocked = Boolean(deadline && deadline <= new Date() && !data.viewer_is_admin);
+  const leaveLocked = Boolean(deadline && deadline <= new Date());
 
   const leftNotices = isOwner
     ? (notices.data || []).filter((n) => n.kind === 'member_left' && n.project_id === data.id)
@@ -115,7 +116,7 @@ export default function Team() {
           <ul className="notices">
             {leftNotices.map((n) => (
               <li key={n.id}>
-                {n.by_admin ? `An admin took ${n.member_name} off the team` : `${n.member_name} left the team`}{' '}
+                {n.by_admin ? `An admin took ${n.actor_name} off the team` : `${n.actor_name} left the team`}{' '}
                 on {new Date(n.created_at).toLocaleDateString()}. Their seat is open again.
               </li>
             ))}

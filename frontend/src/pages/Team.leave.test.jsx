@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Team from './Team';
 import * as client from '../api/client';
-import { admins, appSettings, notifications, projects, teamMembers, teams } from '../api/mockData';
+import { appSettings, notifications, projects, teamMembers, teams } from '../api/mockData';
 import { SessionProvider } from '../auth/SessionContext';
 
 // Spy on leaveTeam but keep the real (mock-mode) implementation, so a test
@@ -34,7 +34,6 @@ afterEach(() => {
   teams.splice(0, teams.length, ...snapshot.teams);
   projects.splice(0, projects.length, ...snapshot.projects);
   notifications.length = 0;
-  admins.length = 0;
   appSettings.formation_deadline = null;
 });
 
@@ -102,13 +101,6 @@ describe('formation deadline', () => {
     await renderTeamAs(MEMBER);
     expect(leaveButton()).toBeInTheDocument();
     expect(screen.getByText(/Rosters lock on/)).toBeInTheDocument();
-  });
-
-  test('an admin can still leave after the deadline', async () => {
-    appSettings.formation_deadline = '2020-01-01T00:00:00Z';
-    admins.push(MEMBER);
-    await renderTeamAs(MEMBER);
-    expect(leaveButton()).toBeInTheDocument();
   });
 
   test('leaveTeam() itself refuses after the deadline', async () => {

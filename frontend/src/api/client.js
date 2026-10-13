@@ -17,7 +17,6 @@ import {
   skills,
   userSkills,
   appSettings,
-  admins,
   notifications,
   buildProject,
   skillsForUser,
@@ -1019,7 +1018,6 @@ export async function getMyTeam() {
     return {
       ...project,
       formation_deadline: appSettings.formation_deadline,
-      viewer_is_admin: admins.includes(id),
       members: project.members.map((m) => {
         const u = users.find((x) => x.id === m.user_id);
         return {
@@ -1051,7 +1049,7 @@ export async function getMyTeam() {
   const [{ data: projectRow, error: projErr }, requestMap, leaveRules] = await Promise.all([
     supabase.from('projects').select(PROJECT_SELECT).eq('id', teamRow.project_id).single(),
     fetchViewerRequestMap(viewerId),
-    fetchLeaveRules(viewerId),
+    fetchLeaveRules(),
   ]);
   if (projErr) throw projErr;
   const project = composeProject(projectRow, viewerId, requestMap);
@@ -1078,19 +1076,17 @@ export async function getMyTeam() {
   };
 }
 
-// When rosters lock, and whether the viewer is an admin who can still leave
-// after that (supabase/20_leave_team_rules.sql). Read separately and
-// forgiving of errors so a database that hasn't run 15_ yet still shows the
-// team page — leave_team() is what actually enforces the deadline.
-async function fetchLeaveRules(viewerId) {
-  const [{ data: settings }, { data: adminRow }] = await Promise.all([
-    supabase.from('app_settings').select('formation_deadline').maybeSingle(),
-    supabase.from('admins').select('user_id').eq('user_id', viewerId).maybeSingle(),
-  ]);
-  return {
-    formation_deadline: settings?.formation_deadline ?? null,
-    viewer_is_admin: Boolean(adminRow),
-  };
+// When rosters lock (supabase/20_leave_team_rules.sql). Read separately and
+// forgiving of errors so a database that hasn't run 20_ yet still shows the
+// team page — leave_team() is what actually enforces the deadline. Only
+// students are ever on a team (18_admin_access.sql), so whoever reads this
+// is subject to the lock.
+async function fetchLeaveRules() {
+  const { data: settings } = await supabase
+    .from('app_settings')
+    .select('formation_deadline')
+    .maybeSingle();
+  return { formation_deadline: settings?.formation_deadline ?? null };
 }
 
 // Deletes the team *and* the project it belongs to — a team exists only to
@@ -1156,7 +1152,7 @@ export async function leaveTeam() {
       throw new Error('You created this project, so you cannot leave it — delete the team instead');
     }
     const deadline = appSettings.formation_deadline;
-    if (deadline && new Date(deadline) <= new Date() && !admins.includes(id)) {
+    if (deadline && new Date(deadline) <= new Date()) {
       throw new Error('The team formation deadline has passed — ask an admin if you need to leave');
     }
 
@@ -1167,7 +1163,7 @@ export async function leaveTeam() {
       user_id: project.creator_id,
       kind: 'member_left',
       project_id: project.id,
-      member_id: id,
+      actor_id: id,
       by_admin: false,
       created_at: new Date().toISOString(),
       read_at: null,
@@ -1203,8 +1199,8 @@ export async function removeMember(userId) {
 // --- Notifications -------------------------------------------------------
 
 // The viewer's unread notifications, newest first. Today the only kind is
-// 'member_left' (someone left a project the viewer created); member_name is
-// who left.
+// 'member_left' (someone left a project the viewer created). actor_name is
+// whoever caused the notification — for 'member_left', who left.
 export async function getNotifications() {
   if (USE_MOCKS) {
     await delay();
@@ -1212,16 +1208,16 @@ export async function getNotifications() {
     return notifications
       .filter((n) => n.user_id === id && !n.read_at)
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .map((n) => ({ ...n, member_name: users.find((u) => u.id === n.member_id)?.name ?? 'Someone' }));
+      .map((n) => ({ ...n, actor_name: users.find((u) => u.id === n.actor_id)?.name ?? 'Someone' }));
   }
 
   const { data, error } = await supabase
     .from('notifications')
-    .select('id, kind, project_id, member_id, by_admin, created_at, read_at, member:users!member_id ( name )')
+    .select('id, kind, project_id, actor_id, by_admin, created_at, read_at, actor:users!actor_id ( name )')
     .is('read_at', null)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return data.map(({ member, ...n }) => ({ ...n, member_name: member?.name ?? 'Someone' }));
+  return data.map(({ actor, ...n }) => ({ ...n, actor_name: actor?.name ?? 'Someone' }));
 }
 
 export async function markNotificationsRead(ids) {
