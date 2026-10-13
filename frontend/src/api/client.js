@@ -948,18 +948,26 @@ export async function createJoinRequest(projectId) {
 export async function respondToRequest(requestId, status, roleId) {
   if (USE_MOCKS) {
     await delay();
-    requireStudentSessionUserId();
+    const me = requireStudentSessionUserId();
+    if (status === 'accepted' && !roleId) throw new Error('A role is required to accept a request');
     const r = joinRequests.find((x) => x.id === requestId);
     if (!r) throw new Error('Request not found');
+    const project = projects.find((p) => p.id === r.project_id);
+    const team = teams.find((t) => t.project_id === r.project_id);
 
-    // Every check runs before anything is mutated. respond_to_join_request
-    // is one transaction server-side, so a rejected accept must not leave
-    // the request marked 'accepted' with nobody actually on the roster.
+    // Every check runs before anything is mutated, in the same order as
+    // respond_to_join_request (21_join_request_responses.sql), which is one
+    // transaction: a rejected accept must not leave the request marked
+    // 'accepted' with nobody actually on the roster.
+    if (project.creator_id !== me) throw new Error('Only the project creator can respond to this request');
+    if (r.status !== 'pending') throw new Error('This request has already been responded to');
     if (status === 'accepted') {
+      if (teamMembers.filter((tm) => tm.team_id === team.id).length >= project.team_size_target) {
+        throw new Error('This team is already full');
+      }
       if (users.find((u) => u.id === r.user_id)?.is_admin) {
         throw new Error('Admin accounts cannot create or join student teams');
       }
-      if (!roleId) throw new Error('A role is required to accept a request');
       // team_members.user_id is the primary key, so a stale request would
       // otherwise fail the insert with a raw constraint violation.
       if (teamMembers.some((tm) => tm.user_id === r.user_id)) {
@@ -972,9 +980,7 @@ export async function respondToRequest(requestId, status, roleId) {
     // Accepting adds the person to the roster, and fills the project once
     // it reaches team_size_target. The backend does this in a transaction.
     if (status === 'accepted') {
-      const team = teams.find((t) => t.project_id === r.project_id);
       teamMembers.push({ team_id: team.id, user_id: r.user_id, role_id: roleId });
-      const project = projects.find((p) => p.id === r.project_id);
       const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
       if (count >= project.team_size_target) {
         project.status = 'full';
@@ -992,10 +998,21 @@ export async function respondToRequest(requestId, status, roleId) {
           jr.status = 'declined';
         });
     }
+
+    notifications.push({
+      id: `n-${Date.now()}-${notifications.length}`,
+      user_id: r.user_id,
+      kind: status === 'accepted' ? 'request_accepted' : 'request_declined',
+      project_id: project.id,
+      actor_id: me,
+      by_admin: false,
+      created_at: new Date().toISOString(),
+      read_at: null,
+    });
     return r;
   }
   // respond_to_join_request() is the one-transaction accept/decline flow —
-  // see supabase/03_functions.sql for the full explanation.
+  // see supabase/21_join_request_responses.sql for the current version.
   const { data, error } = await supabase.rpc('respond_to_join_request', {
     p_request_id: requestId,
     p_status: status,

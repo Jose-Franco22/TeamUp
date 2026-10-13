@@ -726,5 +726,7 @@ Then work through the checks below.
   same template `respond_to_join_request` already uses.
 - **`notifications` was added later** (`20_leave_team_rules.sql`, issue #35) so an owner hears when a
   member leaves; see [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
+  `21_join_request_responses.sql` adds the `request_accepted` / `request_declined` kinds so a
+  requester hears back when their request is answered.
 - **No way to remove yourself as owner** other than deleting the team, and no way to transfer
   ownership. Both are fine for now; flagged in case the scope grows.
