@@ -934,7 +934,7 @@ export async function getMyTeam() {
 }
 
 // When rosters lock, and whether the viewer is an admin who can still leave
-// after that (supabase/15_leave_team_rules.sql). Read separately and
+// after that (supabase/20_leave_team_rules.sql). Read separately and
 // forgiving of errors so a database that hasn't run 15_ yet still shows the
 // team page — leave_team() is what actually enforces the deadline.
 async function fetchLeaveRules(viewerId) {

@@ -1,4 +1,4 @@
--- Leaving a team, part two (issue #35). Run after 14_validate_profile_rules.sql.
+-- Leaving a team, part two (issue #35). Run after 17_keep_filled_roles_on_edit.sql.
 --
 -- 05_membership.sql already lets a student leave and reopens a full
 -- project. This adds the rest of the issue:
@@ -113,9 +113,11 @@ grant execute on function public.mark_notifications_read(uuid[]) to authenticate
 
 -- --- leave_team ----------------------------------------------------------
 -- leave_team() takes the caller off their team. leave_team(p_user_id) is
--- the admin form: take that student off theirs. Dropped and recreated
--- rather than replaced — a second leave_team(uuid default null) alongside
--- the old leave_team() would make a no-argument call ambiguous.
+-- the admin form: take that student off theirs. Builds on the version in
+-- 15_release_filled_roles.sql. Dropped and recreated rather than replaced —
+-- a second leave_team(uuid default null) alongside the old leave_team()
+-- would make a no-argument call ambiguous, so this file must sort after
+-- every file that (re)creates leave_team().
 drop function if exists public.leave_team();
 
 create or replace function public.leave_team(p_user_id uuid default null)
@@ -167,6 +169,10 @@ begin
   end if;
 
   delete from public.team_members where user_id = v_target;
+
+  -- From 15_release_filled_roles.sql: their seat is open again.
+  perform public.restore_project_role(v_project.id, v_membership.role_id);
+
   perform public.sync_project_fill_state(v_project.id);
 
   insert into public.notifications (user_id, kind, project_id, member_id, by_admin)

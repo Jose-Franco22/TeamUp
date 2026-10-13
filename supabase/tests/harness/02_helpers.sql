@@ -66,7 +66,7 @@ declare
   v_request public.join_requests;
 begin
   perform tests.authenticate_as(p_creator);
-  v_project := public.create_project('Test project', '', 2::smallint, v_role, '[]'::jsonb);
+  v_project := public.create_project('Test project', 'A two-seat project used by the tests.', 2::smallint, v_role, '[]'::jsonb);
   perform tests.authenticate_as(p_member);
   v_request := public.create_join_request(v_project.id);
   perform tests.authenticate_as(p_creator);

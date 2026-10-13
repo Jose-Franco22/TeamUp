@@ -1,4 +1,4 @@
--- Leaving a team (issue #35): 05_membership.sql and 15_leave_team_rules.sql.
+-- Leaving a team (issue #35): 05_membership.sql and 20_leave_team_rules.sql.
 begin;
 select plan(18);
 

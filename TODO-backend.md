@@ -479,7 +479,7 @@ that lies about who's working on the project, and a seat the owner can't refill 
 occupies it. The seat reopening immediately is what lets a team recover; the deliberate confirm
 step on `Team.jsx` is what addresses someone leaving on a whim.
 
-**The owner is notified, and rosters lock at a deadline.** `15_leave_team_rules.sql` (issue #35)
+**The owner is notified, and rosters lock at a deadline.** `20_leave_team_rules.sql` (issue #35)
 adds a `notifications` table: `leave_team()` writes a `'member_left'` row for the project's creator,
 which `Team.jsx` shows them until they dismiss it. It's an in-app feed only — real push or email
 would need a service worker or a mail provider, neither of which this project has. The same file
@@ -708,7 +708,7 @@ Then work through the checks below.
 - **No RLS write policy was added for `projects`, and none is needed.** `create_project`,
   `update_project` and `delete_team` are `SECURITY DEFINER` and do their own authorization — the
   same template `respond_to_join_request` already uses.
-- **`notifications` was added later** (`15_leave_team_rules.sql`, issue #35) so an owner hears when a
+- **`notifications` was added later** (`20_leave_team_rules.sql`, issue #35) so an owner hears when a
   member leaves; see [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
 - **No way to remove yourself as owner** other than deleting the team, and no way to transfer
   ownership. Both are fine for now; flagged in case the scope grows.

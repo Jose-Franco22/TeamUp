@@ -297,7 +297,7 @@ export const joinRequests = [
 ];
 
 // --- APP_SETTINGS / ADMINS / NOTIFICATIONS ----------------------------
-// See supabase/15_leave_team_rules.sql. app_settings is a single row;
+// See supabase/20_leave_team_rules.sql. app_settings is a single row;
 // formation_deadline null means rosters never lock. admins lists user_ids
 // allowed past that deadline. notifications: id, user_id (recipient), kind,
 // project_id, member_id, by_admin, created_at, read_at.
