@@ -98,6 +98,7 @@ export function filterRanked(ranked = [], { onlyMatches = false } = {}) {
  * someone who isn't signed in.
  */
 export function rankProjects(projects = [], { student = null, skillById = {} } = {}) {
+  if (student?.is_admin) student = null;
   const scored = projects.map((project) => ({
     project,
     fit: student ? scoreFit({ project, student, skillById }) : null,

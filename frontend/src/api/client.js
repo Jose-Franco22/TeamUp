@@ -58,6 +58,137 @@ function requireSessionUserId() {
   return sessionUserId;
 }
 
+function requireStudentSessionUserId() {
+  const id = requireSessionUserId();
+  if (users.find((u) => u.id === id)?.is_admin) {
+    throw new Error('Admin accounts cannot create or join student teams');
+  }
+  return id;
+}
+
+function requireAdminSessionUserId() {
+  const id = requireSessionUserId();
+  if (!users.find((u) => u.id === id)?.is_admin) throw new Error('Admin access required');
+  return id;
+}
+
+// The database checks the caller's own role, never a browser-supplied user id.
+export async function getAdminAccess() {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    return true;
+  }
+  const { error } = await supabase.rpc('require_admin');
+  if (error) throw error;
+  return true;
+}
+
+// --- Admin dashboard (#37) ---------------------------------------------
+// Detail objects use team ids for /admin/teams/:id and keep project_id
+// separately. No admin view writes to student profiles, requests or rosters.
+function mockPendingRequests(predicate) {
+  return joinRequests
+    .filter((r) => r.status === 'pending' && predicate(r))
+    .slice()
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || a.id.localeCompare(b.id));
+}
+
+function mockAdminTeam(team) {
+  const p = buildProject(projects.find((project) => project.id === team.project_id), sessionUserId);
+  return {
+    id: team.id, project_id: p.id, title: p.title, description: p.description,
+    creator_id: p.creator_id, creator_name: p.creator_name,
+    team_size_target: p.team_size_target, status: p.status, formed_at: p.formed_at,
+    member_count: p.member_count,
+    members: p.members.map((m) => {
+      const u = users.find((student) => student.id === m.user_id);
+      return {
+        user_id: m.user_id, name: m.name, email: u.email,
+        role_id: m.role_id, role_name: m.role, availability_hours: u.availability_hours,
+      };
+    }),
+    roles_needed: p.roles_needed,
+    pending_requests: mockPendingRequests((r) => r.project_id === p.id)
+      .filter((r) => !users.find((u) => u.id === r.user_id)?.is_admin)
+      .map((r) => ({
+        id: r.id, user_id: r.user_id,
+        user_name: users.find((u) => u.id === r.user_id).name, created_at: r.created_at,
+      })),
+  };
+}
+
+function mockAdminStudent(student) {
+  const membership = teamMembers.find((m) => m.user_id === student.id);
+  const team = membership && teams.find((t) => t.id === membership.team_id);
+  const project = team && projects.find((p) => p.id === team.project_id);
+  return {
+    id: student.id, name: student.name, email: student.email, bio: student.bio,
+    availability_hours: student.availability_hours, github_url: student.github_url,
+    skills: skillsForUser(student.id),
+    membership: membership ? {
+      team_id: team.id, project_id: project.id, project_title: project.title,
+      role_id: membership.role_id, role_name: allRoles.find((r) => r.id === membership.role_id)?.name ?? null,
+    } : null,
+    pending_requests: mockPendingRequests((r) => r.user_id === student.id).map((r) => {
+      const p = projects.find((project) => project.id === r.project_id);
+      return {
+        id: r.id, project_id: p.id, team_id: teams.find((t) => t.project_id === p.id)?.id ?? null,
+        project_title: p.title, created_at: r.created_at,
+      };
+    }),
+  };
+}
+
+export async function getAdminDashboard() {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const teamList = teams.map(mockAdminTeam).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+    const unplaced = users
+      .filter((u) => !u.is_admin && !teamMembers.some((m) => m.user_id === u.id))
+      .map(mockAdminStudent)
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    return {
+      teams: teamList, unplaced_students: unplaced,
+      summary: {
+        formed_teams: teamList.filter((t) => t.status === 'full').length,
+        open_teams: teamList.filter((t) => t.status === 'open').length,
+        unplaced_students: unplaced.length,
+      },
+    };
+  }
+  const { data, error } = await supabase.rpc('admin_dashboard');
+  if (error) throw error;
+  return data;
+}
+
+export async function getAdminTeam(teamId) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const team = teams.find((t) => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+    return mockAdminTeam(team);
+  }
+  const { data, error } = await supabase.rpc('admin_team_details', { p_team_id: teamId });
+  if (error) throw error;
+  return data;
+}
+
+export async function getAdminStudent(studentId) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const student = users.find((u) => u.id === studentId && !u.is_admin);
+    if (!student) throw new Error('Student not found');
+    return mockAdminStudent(student);
+  }
+  const { data, error } = await supabase.rpc('admin_student_details', { p_student_id: studentId });
+  if (error) throw error;
+  return data;
+}
+
 async function getViewerId() {
   const {
     data: { session },
@@ -125,9 +256,21 @@ async function fetchViewerRequestMap(viewerId) {
   return byProject;
 }
 
+// Guests cannot read team_members at all, so their seat counts come from one
+// batched aggregate for every project on the page (18_admin_access.sql).
+// Signed-in viewers read the roster itself and need no extra call.
+async function fetchGuestMemberCounts(viewerId, rows) {
+  if (viewerId) return {};
+  const ids = rows.filter((row) => embeddedOne(row.teams)).map((row) => row.id);
+  if (ids.length === 0) return {};
+  const { data, error } = await supabase.rpc('project_member_counts', { p_project_ids: ids });
+  if (error) throw error;
+  return Object.fromEntries((data ?? []).map((r) => [r.project_id, r.member_count]));
+}
+
 // Shapes one `projects` row (as fetched via PROJECT_SELECT) into the same
 // object buildProject() produces from the mocks.
-async function composeProject(row, viewerId, viewerRequestsByProject) {
+function composeProject(row, viewerId, viewerRequestsByProject, guestMemberCounts) {
   // `skills` embeds as null when skill_id is null — a role listed without a
   // specific skill attached, which the schema allows on purpose.
   // A role whose seats have all been filled sits at quantity_needed = 0
@@ -153,7 +296,7 @@ async function composeProject(row, viewerId, viewerRequestsByProject) {
   let avg_availability_hours = null;
 
   if (viewerId) {
-    // Authenticated: full member list, per TODO-backend.md.
+    // Any signed-in viewer can read the roster; RLS leaves out admin accounts.
     members = rawMembers.map((tm) => ({
       user_id: tm.user_id,
       name: tm.users.name,
@@ -165,11 +308,8 @@ async function composeProject(row, viewerId, viewerRequestsByProject) {
       ? Math.round(rawMembers.reduce((sum, tm) => sum + (tm.users.availability_hours || 0), 0) / rawMembers.length)
       : 0;
   } else if (team) {
-    // Guest: team_members RLS returns nothing, so get the count from the
-    // one function that's allowed to see past that (see 03_functions.sql).
-    const { data: count, error } = await supabase.rpc('project_member_count', { p_project_id: row.id });
-    if (error) throw error;
-    member_count = count ?? 0;
+    // Guest: seat count only, no identities or availability.
+    member_count = guestMemberCounts?.[row.id] ?? 0;
   }
 
   return {
@@ -234,7 +374,8 @@ export async function getProjects({ onlyOpen = true } = {}) {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw error;
-  return keep(await Promise.all(rows.map((row) => composeProject(row, viewerId, requestMap))));
+  const guestCounts = await fetchGuestMemberCounts(viewerId, rows);
+  return keep(rows.map((row) => composeProject(row, viewerId, requestMap, guestCounts)));
 }
 
 export async function getProject(id) {
@@ -250,7 +391,7 @@ export async function getProject(id) {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw new Error('Project not found');
-  return composeProject(row, viewerId, requestMap);
+  return composeProject(row, viewerId, requestMap, await fetchGuestMemberCounts(viewerId, [row]));
 }
 
 // `roles_needed` is an array of { role_id, skill_id, quantity_needed }, where
@@ -284,7 +425,7 @@ export async function createProject({
 
   if (USE_MOCKS) {
     await delay();
-    const id = requireSessionUserId();
+    const id = requireStudentSessionUserId();
     // A student can only be on one team — same rule as createJoinRequest.
     const onAnyTeam = teamMembers.some((tm) => tm.user_id === id);
     if (onAnyTeam) throw new Error('You are already on a team and cannot create another project');
@@ -609,7 +750,7 @@ export async function removeSkill(skillId) {
 // test in client.test.js that reads 07_profile_evidence.sql and asserts this
 // nesting, so the two cannot drift again.
 export const USER_SELECT =
-  'id, email, name, bio, availability_hours, github_url, ' +
+  'id, email, name, bio, availability_hours, github_url, is_admin, ' +
   'user_skills ( source, skills ( id, name, category ), profile_evidence ( months, projects ) )';
 
 // PostgREST returns an embedded child as an object when it can tell the
@@ -771,7 +912,7 @@ export async function getRequests() {
 export async function createJoinRequest(projectId) {
   if (USE_MOCKS) {
     await delay();
-    const id = requireSessionUserId();
+    const id = requireStudentSessionUserId();
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new Error('Project not found');
     if (project.creator_id === id) throw new Error('You cannot request to join your own project');
@@ -808,6 +949,7 @@ export async function createJoinRequest(projectId) {
 export async function respondToRequest(requestId, status, roleId) {
   if (USE_MOCKS) {
     await delay();
+    requireStudentSessionUserId();
     const r = joinRequests.find((x) => x.id === requestId);
     if (!r) throw new Error('Request not found');
 
@@ -815,6 +957,9 @@ export async function respondToRequest(requestId, status, roleId) {
     // is one transaction server-side, so a rejected accept must not leave
     // the request marked 'accepted' with nobody actually on the roster.
     if (status === 'accepted') {
+      if (users.find((u) => u.id === r.user_id)?.is_admin) {
+        throw new Error('Admin accounts cannot create or join student teams');
+      }
       if (!roleId) throw new Error('A role is required to accept a request');
       // team_members.user_id is the primary key, so a stale request would
       // otherwise fail the insert with a raw constraint violation.
@@ -909,7 +1054,7 @@ export async function getMyTeam() {
     fetchLeaveRules(viewerId),
   ]);
   if (projErr) throw projErr;
-  const project = await composeProject(projectRow, viewerId, requestMap);
+  const project = composeProject(projectRow, viewerId, requestMap);
 
   // GET /api/me/team enriches each teammate with availability_hours/skills,
   // unlike the plain project views — see TODO-backend.md.
