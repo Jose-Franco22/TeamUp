@@ -45,7 +45,7 @@ select is(
    where user_id = current_setting('tests.owner')::uuid
      and kind = 'member_left'
      and project_id = current_setting('tests.project')::uuid
-     and member_id = current_setting('tests.member')::uuid
+     and actor_id = current_setting('tests.member')::uuid
      and not by_admin
      and read_at is null),
   1,

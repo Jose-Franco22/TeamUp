@@ -40,15 +40,19 @@ create policy "app_settings_update_admin"
   with check (private.is_admin());
 
 -- --- notifications -------------------------------------------------------
--- Written only by SECURITY DEFINER functions (no INSERT policy). Today the
--- only kind is 'member_left': member_id left project_id. by_admin is true
--- when an admin took them off rather than the student leaving themselves.
+-- Written only by SECURITY DEFINER functions (no INSERT policy). This is
+-- the shared notifications table: other stories (#20, #26, #34, #39) add
+-- their own kinds. user_id is who receives it; actor_id is who caused it
+-- (for 'member_left', the student who left). The page a notification opens
+-- is worked out from kind + project_id in the app, not stored. Today the
+-- only kind is 'member_left'. by_admin is true when an admin took the
+-- student off rather than the student leaving themselves.
 create table public.notifications (
   id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null references public.users(id) on delete cascade,
   kind       text not null check (kind in ('member_left')),
   project_id uuid references public.projects(id) on delete cascade,
-  member_id  uuid references public.users(id) on delete set null,
+  actor_id   uuid references public.users(id) on delete set null,
   by_admin   boolean not null default false,
   created_at timestamptz not null default now(),
   read_at    timestamptz
@@ -146,7 +150,7 @@ begin
 
   perform public.sync_project_fill_state(v_project.id);
 
-  insert into public.notifications (user_id, kind, project_id, member_id, by_admin)
+  insert into public.notifications (user_id, kind, project_id, actor_id, by_admin)
   values (v_project.creator_id, 'member_left', v_project.id, v_target, v_target <> caller);
 end;
 $$;

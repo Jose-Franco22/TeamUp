@@ -1163,7 +1163,7 @@ export async function leaveTeam() {
       user_id: project.creator_id,
       kind: 'member_left',
       project_id: project.id,
-      member_id: id,
+      actor_id: id,
       by_admin: false,
       created_at: new Date().toISOString(),
       read_at: null,
@@ -1199,8 +1199,8 @@ export async function removeMember(userId) {
 // --- Notifications -------------------------------------------------------
 
 // The viewer's unread notifications, newest first. Today the only kind is
-// 'member_left' (someone left a project the viewer created); member_name is
-// who left.
+// 'member_left' (someone left a project the viewer created). actor_name is
+// whoever caused the notification — for 'member_left', who left.
 export async function getNotifications() {
   if (USE_MOCKS) {
     await delay();
@@ -1208,16 +1208,16 @@ export async function getNotifications() {
     return notifications
       .filter((n) => n.user_id === id && !n.read_at)
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .map((n) => ({ ...n, member_name: users.find((u) => u.id === n.member_id)?.name ?? 'Someone' }));
+      .map((n) => ({ ...n, actor_name: users.find((u) => u.id === n.actor_id)?.name ?? 'Someone' }));
   }
 
   const { data, error } = await supabase
     .from('notifications')
-    .select('id, kind, project_id, member_id, by_admin, created_at, read_at, member:users!member_id ( name )')
+    .select('id, kind, project_id, actor_id, by_admin, created_at, read_at, actor:users!actor_id ( name )')
     .is('read_at', null)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return data.map(({ member, ...n }) => ({ ...n, member_name: member?.name ?? 'Someone' }));
+  return data.map(({ actor, ...n }) => ({ ...n, actor_name: actor?.name ?? 'Someone' }));
 }
 
 export async function markNotificationsRead(ids) {

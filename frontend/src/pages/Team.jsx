@@ -116,7 +116,7 @@ export default function Team() {
           <ul className="notices">
             {leftNotices.map((n) => (
               <li key={n.id}>
-                {n.by_admin ? `An admin took ${n.member_name} off the team` : `${n.member_name} left the team`}{' '}
+                {n.by_admin ? `An admin took ${n.actor_name} off the team` : `${n.actor_name} left the team`}{' '}
                 on {new Date(n.created_at).toLocaleDateString()}. Their seat is open again.
               </li>
             ))}
