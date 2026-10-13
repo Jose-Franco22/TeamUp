@@ -359,18 +359,27 @@ export async function createProject({
 // Raising the target on a project that had filled reopens it, and lowering
 // it onto the current roster closes it — projects.status and teams.formed_at
 // both follow from the same comparison respond_to_join_request makes.
-export async function updateProject(projectId, { title, description, team_size_target, own_role_id, roles_needed }) {
-  if (team_size_target < MIN_TEAM_SIZE || team_size_target > MAX_TEAM_SIZE) {
-    throw new Error(`A team has to be between ${MIN_TEAM_SIZE} and ${MAX_TEAM_SIZE} people`);
-  }
-  if (!own_role_id) throw new Error('A role is required');
+export async function updateProject(
+  projectId,
+  { title, description, team_size_target, own_role_id, roles_needed },
+  { memberCount = 1 } = {}
+) {
+  // The same rules as createProject, from the same function — an edit must
+  // not be able to save what a create would have refused.
+  //
+  // `memberCount` is how many people already hold a seat. The caller knows
+  // it (EditProject has it from getProject) and the client cannot without
+  // an extra round trip, so it is passed in. It only affects the two rules
+  // that depend on the roster — the target can't drop below it, and the
+  // open seats are counted from it — and update_project() re-checks both
+  // server-side from the real roster, so a wrong value here cannot let a
+  // bad edit through.
+  const { values, errors, isValid } = validateProject(
+    { title, description, team_size_target, own_role_id, roles_needed },
+    { memberCount }
+  );
+  if (!isValid) throw new ValidationError(errors);
 
-  const seen = new Set();
-  for (const r of roles_needed) {
-    if (!r.role_id) throw new Error('Every role you list needs a role selected');
-    if (seen.has(r.role_id)) throw new Error('You listed the same role twice');
-    seen.add(r.role_id);
-  }
   assertRolesMatchSkills(roles_needed);
 
   if (USE_MOCKS) {
@@ -399,9 +408,10 @@ export async function updateProject(projectId, { title, description, team_size_t
     }
 
     Object.assign(project, {
-      title,
-      description,
-      team_size_target,
+      // The validated, trimmed values — update_project() btrims server-side.
+      title: values.title,
+      description: values.description,
+      team_size_target: values.team_size_target,
       status: roster.length >= team_size_target ? 'full' : 'open',
     });
     team.formed_at = roster.length >= team_size_target ? team.formed_at || new Date().toISOString() : null;
@@ -409,8 +419,18 @@ export async function updateProject(projectId, { title, description, team_size_t
     const mine = roster.find((tm) => tm.user_id === id);
     mine.role_id = own_role_id;
 
+    // Roles whose seats are all filled sit at quantity_needed = 0 and are
+    // hidden from the form (composeProject filters them out), so the
+    // creator never saw them and cannot have meant to remove them. Keeping
+    // them preserves the skill pinned to each one, so the seat can reopen
+    // if that member leaves. Mirrors update_project() in
+    // supabase/17_keep_filled_roles_on_edit.sql.
+    const submitted = new Set(roles_needed.map((r) => r.role_id));
     for (let i = projectRolesNeeded.length - 1; i >= 0; i -= 1) {
-      if (projectRolesNeeded[i].project_id === projectId) projectRolesNeeded.splice(i, 1);
+      const row = projectRolesNeeded[i];
+      if (row.project_id !== projectId) continue;
+      if (row.quantity_needed === 0 && !submitted.has(row.role_id)) continue;
+      projectRolesNeeded.splice(i, 1);
     }
     for (const r of roles_needed) {
       projectRolesNeeded.push({
@@ -426,9 +446,9 @@ export async function updateProject(projectId, { title, description, team_size_t
 
   const { error } = await supabase.rpc('update_project', {
     p_project_id: projectId,
-    p_title: title,
-    p_description: description,
-    p_team_size_target: team_size_target,
+    p_title: values.title,
+    p_description: values.description,
+    p_team_size_target: values.team_size_target,
     p_own_role_id: own_role_id,
     p_roles_needed: roles_needed,
   });

@@ -108,7 +108,12 @@ export default function ProjectForm({
 
   function updateForm(patch) {
     setForm((f) => ({ ...f, ...patch }));
-    touch(...Object.keys(patch));
+    // Changing the team size changes how many seats the listed roles are
+    // allowed to claim, so it can invalidate the roles without the student
+    // having touched them. Reveal that error too, or Save just goes grey
+    // with nothing on screen saying why.
+    const also = 'team_size_target' in patch ? ['roles_needed'] : [];
+    touch(...Object.keys(patch), ...also);
     setSubmitState(null);
     setServerErrors({});
   }
