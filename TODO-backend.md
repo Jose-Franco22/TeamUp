@@ -496,10 +496,13 @@ step on `Team.jsx` is what addresses someone leaving on a whim.
 adds a `notifications` table: `leave_team()` writes a `'member_left'` row for the project's creator,
 which `Team.jsx` shows them until they dismiss it. It's an in-app feed only — real push or email
 would need a service worker or a mail provider, neither of which this project has. The same file
-adds a class-wide `app_settings.formation_deadline`: after it, `leave_team()` refuses students,
-and an admin can still take a student off with `leave_team(p_user_id)`. "Admin" means
-`users.is_admin`, checked with `private.is_admin()` from `18_admin_access.sql` (#36), whose trigger
-already stops a student from setting that flag on themselves.
+adds a class-wide formation deadline, read only through `formation_deadline()` (today it returns
+`app_settings.formation_deadline`; #38 will point it at its milestones table). After it,
+`leave_team()` refuses students. Taking a student off is an admin's job (#39), and both paths share
+`private.remove_from_team(p_user_id, p_by_admin)` — the one place a seat is given up: it deletes the
+membership, restores the role, resyncs the project and notifies the creator. Only an admin
+(`users.is_admin`, checked with `private.is_admin()` from `18_admin_access.sql`, #36) can set the
+deadline.
 
 ## Deleting a team — `delete_team()`
 

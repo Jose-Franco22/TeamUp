@@ -4,9 +4,10 @@
 -- project. This adds the rest of the issue:
 --   * the project's creator gets a notification when someone leaves;
 --   * leaving is blocked once the team formation deadline has passed;
---   * an admin can still take a student off after the deadline. Admins
---     can't be on teams (18_admin_access.sql), so an admin never leaves
---     for themselves.
+--   * private.remove_from_team(), the one place a seat is given up. An
+--     admin taking a student off is #39's function, which calls it with
+--     p_by_admin => true. Admins can't be on teams (18_admin_access.sql),
+--     so whoever calls leave_team() is a student.
 --
 -- The creator still can't leave — delete_team() is their equivalent.
 
@@ -16,6 +17,8 @@
 -- --- app_settings --------------------------------------------------------
 -- One row of class-wide settings. formation_deadline is when rosters lock:
 -- after it, students can't leave on their own. Null means no deadline set.
+-- Read it through public.formation_deadline() below, not this table: #38
+-- moves the date to a milestones table and only that function changes.
 --
 --   update public.app_settings set formation_deadline = '2026-11-01 23:59 America/Chicago';
 create table public.app_settings (
@@ -86,16 +89,73 @@ $$;
 
 grant execute on function public.mark_notifications_read(uuid[]) to authenticated;
 
--- --- leave_team ----------------------------------------------------------
--- leave_team() takes the caller off their team. leave_team(p_user_id) is
--- the admin form: take that student off theirs. Builds on the version in
--- 15_release_filled_roles.sql. Dropped and recreated rather than replaced —
--- a second leave_team(uuid default null) alongside the old leave_team()
--- would make a no-argument call ambiguous, so this file must sort after
--- every file that (re)creates leave_team().
-drop function if exists public.leave_team();
+-- --- formation_deadline -------------------------------------------------
+-- The one way to read the formation deadline, for SQL and the app alike
+-- (supabase.rpc('formation_deadline')). Null means no deadline. #38 will
+-- rewrite this body to read its milestones table and drop app_settings;
+-- callers don't change.
+create or replace function public.formation_deadline()
+returns timestamptz
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select formation_deadline from public.app_settings;
+$$;
 
-create or replace function public.leave_team(p_user_id uuid default null)
+grant execute on function public.formation_deadline() to anon, authenticated;
+
+-- --- remove_from_team ----------------------------------------------------
+-- Takes p_user_id off their team and reopens their seat: deletes the
+-- membership, restores the role they held (15_release_filled_roles.sql),
+-- resyncs the project's fill state and tells the creator. leave_team()
+-- calls it for the caller; #39's admin removal calls it with
+-- p_by_admin => true, which the creator's notification records.
+--
+-- Who may remove whom, the creator rule and the deadline are the caller's
+-- job — this only does the removal. Not callable from the API.
+create or replace function private.remove_from_team(p_user_id uuid, p_by_admin boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_membership public.team_members;
+  v_project public.projects;
+begin
+  delete from public.team_members where user_id = p_user_id
+    returning * into v_membership;
+  if not found then
+    raise exception 'That student is not on a team';
+  end if;
+
+  select p.* into v_project
+    from public.projects p
+    join public.teams t on t.project_id = p.id
+    where t.id = v_membership.team_id;
+
+  perform public.restore_project_role(v_project.id, v_membership.role_id);
+  perform public.sync_project_fill_state(v_project.id);
+
+  insert into public.notifications (user_id, kind, project_id, actor_id, by_admin)
+  values (v_project.creator_id, 'member_left', v_project.id, p_user_id, p_by_admin);
+end;
+$$;
+
+revoke all on function private.remove_from_team(uuid, boolean) from public, anon, authenticated;
+
+-- --- leave_team ----------------------------------------------------------
+-- The caller leaves their own team. Builds on the version in
+-- 15_release_filled_roles.sql. An earlier version of this file added an
+-- admin form, leave_team(p_user_id uuid default null); drop it so a
+-- database that ran that version doesn't keep it (and so a no-argument
+-- call isn't ambiguous). This file must sort after every file that
+-- (re)creates leave_team().
+drop function if exists public.leave_team(uuid);
+
+create or replace function public.leave_team()
 returns void
 language plpgsql
 security definer
@@ -103,56 +163,33 @@ set search_path = public
 as $$
 declare
   caller uuid := auth.uid();
-  v_target uuid := coalesce(p_user_id, auth.uid());
-  v_is_admin boolean;
   v_deadline timestamptz;
-  v_membership public.team_members;
-  v_team public.teams;
-  v_project public.projects;
 begin
   if caller is null then
     raise exception 'Not signed in';
   end if;
 
-  v_is_admin := private.is_admin();
-
-  if v_target <> caller and not v_is_admin then
-    raise exception 'Only an admin can take someone else off a team';
+  if not exists (select 1 from public.team_members where user_id = caller) then
+    raise exception 'You are not on a team';
   end if;
 
-  select * into v_membership from public.team_members where user_id = v_target;
-  if not found then
-    if v_target = caller then
-      raise exception 'You are not on a team';
-    end if;
-    raise exception 'That student is not on a team';
+  if exists (
+    select 1
+      from public.team_members tm
+      join public.teams t on t.id = tm.team_id
+      join public.projects p on p.id = t.project_id
+      where tm.user_id = caller and p.creator_id = caller
+  ) then
+    raise exception 'You created this project, so you cannot leave it — delete the team instead';
   end if;
 
-  select * into v_team from public.teams where id = v_membership.team_id;
-  select * into v_project from public.projects where id = v_team.project_id;
-
-  if v_project.creator_id = v_target then
-    if v_target = caller then
-      raise exception 'You created this project, so you cannot leave it — delete the team instead';
-    end if;
-    raise exception 'The project creator cannot leave — delete the team instead';
-  end if;
-
-  select formation_deadline into v_deadline from public.app_settings;
-  if v_deadline is not null and now() >= v_deadline and not v_is_admin then
+  v_deadline := public.formation_deadline();
+  if v_deadline is not null and now() >= v_deadline then
     raise exception 'The team formation deadline has passed — ask an admin if you need to leave';
   end if;
 
-  delete from public.team_members where user_id = v_target;
-
-  -- From 15_release_filled_roles.sql: their seat is open again.
-  perform public.restore_project_role(v_project.id, v_membership.role_id);
-
-  perform public.sync_project_fill_state(v_project.id);
-
-  insert into public.notifications (user_id, kind, project_id, actor_id, by_admin)
-  values (v_project.creator_id, 'member_left', v_project.id, v_target, v_target <> caller);
+  perform private.remove_from_team(caller, false);
 end;
 $$;
 
-grant execute on function public.leave_team(uuid) to authenticated;
+grant execute on function public.leave_team() to authenticated;

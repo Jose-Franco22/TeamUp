@@ -1076,17 +1076,15 @@ export async function getMyTeam() {
   };
 }
 
-// When rosters lock (supabase/20_leave_team_rules.sql). Read separately and
-// forgiving of errors so a database that hasn't run 20_ yet still shows the
-// team page — leave_team() is what actually enforces the deadline. Only
-// students are ever on a team (18_admin_access.sql), so whoever reads this
-// is subject to the lock.
+// When rosters lock (supabase/20_leave_team_rules.sql). Read through
+// formation_deadline() rather than a table, so #38 can move where the date
+// lives without touching this. Forgiving of errors so a database that
+// hasn't run 20_ yet still shows the team page — leave_team() is what
+// actually enforces the deadline. Only students are ever on a team
+// (18_admin_access.sql), so whoever reads this is subject to the lock.
 async function fetchLeaveRules() {
-  const { data: settings } = await supabase
-    .from('app_settings')
-    .select('formation_deadline')
-    .maybeSingle();
-  return { formation_deadline: settings?.formation_deadline ?? null };
+  const { data: deadline } = await supabase.rpc('formation_deadline');
+  return { formation_deadline: deadline ?? null };
 }
 
 // Deletes the team *and* the project it belongs to — a team exists only to
@@ -1138,8 +1136,8 @@ export async function deleteTeam(teamId) {
 //
 // A project's creator can't leave their own project (projects.creator_id
 // points at them); for them the equivalent is deleteTeam(). After the team
-// formation deadline only an admin can leave, and the creator is notified
-// either way.
+// formation deadline a student can't leave (an admin can take them off —
+// #39), and the creator is notified either way.
 export async function leaveTeam() {
   if (USE_MOCKS) {
     await delay();

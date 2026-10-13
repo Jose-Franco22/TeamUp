@@ -1,6 +1,6 @@
 -- Leaving a team (issue #35): 05_membership.sql and 20_leave_team_rules.sql.
 begin;
-select plan(21);
+select plan(22);
 
 -- --- leave_team() removes the caller from the team ------------------------
 select set_config('tests.owner',  tests.sign_in_with_microsoft('owner01@utrgv.edu', 'Owner')::text, true);
@@ -117,10 +117,6 @@ select throws_ok(
   $$ select public.leave_team() $$,
   'P0001', 'The team formation deadline has passed — ask an admin if you need to leave',
   'a student can''t leave after the formation deadline');
-select throws_ok(
-  $$ select public.leave_team(current_setting('tests.owner')::uuid) $$,
-  'P0001', 'Only an admin can take someone else off a team',
-  'a student can''t take someone else off a team');
 select tests.clear_authentication();
 
 select is(
@@ -128,18 +124,27 @@ select is(
   1,
   'the student is still on the team after the refused leave');
 
-select tests.authenticate_as(current_setting('tests.admin')::uuid);
-select lives_ok(
-  $$ select public.leave_team(current_setting('tests.member2')::uuid) $$,
-  'an admin can take a student off a team after the deadline');
+-- Admin removal after the deadline is #39's function (it calls
+-- private.remove_from_team with p_by_admin => true); its tests live there.
+
+-- --- One way to read the deadline -------------------------------------------
+select is(
+  public.formation_deadline(),
+  (select formation_deadline from public.app_settings),
+  'formation_deadline() returns the deadline leave_team() checks');
+
+select tests.authenticate_as(current_setting('tests.member2')::uuid);
+select isnt(
+  public.formation_deadline(),
+  null,
+  'a student can read the deadline through formation_deadline()');
 select tests.clear_authentication();
 
-select results_eq(
-  $$ select (select count(*)::int from public.team_members where user_id = current_setting('tests.member2')::uuid),
-            (select status from public.projects where id = current_setting('tests.project2')::uuid),
-            (select by_admin from public.notifications where user_id = current_setting('tests.owner2')::uuid) $$,
-  $$ values (0, 'open'::text, true) $$,
-  'after an admin does it: the student is off, the project reopens, and the creator is told an admin did it');
+-- --- leave_team() only takes the caller off -----------------------------------
+select hasnt_function('public', 'leave_team', array['uuid'],
+  'leave_team() has no form that takes someone else off a team');
+select function_privs_are('private', 'remove_from_team', array['uuid', 'boolean'], 'authenticated', array[]::text[],
+  'students can''t call remove_from_team() directly');
 
 select * from finish();
 rollback;
