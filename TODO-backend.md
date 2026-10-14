@@ -774,3 +774,46 @@ Then work through the checks below.
   requester hears back when their request is answered.
 - **No way to remove yourself as owner** other than deleting the team, and no way to transfer
   ownership. Both are fine for now; flagged in case the scope grows.
+
+### AI fit review (the `fit-review` Edge Function)
+
+The Browse card's score comes from the point system in
+`frontend/src/lib/matching/fit.js`, which runs in the browser, instantly and
+offline. **Get AI verdict** is the optional second stage: it sends the project,
+the student's skills and the point system's own working to Gemini, which reads
+the project *description* — the one thing a skill-id comparison cannot — and
+answers with its own score. That score then replaces the number in the ring.
+
+The key never reaches the browser. Vite inlines every `VITE_*` variable into
+the public bundle, so the call goes to our own Edge Function and only it holds
+`GEMINI_API_KEY`.
+
+Set it up:
+
+```bash
+supabase secrets set GEMINI_API_KEY=<key from https://aistudio.google.com/apikey>
+supabase functions deploy fit-review
+```
+
+Optional: `supabase secrets set GEMINI_MODEL=<model>`. The default is
+`gemini-3.1-flash-lite`. Measured on 2026-10-14 against the real prompt, three
+students: `gemini-3.1-flash-lite` answered in 1.6–3.3 s and
+`gemini-3.5-flash-lite` in 11–17 s, with identical scores and no thinking
+tokens, so the faster one is the default.
+
+**Until it is deployed, nothing breaks.** Every failure — no key, not
+deployed, rate limited, offline, slow, or a reply that cannot be read — leaves
+the point score on screen with a one-line note saying the review was not
+available. The button only appears when `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY` are set, and never on a project scoring zero, where
+the point system is already certain and the call would be wasted.
+
+Nothing personal is sent. No name, email or id goes into the payload — the
+free tier's terms forbid personal information, and none of it helps judge a
+skills match. `buildPayload()` copies each field out by hand rather than
+spreading objects, precisely so a new column on `users` cannot leak into the
+prompt later; `judge.test.js` asserts it against a student carrying every
+identifier the app has.
+
+The free tier allows 15 requests a minute. One press of the button is one
+call, and a 429 is reported as "try again in a minute" rather than an error.
