@@ -1190,20 +1190,45 @@ export async function leaveTeam() {
   if (error) throw error;
 }
 
-// The project's creator removes someone else from the roster.
+// The project's creator removes someone else from the roster, or an admin
+// removes any student but the creator. Mirrors remove_member()
+// (supabase/22_remove_member_rules.sql): after the team formation deadline
+// only an admin can, and the removed student is notified. The creator is
+// only notified when it was an admin.
 export async function removeMember(userId) {
   if (USE_MOCKS) {
     await delay();
     const id = requireSessionUserId();
+    const isAdmin = Boolean(users.find((u) => u.id === id)?.is_admin);
     if (userId === id) throw new Error('You cannot remove yourself — delete the team instead');
     const membership = teamMembers.find((tm) => tm.user_id === userId);
     if (!membership) throw new Error('That student is not on a team');
     const team = teams.find((t) => t.id === membership.team_id);
     const project = projects.find((p) => p.id === team.project_id);
-    if (project.creator_id !== id) throw new Error('Only the team owner can remove a member');
+    if (project.creator_id !== id && !isAdmin) {
+      throw new Error('Only the project creator can remove a member');
+    }
+    if (userId === project.creator_id) {
+      throw new Error('The project creator cannot be removed — delete the team instead');
+    }
+    const deadline = appSettings.formation_deadline;
+    if (!isAdmin && deadline && new Date(deadline) <= new Date()) {
+      throw new Error('The team formation deadline has passed — ask an admin to remove them');
+    }
 
     teamMembers.splice(teamMembers.indexOf(membership), 1);
     syncProjectFillState(project, team);
+    const notify = (n) =>
+      notifications.push({
+        id: `n-${Date.now()}-${notifications.length}`,
+        project_id: project.id,
+        by_admin: isAdmin,
+        created_at: new Date().toISOString(),
+        read_at: null,
+        ...n,
+      });
+    notify({ user_id: userId, kind: 'member_removed', actor_id: id });
+    if (isAdmin) notify({ user_id: project.creator_id, kind: 'member_left', actor_id: userId });
     return;
   }
 
@@ -1213,9 +1238,13 @@ export async function removeMember(userId) {
 
 // --- Notifications -------------------------------------------------------
 
-// The viewer's unread notifications, newest first. Today the only kind is
-// 'member_left' (someone left a project the viewer created). actor_name is
-// whoever caused the notification — for 'member_left', who left.
+// The viewer's unread notifications, newest first. Kinds: 'member_left'
+// (someone left, or an admin took them off, a project the viewer created),
+// 'member_removed' (the viewer was taken off a team), 'request_accepted' and
+// 'request_declined'. actor_name is whoever caused the notification — for
+// 'member_left', who left; for 'member_removed', who removed the viewer.
+// project_title is included because a removed student is no longer on the
+// project, so the app has nowhere else to look it up.
 export async function getNotifications() {
   if (USE_MOCKS) {
     await delay();
@@ -1223,16 +1252,24 @@ export async function getNotifications() {
     return notifications
       .filter((n) => n.user_id === id && !n.read_at)
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .map((n) => ({ ...n, actor_name: users.find((u) => u.id === n.actor_id)?.name ?? 'Someone' }));
+      .map((n) => ({
+        ...n,
+        actor_name: users.find((u) => u.id === n.actor_id)?.name ?? 'Someone',
+        project_title: projects.find((p) => p.id === n.project_id)?.title ?? 'a project',
+      }));
   }
 
   const { data, error } = await supabase
     .from('notifications')
-    .select('id, kind, project_id, actor_id, by_admin, created_at, read_at, actor:users!actor_id ( name )')
+    .select('id, kind, project_id, actor_id, by_admin, created_at, read_at, actor:users!actor_id ( name ), project:projects ( title )')
     .is('read_at', null)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return data.map(({ actor, ...n }) => ({ ...n, actor_name: actor?.name ?? 'Someone' }));
+  return data.map(({ actor, project, ...n }) => ({
+    ...n,
+    actor_name: actor?.name ?? 'Someone',
+    project_title: project?.title ?? 'a project',
+  }));
 }
 
 export async function markNotificationsRead(ids) {

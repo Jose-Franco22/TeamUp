@@ -504,6 +504,14 @@ membership, restores the role, resyncs the project and notifies the creator. Onl
 (`users.is_admin`, checked with `private.is_admin()` from `18_admin_access.sql`, #36) can set the
 deadline.
 
+**Removing follows the same rules.** `22_remove_member_rules.sql` (issue #29) sends
+`remove_member()` through `private.remove_from_team()` too. Only the creator can remove a member,
+never themself, and the formation deadline blocks them the same way it blocks leaving. An admin can
+still remove any student except the creator after the deadline. The removed student gets a
+`'member_removed'` notification, which `Team.jsx` shows even once they're off the team. The creator
+is only notified (`'member_left'`, `by_admin`) when an admin did the removal. Once the
+`team_members` row is gone, the student is free to request or start another project.
+
 ## Deleting a team — `delete_team()`
 
 > This section assumes the function approach. A single DELETE policy on `projects` would also
