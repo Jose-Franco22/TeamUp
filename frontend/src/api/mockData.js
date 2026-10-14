@@ -297,16 +297,36 @@ export const joinRequests = [
   { id: 'jr-4', project_id: 'p-lab', user_id: 'u-adan', status: 'declined', created_at: '2026-08-26T11:00:00Z' },
 ];
 
-// --- APP_SETTINGS / NOTIFICATIONS -------------------------------------
-// See supabase/20_leave_team_rules.sql. app_settings is a single row;
-// formation_deadline null means rosters never lock. Admins are users with
+// --- MILESTONES / NOTIFICATIONS / ADMIN_ACTIONS -----------------------
+// See supabase/26_milestones.sql. milestones: id, name, due_at,
+// is_formation_deadline — at most one has the flag, and its due_at is when
+// rosters lock. None flagged means they never lock. Admins are users with
 // is_admin (above), as in 18_admin_access.sql. notifications: id, user_id
 // (recipient), kind, project_id, actor_id, by_admin, created_at, read_at.
 // 21_join_request_responses.sql adds the request_accepted/declined kinds.
 // 23_join_request_notifications.sql adds 'join_request', for the creator.
-export const appSettings = { formation_deadline: null };
+// 27_admin_placement.sql adds 'member_assigned' and 'member_added', and
+// admin_actions, the record of every admin placement change.
+export const milestones = [];
+
+// formation_deadline() in 26_milestones.sql.
+export function formationDeadline() {
+  return milestones.find((m) => m.is_formation_deadline)?.due_at ?? null;
+}
+
+// Tests set the deadline directly. null clears it.
+export function setFormationDeadline(dueAt) {
+  for (let i = milestones.length - 1; i >= 0; i -= 1) {
+    if (milestones[i].is_formation_deadline) milestones.splice(i, 1);
+  }
+  if (dueAt) {
+    milestones.push({ id: `ms-deadline-${Date.now()}`, name: 'Team formation deadline', due_at: dueAt, is_formation_deadline: true });
+  }
+}
 
 export const notifications = [];
+
+export const adminActions = [];
 
 // --- Composition helpers ----------------------------------------------
 // These stand in for the joins the backend will do. Keeping them here

@@ -147,9 +147,13 @@ export default function Team() {
   const deadline = data.formation_deadline ? new Date(data.formation_deadline) : null;
   const rosterLocked = Boolean(deadline && deadline <= new Date());
 
-  const leftNotices = isOwner
-    ? (notices.data || []).filter((n) => n.kind === 'member_left' && n.project_id === data.id)
-    : [];
+  // member_left and member_added go to the owner; member_assigned to the
+  // student an admin put on this team (27_admin_placement.sql).
+  const leftNotices = (notices.data || []).filter(
+    (n) =>
+      n.project_id === data.id &&
+      (n.kind === 'member_assigned' || (isOwner && (n.kind === 'member_left' || n.kind === 'member_added')))
+  );
 
   return (
     <>
@@ -172,8 +176,11 @@ export default function Team() {
           <ul className="notices">
             {leftNotices.map((n) => (
               <li key={n.id}>
-                {n.by_admin ? `An admin took ${n.actor_name} off the team` : `${n.actor_name} left the team`}{' '}
-                on {new Date(n.created_at).toLocaleDateString()}. Their seat is open again.
+                {n.kind === 'member_assigned'
+                  ? `An admin placed you on this team on ${new Date(n.created_at).toLocaleDateString()}.`
+                  : n.kind === 'member_added'
+                    ? `An admin added ${n.actor_name} to the team on ${new Date(n.created_at).toLocaleDateString()}.`
+                    : `${n.by_admin ? `An admin took ${n.actor_name} off the team` : `${n.actor_name} left the team`} on ${new Date(n.created_at).toLocaleDateString()}. Their seat is open again.`}
               </li>
             ))}
           </ul>

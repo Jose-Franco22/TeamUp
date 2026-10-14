@@ -14,6 +14,7 @@ import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
 import Walkthrough from './components/Walkthrough';
 import { PendingBadge, RequestNotices, useRequestAlerts } from './components/RequestAlerts';
+import { MilestoneBanner } from './components/Milestones';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 
@@ -104,6 +105,7 @@ export default function App() {
       </header>
 
       <main className="shell">
+        {signedIn && !isAdmin && <MilestoneBanner />}
         <RequestNotices notices={requestAlerts.notices} onDismiss={requestAlerts.dismiss} />
         <Routes>
           <Route path="/login" element={<Login />} />

@@ -136,6 +136,16 @@ project, its creator gets an in-app notice naming them, with a link to `/request
 Requests tab shows how many requests are waiting. Email copies need a one-time Edge Function and
 webhook setup — see [Email notifications in TODO-backend.md](TODO-backend.md#email-notifications).
 
+## Deadlines, milestones and admin placement (#38, #39)
+
+Apply `supabase/26_milestones.sql`, then `supabase/27_admin_placement.sql`, after `25`. Admins add
+milestones on `/admin`, and can mark one as the team formation deadline. After it, students can't
+post projects, send requests, leave or remove members. Students see what's coming up in a banner at
+the top of every page. On a student's admin page, an admin can assign them to a team with an open
+seat, move them to another team, or remove them, even after the deadline. Each change notifies the
+people affected and is listed under **Recent admin changes** on `/admin`. TODO-backend.md has the
+details, next to the leaving and removing rules.
+
 ## Testing
 
 Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.

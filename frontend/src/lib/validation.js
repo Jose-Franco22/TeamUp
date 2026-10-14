@@ -237,3 +237,28 @@ export function fieldErrorsFromDbError(error) {
   }
   return null;
 }
+
+// --- Milestones (issue #38) -----------------------------------------------
+// Mirrored by milestones_name_length and the raises in save_milestone()
+// (supabase/26_milestones.sql), which are the real boundary.
+export const MILESTONE_NAME_MAX = 80;
+
+// `due_at` is whatever the form holds — a datetime-local string such as
+// "2026-11-01T23:59", read as the viewer's local time — or an ISO string.
+// The cleaned value is an ISO timestamp, ready to send.
+export function validateMilestone({ name, due_at }) {
+  const errors = {};
+  const values = {};
+
+  const trimmed = String(name ?? '').trim();
+  if (trimmed === '') errors.name = 'Give the milestone a name';
+  else if (charCount(trimmed) > MILESTONE_NAME_MAX) {
+    errors.name = `Keep the name to ${MILESTONE_NAME_MAX} characters or fewer`;
+  } else values.name = trimmed;
+
+  const when = due_at ? new Date(due_at) : null;
+  if (!when || Number.isNaN(when.getTime())) errors.due_at = 'Pick a due date and time';
+  else values.due_at = when.toISOString();
+
+  return { values, errors, isValid: Object.keys(errors).length === 0 };
+}

@@ -802,3 +802,25 @@ button:disabled { opacity: 0.45; cursor: default; }
 .fit-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .btn.small { padding: 5px 10px; font-size: 12.5px; }
 .fit-note { font-size: 12px; color: var(--mute); }
+
+/* ---------- milestones (issue #38) ---------- */
+.milestone-banner { padding: 14px 18px; }
+.milestone-locked { margin: 0 0 8px; font-size: 13.5px; color: var(--warn); }
+.milestone-locked:last-child { margin-bottom: 0; }
+.milestone-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 28px; }
+.milestone-list li { display: flex; flex-direction: column; min-width: 0; }
+.milestone-name { font-size: 13.5px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
+.milestone-due { font-size: 12.5px; color: var(--slate); }
+.milestone-admin-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.milestone-admin-list li > div { min-width: 0; overflow-wrap: anywhere; }
+.milestone-form,
+.placement-form { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.milestone-form h3,
+.placement-form h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
+.milestone-form .switch { align-items: flex-start; margin-bottom: 4px; }
+.milestone-form .switch input { margin-top: 3px; flex: none; }
+
+/* ---------- admin placement (issue #39) ---------- */
+.placement { margin-top: 14px; }
+.placement > .hint { margin: 0; }
+.placement-ok { margin: 10px 0 0; color: var(--open); }
