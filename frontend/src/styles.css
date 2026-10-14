@@ -411,6 +411,24 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: var(--ink);
 }
 .role-row .btn { padding: 9px 12px; white-space: nowrap; }
+/* The searchable skill picker sits in the row like the role <select>. */
+.role-row .skill-select { flex: 1; min-width: 0; }
+.skill-select-trigger {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.skill-select-trigger:disabled { color: var(--mute); cursor: not-allowed; }
 
 .hint.seats { margin: 8px 0 0; }
 .hint.seats.over { color: var(--danger); }
@@ -418,7 +436,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 /* Role + skill + quantity + remove is too much for a phone-width row. */
 @media (max-width: 620px) {
   .role-row { flex-wrap: wrap; }
-  .role-row select { flex: 1 1 100%; }
+  .role-row select,
+  .role-row .skill-select { flex: 1 1 100%; }
 }
 
 /* ---------- roster ---------- */
