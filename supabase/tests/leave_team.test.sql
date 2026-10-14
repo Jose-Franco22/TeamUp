@@ -51,13 +51,15 @@ select is(
   1,
   'the creator gets an unread notification naming who left');
 
+-- Filtered to 'member_left': the creator also has a 'join_request'
+-- notification from the member asking to join (23_join_request_notifications.sql).
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select is(
-  (select count(*)::int from public.notifications),
+  (select count(*)::int from public.notifications where kind = 'member_left'),
   1,
   'the creator can read their notification');
 select lives_ok(
-  $$ select public.mark_notifications_read(array(select id from public.notifications)) $$,
+  $$ select public.mark_notifications_read(array(select id from public.notifications where kind = 'member_left')) $$,
   'the creator can mark it read');
 -- Filtered to 'member_left': the member has their own 'request_accepted'
 -- notification from joining (21_join_request_responses.sql).
@@ -69,7 +71,8 @@ select is(
 select tests.clear_authentication();
 
 select isnt(
-  (select read_at from public.notifications where user_id = current_setting('tests.owner')::uuid),
+  (select read_at from public.notifications
+   where user_id = current_setting('tests.owner')::uuid and kind = 'member_left'),
   null,
   'marking read is saved');
 

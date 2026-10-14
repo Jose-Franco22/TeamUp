@@ -4,6 +4,7 @@ import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
 import StatusPill from '../components/StatusPill';
+import { REQUESTS_CHANGED } from '../components/RequestAlerts';
 
 // Default role for an incoming request: whichever listed role has a skill
 // pinned to it that the applicant actually claims, otherwise the first role
@@ -43,6 +44,8 @@ export default function Requests() {
       // page for the loading state. Accepting can change other rows too
       // (the team may now be full), so take the server's list wholesale.
       setData(await getRequests());
+      // The Requests tab's pending count lives in App; tell it to recount.
+      window.dispatchEvent(new Event(REQUESTS_CHANGED));
     } catch (err) {
       setRowErrors((e) => ({ ...e, [id]: err.message || 'Something went wrong.' }));
     } finally {

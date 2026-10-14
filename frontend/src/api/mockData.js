@@ -303,6 +303,7 @@ export const joinRequests = [
 // is_admin (above), as in 18_admin_access.sql. notifications: id, user_id
 // (recipient), kind, project_id, actor_id, by_admin, created_at, read_at.
 // 21_join_request_responses.sql adds the request_accepted/declined kinds.
+// 23_join_request_notifications.sql adds 'join_request', for the creator.
 export const appSettings = { formation_deadline: null };
 
 export const notifications = [];
