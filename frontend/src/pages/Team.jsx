@@ -4,9 +4,11 @@ import {
   deleteTeam,
   getMyTeam,
   getNotifications,
+  getRoles,
   leaveTeam,
   markNotificationsRead,
   removeMember,
+  setMemberRole,
 } from '../api/client';
 import { useSession } from '../auth/SessionContext';
 import useAsync from '../components/useAsync';
@@ -15,7 +17,7 @@ import Avatar from '../components/Avatar';
 import StatusPill from '../components/StatusPill';
 
 export default function Team() {
-  const { data, loading, error, reload } = useAsync(getMyTeam, []);
+  const { data, loading, error, reload, setData } = useAsync(getMyTeam, []);
   const { user } = useSession();
   const navigate = useNavigate();
   const notices = useAsync(getNotifications, []);
@@ -25,6 +27,9 @@ export default function Team() {
   const [leaveState, setLeaveState] = useState(null);
   // user_id -> 'confirming' | 'removing' | error message
   const [removeState, setRemoveState] = useState({});
+  // Demo: the owner can change anyone's role. user_id -> 'saving' | error message
+  const rolesState = useAsync(getRoles, []);
+  const [roleState, setRoleState] = useState({});
 
   async function handleLeave() {
     setLeaveState('leaving');
@@ -45,6 +50,24 @@ export default function Team() {
       setRemoveState((r) => ({ ...r, [userId]: undefined }));
     } catch (err) {
       setRemoveState((r) => ({ ...r, [userId]: err.message }));
+    }
+  }
+
+  async function handleRoleChange(userId, roleId) {
+    setRoleState((r) => ({ ...r, [userId]: 'saving' }));
+    try {
+      await setMemberRole(userId, roleId);
+      // Patch the row in place rather than reloading the whole page.
+      const role = (rolesState.data || []).find((x) => x.id === roleId);
+      setData((d) => ({
+        ...d,
+        members: d.members.map((m) =>
+          m.user_id === userId ? { ...m, role_id: roleId, role: role?.name ?? m.role } : m
+        ),
+      }));
+      setRoleState((r) => ({ ...r, [userId]: undefined }));
+    } catch (err) {
+      setRoleState((r) => ({ ...r, [userId]: err.message }));
     }
   }
 
@@ -97,7 +120,7 @@ export default function Team() {
       <>
         {removedSection}
         <Empty title="You are not on a team yet.">
-          <p>Once a project accepts your request, your roster shows up here.</p>
+          <p>Join a project from Browse and your roster shows up here.</p>
           {removedNotices.length > 0 && (
             <p>
               <Link to="/browse">Browse projects</Link>
@@ -217,7 +240,35 @@ export default function Team() {
                 </div>
                 <div className="sub">{m.skills.join(', ') || 'No skills listed'}</div>
               </div>
-              <div className="sub">{m.role || 'Not set'}</div>
+              <div className="sub">
+                {isOwner && rolesState.data ? (
+                  <>
+                    <select
+                      className="role-select"
+                      aria-label={`Role for ${m.name}`}
+                      value={m.role_id || ''}
+                      disabled={roleState[m.user_id] === 'saving'}
+                      onChange={(e) => handleRoleChange(m.user_id, e.target.value)}
+                    >
+                      {!m.role_id && (
+                        <option value="" disabled>
+                          Not set
+                        </option>
+                      )}
+                      {rolesState.data.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                    {roleState[m.user_id] && roleState[m.user_id] !== 'saving' && (
+                      <span className="inline-error" role="alert">{roleState[m.user_id]}</span>
+                    )}
+                  </>
+                ) : (
+                  m.role || 'Not set'
+                )}
+              </div>
               <div className="sub">
                 {canRemove ? (
                   rm === 'confirming' ? (
@@ -258,7 +309,9 @@ export default function Team() {
         })}
       </div>
       <p className="note">
-        Roles come from what each member was accepted for. Skills shown are their profile skills.
+        {isOwner
+          ? 'As the owner you can change anyone\'s role, including your own. Skills shown are their profile skills.'
+          : 'Roles are set by the project owner. Skills shown are their profile skills.'}
       </p>
       {isOwner && !isAlone && (
         <p className="hint">
