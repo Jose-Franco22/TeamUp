@@ -413,10 +413,22 @@ button:disabled { opacity: 0.45; cursor: default; }
 .hint.seats { margin: 8px 0 0; }
 .hint.seats.over { color: var(--danger); }
 
-/* Role + skill + quantity + remove is too much for a phone-width row. */
+/* Role + skill + quantity + remove is too much for a phone-width row, and
+   letting it wrap freely runs one row's controls into the next. Stack each
+   row on a fixed grid — role, skill, then quantity beside Remove — and box
+   it so it's clear which controls belong together. */
 @media (max-width: 620px) {
-  .role-row { flex-wrap: wrap; }
-  .role-row select { flex: 1 1 100%; }
+  .role-rows { gap: 10px; }
+  .role-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .role-row select { grid-column: 1 / -1; width: 100%; }
+  .role-row .btn { justify-self: end; }
 }
 
 /* ---------- roster ---------- */
@@ -573,6 +585,17 @@ button:disabled { opacity: 0.45; cursor: default; }
   .row.hd { display: none; }
   .shell { padding: 20px 16px; }
   .bar { padding: 0 16px; gap: 20px; }
+}
+
+/* iOS Safari zooms the page when a control under 16px is focused and leaves
+   it zoomed, which pushes the form out of line. Kept after every rule that
+   sets a control's font size so it wins. */
+@media (max-width: 620px) {
+  .role-row select,
+  .role-row input[type='number'],
+  .field input,
+  .field textarea,
+  .field select { font-size: 16px; }
 }
 
 /* ---------- resume import ---------- */
