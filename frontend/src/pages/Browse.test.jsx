@@ -26,7 +26,7 @@ vi.mock('../api/client', () => ({
   getProjects: vi.fn(),
   getCurrentUser: vi.fn(),
   getRoles: vi.fn(),
-  createJoinRequest: vi.fn(),
+  joinProject: vi.fn(),
 }));
 
 // --- fixtures ------------------------------------------------------------
@@ -104,7 +104,7 @@ beforeEach(() => {
   client.getProjects.mockResolvedValue([PARKING, DEGREE, SCAM]);
   client.getCurrentUser.mockResolvedValue(ME);
   client.getRoles.mockResolvedValue(ROLES);
-  client.createJoinRequest.mockResolvedValue({});
+  client.joinProject.mockResolvedValue({});
 });
 
 async function renderBrowse() {
@@ -403,7 +403,7 @@ describe('a guest', () => {
     expect(cardTitles()).toEqual(['Degree plan builder']);
   });
 
-  test('is sent to sign in instead of being allowed to request', async () => {
+  test('is sent to sign in instead of being allowed to join', async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -411,35 +411,35 @@ describe('a guest', () => {
       </MemoryRouter>
     );
     await screen.findByText('Campus parking tracker');
-    await user.click(screen.getAllByRole('button', { name: /sign in to request/i })[0]);
+    await user.click(screen.getAllByRole('button', { name: /sign in to join/i })[0]);
     expect(navigate).toHaveBeenCalledWith('/login', {
       state: { from: { pathname: '/browse' } },
     });
-    expect(client.createJoinRequest).not.toHaveBeenCalled();
+    expect(client.joinProject).not.toHaveBeenCalled();
   });
 });
 
-// --- requesting to join --------------------------------------------------
+// --- joining (demo: no approval step) -------------------------------------
 
-describe('requesting to join', () => {
-  test('sends the request for the project whose button was pressed', async () => {
+describe('joining a team', () => {
+  test('joins the project whose button was pressed, then reloads the list', async () => {
     const user = userEvent.setup();
     await renderBrowse();
     const card = screen.getByText('Campus parking tracker').closest('article');
-    await user.click(within(card).getByRole('button', { name: /request to join/i }));
-    await waitFor(() => expect(client.createJoinRequest).toHaveBeenCalledWith('p-parking'));
-    expect(within(card).getByRole('button', { name: /request pending/i })).toBeDisabled();
+    await user.click(within(card).getByRole('button', { name: /join team/i }));
+    await waitFor(() => expect(client.joinProject).toHaveBeenCalledWith('p-parking'));
+    await waitFor(() => expect(client.getProjects).toHaveBeenCalledTimes(2));
   });
 
-  test('a rejected request shows the reason on that card, and leaves the rest alone', async () => {
+  test('a refused join shows the reason on that card, and leaves the rest alone', async () => {
     const user = userEvent.setup();
-    client.createJoinRequest.mockRejectedValue(new Error('You already have a pending request'));
+    client.joinProject.mockRejectedValue(new Error('This team is already full'));
     await renderBrowse();
     const card = screen.getByText('Campus parking tracker').closest('article');
-    await user.click(within(card).getByRole('button', { name: /request to join/i }));
+    await user.click(within(card).getByRole('button', { name: /join team/i }));
 
     expect(await within(card).findByRole('alert')).toHaveTextContent(
-      'You already have a pending request'
+      'This team is already full'
     );
     const other = screen.getByText('Degree plan builder').closest('article');
     expect(within(other).queryByRole('alert')).not.toBeInTheDocument();

@@ -64,11 +64,11 @@ const STEPS = [
     ),
   },
   {
-    title: 'Request to join',
+    title: 'Join a team',
     body: () => (
       <p className="desc">
-        Found one that needs what you have? Send a request — the project's creator accepts or
-        declines it, and you'll see the answer under Requests. Once a roster reaches its target
+        Found one that needs what you have? Click Join team and you're on the roster straight
+        away, in the first role the project still needs. Once a roster reaches its target
         size, the project closes and the team is formed. You can only be on one team at a time.
       </p>
     ),

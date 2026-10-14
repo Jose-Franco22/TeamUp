@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createJoinRequest, getCurrentUser, getProjects, getRoles } from '../api/client';
+import { joinProject, getCurrentUser, getProjects, getRoles } from '../api/client';
 import { useSession } from '../auth/SessionContext';
 import useAsync from '../components/useAsync';
 import { ErrorState, Loading, Empty } from '../components/States';
@@ -31,7 +31,7 @@ export default function Browse() {
   );
   const rolesState = useAsync(getRoles, []);
 
-  // project_id -> 'sending' | 'sent' | error message
+  // project_id -> 'joining' | error message
   const [requests, setRequests] = useState({});
   const [onlyMatches, setOnlyMatches] = useState(false);
   const [onlyOpen, setOnlyOpen] = useState(true);
@@ -77,10 +77,12 @@ export default function Browse() {
       navigate('/login', { state: { from: { pathname: '/browse' } } });
       return;
     }
-    setRequests((r) => ({ ...r, [projectId]: 'sending' }));
+    setRequests((r) => ({ ...r, [projectId]: 'joining' }));
     try {
-      await createJoinRequest(projectId);
-      setRequests((r) => ({ ...r, [projectId]: 'sent' }));
+      // Demo: joining is instant, so reload to show the new roster.
+      await joinProject(projectId);
+      setRequests((r) => ({ ...r, [projectId]: undefined }));
+      projectsState.reload();
     } catch (err) {
       setRequests((r) => ({ ...r, [projectId]: err.message }));
     }
@@ -209,8 +211,6 @@ export default function Browse() {
             const req = requests[p.id];
             const isCreator = isAuthenticated && p.creator_id === user.id;
             const isMember = isAuthenticated && p.members.some((m) => m.user_id === user.id);
-            const isPending =
-              isAuthenticated && (req === 'sent' || p.viewer_request_status === 'pending');
             const isFull = p.status === 'full' || p.member_count >= p.team_size_target;
             return (
               <article className="card" key={p.id}>
@@ -237,7 +237,7 @@ export default function Browse() {
                 <div className="foot">
                   {!isAuthenticated ? (
                     <button className="btn" onClick={() => handleJoin(p.id)}>
-                      Sign in to request
+                      Sign in to join
                     </button>
                   ) : isCreator ? (
                     <span className="btn-label">Your project</span>
@@ -249,17 +249,13 @@ export default function Browse() {
                     <button className="btn" disabled>
                       Already on a team
                     </button>
-                  ) : isPending ? (
-                    <button className="btn" disabled>
-                      Request pending
-                    </button>
                   ) : (
                     <button
                       className="btn"
-                      disabled={isFull || req === 'sending'}
+                      disabled={isFull || req === 'joining'}
                       onClick={() => handleJoin(p.id)}
                     >
-                      {req === 'sending' ? 'Sending…' : 'Request to join'}
+                      {req === 'joining' ? 'Joining…' : 'Join team'}
                     </button>
                   )}
                   {isAuthenticated && (
@@ -269,7 +265,7 @@ export default function Browse() {
                     </span>
                   )}
                 </div>
-                {req && req !== 'sending' && req !== 'sent' && (
+                {req && req !== 'joining' && (
                   <p className="inline-error" role="alert">{req}</p>
                 )}
               </article>

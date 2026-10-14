@@ -90,7 +90,7 @@ function MockLogin() {
         <div className="field">
           <label htmlFor="user">Account</label>
           <select id="user" value={selected} onChange={(e) => setSelected(e.target.value)}>
-            <optgroup label="Not on a team — can request to join">
+            <optgroup label="Not on a team — can join one">
               {free.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name} — {u.email}
@@ -143,7 +143,7 @@ export default function Login() {
           <p>
             CSCI 4390 teams usually form through whoever's already in your group chat — not
             whoever actually has the skills the project needs. TeamUp lists what every project is
-            building, what roles are still open, and lets you request to join the ones that match
+            building, what roles are still open, and lets you join the ones that match
             what you can bring.
           </p>
         </section>

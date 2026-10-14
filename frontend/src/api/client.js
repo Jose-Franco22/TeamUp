@@ -978,6 +978,56 @@ export async function createJoinRequest(projectId) {
   return data;
 }
 
+// DEMO ONLY: join straight onto the team, no creator approval. Writes the
+// same rows an accepted request would — see supabase/24_demo_instant_join.sql.
+export async function joinProject(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireStudentSessionUserId();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+    if (project.creator_id === id) throw new Error('You cannot join your own project');
+    if (teamMembers.some((tm) => tm.user_id === id)) {
+      throw new Error('You are already on a team and cannot join another project');
+    }
+    const team = teams.find((t) => t.project_id === projectId);
+    const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
+    if (count >= project.team_size_target) throw new Error('This team is already full');
+
+    const sortOrder = (roleId) => allRoles.find((r) => r.id === roleId)?.sort_order ?? 0;
+    const listed = projectRolesNeeded
+      .filter((n) => n.project_id === projectId && n.role_id)
+      .sort((a, b) => (b.quantity_needed > 0) - (a.quantity_needed > 0) || sortOrder(a.role_id) - sortOrder(b.role_id));
+    const need = listed[0];
+    const roleId = need?.role_id ?? [...allRoles].sort((a, b) => a.sort_order - b.sort_order)[0]?.id;
+    if (!roleId) throw new Error('No roles are set up yet');
+
+    const row = {
+      id: `jr-${Date.now()}`,
+      project_id: projectId,
+      user_id: id,
+      status: 'accepted',
+      created_at: new Date().toISOString(),
+    };
+    joinRequests.push(row);
+    teamMembers.push({ team_id: team.id, user_id: id, role_id: roleId });
+    if (need && need.quantity_needed > 0) need.quantity_needed -= 1;
+    if (count + 1 >= project.team_size_target) {
+      project.status = 'full';
+      team.formed_at = team.formed_at || new Date().toISOString();
+    }
+    joinRequests
+      .filter((jr) => jr.user_id === id && jr.status === 'pending')
+      .forEach((jr) => {
+        jr.status = 'declined';
+      });
+    return row;
+  }
+  const { data, error } = await supabase.rpc('join_project', { p_project_id: projectId });
+  if (error) throw error;
+  return data;
+}
+
 // `roleId` is the creator's pick from the project's roles_needed — a
 // roles.id, not a free-text string (see 04_roles_and_team_deletion.sql) —
 // and only applies when accepting.
