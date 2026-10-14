@@ -802,3 +802,26 @@ button:disabled { opacity: 0.45; cursor: default; }
 .fit-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .btn.small { padding: 5px 10px; font-size: 12.5px; }
 .fit-note { font-size: 12px; color: var(--mute); }
+
+/* Walkthrough's last step: join a team or start one. */
+.tour-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.tour-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 16px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.tour-choice:hover,
+.tour-choice:focus-visible { border-color: var(--open-line); background: var(--open-bg); }
+.tour-choice b { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.tour-choice span { font-size: 13px; line-height: 1.5; color: var(--slate); overflow-wrap: anywhere; }
+@media (max-width: 620px) {
+  .tour-choices { grid-template-columns: 1fr; }
+}

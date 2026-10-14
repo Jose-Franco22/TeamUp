@@ -109,13 +109,27 @@ describe('first-sign-in walkthrough', () => {
     await user.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
 
-    // Walk to the end; the last step's button finishes the tour.
-    while (!screen.queryByRole('button', { name: 'Browse projects' })) {
-      await user.click(screen.getByRole('button', { name: 'Next' }));
-    }
-    await user.click(screen.getByRole('button', { name: 'Browse projects' }));
+    // Two steps: skills, then the choice. The choice is the way forward,
+    // so the last step has no Next.
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByRole('heading', { name: 'Find your team' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('list', { name: 'Step 2 of 2' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Browse projects/ }));
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(path()).toBe('/browse');
+    expect(JSON.parse(localStorage.getItem(ONBOARDED_KEY))).toContain('u-jose');
+  });
+
+  test('choosing to create a project finishes the tour on the create page', async () => {
+    renderApp('/browse', { signedInAs: 'u-sofia', onboarded: false });
+    const dialog = await screen.findByRole('dialog');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: /Create a project/ }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(path()).toBe('/projects/new');
+    expect(JSON.parse(localStorage.getItem(ONBOARDED_KEY))).toContain('u-sofia');
   });
 });
 
