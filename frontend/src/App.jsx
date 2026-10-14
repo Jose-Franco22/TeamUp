@@ -10,10 +10,12 @@ import Team from './pages/Team';
 import Admin from './pages/Admin';
 import AdminTeam from './pages/AdminTeam';
 import AdminStudent from './pages/AdminStudent';
+import AdminMilestones from './pages/AdminMilestones';
 import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
 import Walkthrough from './components/Walkthrough';
 import { PendingBadge, RequestNotices, useRequestAlerts } from './components/RequestAlerts';
+import { MilestoneBanner } from './components/Milestones';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 
@@ -34,7 +36,11 @@ export default function App() {
   const signedIn = status === 'authenticated';
   const isAdmin = user?.is_admin === true;
   const tabs = !signedIn ? [] : isAdmin
-    ? [{ to: '/admin', label: 'Admin' }, { to: '/profile', label: 'Your profile' }]
+    ? [
+        { to: '/admin', label: 'Admin' },
+        { to: '/admin/milestones', label: 'Milestones' },
+        { to: '/profile', label: 'Your profile' },
+      ]
     : TABS;
   // Admins are never on a team, so they never own a project to hear about.
   const requestAlerts = useRequestAlerts(signedIn && !isAdmin);
@@ -83,7 +89,15 @@ export default function App() {
         <div id="site-menu" className={menuOpen ? 'menu open' : 'menu'}>
           <nav className="nav">
             {tabs.map((t) => (
-              <NavLink key={t.to} to={t.to} className={({ isActive }) => (isActive ? 'on' : '')}>
+              <NavLink
+                key={t.to}
+                to={t.to}
+                className={({ isActive }) =>
+                  // /admin covers the team and student pages under it, but
+                  // not the Milestones tab, which has its own highlight.
+                  isActive && !(t.to === '/admin' && pathname.startsWith('/admin/milestones')) ? 'on' : ''
+                }
+              >
                 {t.label}
                 {t.to === '/requests' && <PendingBadge count={requestAlerts.pending} />}
               </NavLink>
@@ -104,6 +118,7 @@ export default function App() {
       </header>
 
       <main className="shell">
+        {signedIn && !isAdmin && <MilestoneBanner />}
         <RequestNotices notices={requestAlerts.notices} onDismiss={requestAlerts.dismiss} />
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -118,6 +133,7 @@ export default function App() {
             </Route>
             <Route element={<ProtectedRoute adminOnly />}>
               <Route path="/admin" element={<Admin />} />
+              <Route path="/admin/milestones" element={<AdminMilestones />} />
               <Route path="/admin/teams/:teamId" element={<AdminTeam />} />
               <Route path="/admin/students/:studentId" element={<AdminStudent />} />
               <Route path="/admin/*" element={<p className="empty">Page not found.</p>} />

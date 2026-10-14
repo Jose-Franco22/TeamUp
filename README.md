@@ -143,6 +143,18 @@ you** on the Requests page has a Withdraw button. A withdrawn request shows as w
 student, drops out of the creator's list (and their unread alert for it is cleared), and the
 student can ask to join the same project again later.
 
+## Deadlines, milestones and admin placement (#38, #39)
+
+Apply `supabase/26_milestones.sql`, `supabase/27_admin_placement.sql`, then
+`supabase/28_milestone_messages.sql`, after `24`. Each milestone can carry an optional message
+explaining what's expected. Admins add
+milestones on the **Milestones** tab (`/admin/milestones`), and can mark one as the team formation deadline. After it, students can't
+post projects, send requests, leave or remove members. Students see what's coming up in a banner at
+the top of every page. On a student's admin page, an admin can assign them to a team with an open
+seat, move them to another team, or remove them, even after the deadline. Each change notifies the
+people affected and is listed under **Recent admin changes** on `/admin`. TODO-backend.md has the
+details, next to the leaving and removing rules.
+
 ## Testing
 
 Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.

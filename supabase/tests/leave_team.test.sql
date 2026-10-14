@@ -98,22 +98,21 @@ select set_config('tests.project2',
 -- An instructor account, made the same way 18_admin_access.sql says to.
 update public.users set is_admin = true where id = current_setting('tests.admin')::uuid;
 
--- Only an admin can move the deadline.
+-- Only an admin can set the deadline (a milestone flagged as it, 26_milestones.sql).
 select tests.authenticate_as(current_setting('tests.member2')::uuid);
-update public.app_settings set formation_deadline = now() - interval '1 day';
-select tests.clear_authentication();
-select is(
-  (select formation_deadline from public.app_settings),
-  null,
+select throws_ok(
+  $$ select public.save_milestone(null, 'Team formation deadline', now() - interval '1 day', true) $$,
+  '42501', 'Admin access required',
   'a student can''t set the formation deadline');
+select tests.clear_authentication();
 
 select tests.authenticate_as(current_setting('tests.admin')::uuid);
 select lives_ok(
-  $$ update public.app_settings set formation_deadline = now() - interval '1 day' $$,
+  $$ select public.save_milestone(null, 'Team formation deadline', now() - interval '1 day', true) $$,
   'an admin can set the formation deadline');
 select tests.clear_authentication();
 select isnt(
-  (select formation_deadline from public.app_settings),
+  public.formation_deadline(),
   null,
   'the admin''s deadline is saved');
 
@@ -135,7 +134,7 @@ select is(
 -- --- One way to read the deadline -------------------------------------------
 select is(
   public.formation_deadline(),
-  (select formation_deadline from public.app_settings),
+  (select due_at from public.milestones where is_formation_deadline),
   'formation_deadline() returns the deadline leave_team() checks');
 
 select tests.authenticate_as(current_setting('tests.member2')::uuid);

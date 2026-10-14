@@ -137,6 +137,7 @@ describe('admin access (#36)', () => {
     renderApp('/admin', { signedInAs: 'u-instructor', onboarded: false });
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(screen.getByRole('link', { name: 'Milestones' })).toHaveAttribute('href', '/admin/milestones');
     expect(screen.queryByRole('link', { name: 'Create a project' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Your team' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -146,6 +147,24 @@ describe('admin access (#36)', () => {
     renderApp(start, { signedInAs: 'u-instructor' });
     await waitFor(() => expect(path()).toBe('/admin'));
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
+  });
+
+  test('milestones have their own admin tab (#38)', async () => {
+    renderApp('/admin', { signedInAs: 'u-instructor' });
+    await screen.findByRole('heading', { name: 'Administration' });
+    expect(screen.queryByRole('form', { name: 'Add a milestone' })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('link', { name: 'Milestones' }));
+    expect(await screen.findByRole('heading', { name: 'Deadlines and milestones' })).toBeInTheDocument();
+    expect(path()).toBe('/admin/milestones');
+    expect(screen.getByRole('form', { name: 'Add a milestone' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Milestones' })).toHaveClass('on');
+    expect(screen.getByRole('link', { name: 'Admin' })).not.toHaveClass('on');
+  });
+
+  test('students opening /admin/milestones are redirected', async () => {
+    renderApp('/admin/milestones', { signedInAs: 'u-adan' });
+    await waitFor(() => expect(path()).toBe('/browse'));
+    expect(screen.queryByRole('link', { name: 'Milestones' })).not.toBeInTheDocument();
   });
 
   test('admin sign-out removes admin navigation and returns to login', async () => {

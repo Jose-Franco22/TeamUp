@@ -4,12 +4,18 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Admin from './Admin';
-import { getAdminDashboard } from '../api/client';
+import { getAdminActions, getAdminDashboard } from '../api/client';
 import { DASHBOARD, EMPTY_DASHBOARD } from '../test/adminFixtures';
 
-vi.mock('../api/client', () => ({ getAdminDashboard: vi.fn() }));
+vi.mock('../api/client', () => ({
+  getAdminDashboard: vi.fn(),
+  getAdminActions: vi.fn(),
+}));
 
-beforeEach(() => getAdminDashboard.mockReset().mockResolvedValue(DASHBOARD));
+beforeEach(() => {
+  getAdminDashboard.mockReset().mockResolvedValue(DASHBOARD);
+  getAdminActions.mockResolvedValue([]);
+});
 
 function renderAdmin() {
   render(<MemoryRouter><Admin /></MemoryRouter>);
