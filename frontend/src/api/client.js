@@ -908,6 +908,30 @@ export async function getRequests() {
   return { incoming, outgoing };
 }
 
+// How many requests to join the viewer's projects are waiting on them — the
+// number on the Requests tab. Same rows as getRequests().incoming, without
+// fetching everything about each one.
+export async function getPendingRequestCount() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const myProjectIds = projects.filter((p) => p.creator_id === id).map((p) => p.id);
+    return joinRequests.filter((r) => myProjectIds.includes(r.project_id) && r.status === 'pending').length;
+  }
+
+  // RLS returns the viewer's own requests plus incoming ones on their
+  // projects, and nobody can request their own project — so a pending row
+  // that isn't the viewer's is an incoming one.
+  const viewerId = requireViewerId(await getViewerId());
+  const { count, error } = await supabase
+    .from('join_requests')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'pending')
+    .neq('user_id', viewerId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export async function createJoinRequest(projectId) {
   if (USE_MOCKS) {
     await delay();
@@ -933,10 +957,22 @@ export async function createJoinRequest(projectId) {
       created_at: new Date().toISOString(),
     };
     joinRequests.push(row);
+    // The creator hears about it straight away (23_join_request_notifications.sql).
+    notifications.push({
+      id: `n-${Date.now()}-${notifications.length}`,
+      user_id: project.creator_id,
+      kind: 'join_request',
+      project_id: projectId,
+      actor_id: id,
+      by_admin: false,
+      created_at: row.created_at,
+      read_at: null,
+    });
     return row;
   }
-  // create_join_request() runs all four checks and the insert in one
-  // transaction server-side — see supabase/03_functions.sql.
+  // create_join_request() runs all four checks, the insert and the creator's
+  // notification in one transaction server-side — see
+  // supabase/23_join_request_notifications.sql.
   const { data, error } = await supabase.rpc('create_join_request', { p_project_id: projectId });
   if (error) throw error;
   return data;
@@ -1238,11 +1274,13 @@ export async function removeMember(userId) {
 
 // --- Notifications -------------------------------------------------------
 
-// The viewer's unread notifications, newest first. Kinds: 'member_left'
+// The viewer's unread notifications, newest first. Kinds: 'join_request'
+// (someone asked to join a project the viewer created), 'member_left'
 // (someone left, or an admin took them off, a project the viewer created),
 // 'member_removed' (the viewer was taken off a team), 'request_accepted' and
 // 'request_declined'. actor_name is whoever caused the notification — for
-// 'member_left', who left; for 'member_removed', who removed the viewer.
+// 'join_request', who asked; for 'member_left', who left; for
+// 'member_removed', who removed the viewer.
 // project_title is included because a removed student is no longer on the
 // project, so the app has nowhere else to look it up.
 export async function getNotifications() {

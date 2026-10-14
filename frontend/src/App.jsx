@@ -13,6 +13,7 @@ import AdminStudent from './pages/AdminStudent';
 import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
 import Walkthrough from './components/Walkthrough';
+import { PendingBadge, RequestNotices, useRequestAlerts } from './components/RequestAlerts';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 
@@ -35,6 +36,8 @@ export default function App() {
   const tabs = !signedIn ? [] : isAdmin
     ? [{ to: '/admin', label: 'Admin' }, { to: '/profile', label: 'Your profile' }]
     : TABS;
+  // Admins are never on a team, so they never own a project to hear about.
+  const requestAlerts = useRequestAlerts(signedIn && !isAdmin);
 
   // Every page but /login needs a session, so signing out goes straight to
   // the sign-in page. Navigating first means ProtectedRoute never records
@@ -82,6 +85,7 @@ export default function App() {
             {tabs.map((t) => (
               <NavLink key={t.to} to={t.to} className={({ isActive }) => (isActive ? 'on' : '')}>
                 {t.label}
+                {t.to === '/requests' && <PendingBadge count={requestAlerts.pending} />}
               </NavLink>
             ))}
           </nav>
@@ -100,6 +104,7 @@ export default function App() {
       </header>
 
       <main className="shell">
+        <RequestNotices notices={requestAlerts.notices} onDismiss={requestAlerts.dismiss} />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedRoute />}>

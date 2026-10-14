@@ -129,10 +129,17 @@ and 6 unplaced students. Dashboard, detail and permission tests run with
 `cd frontend && npm test`; the database suite automatically includes
 `supabase/tests/admin_dashboard.test.sql`.
 
+## Join request notifications (#26)
+
+Apply `supabase/23_join_request_notifications.sql` after `22`. When someone asks to join a
+project, its creator gets an in-app notice naming them, with a link to `/requests`, and the
+Requests tab shows how many requests are waiting. Email copies need a one-time Edge Function and
+webhook setup — see [Email notifications in TODO-backend.md](TODO-backend.md#email-notifications).
+
 ## Testing
 
 Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.
-A story is done when those tests exist and pass in CI. All three suites run automatically on every
+A story is done when those tests exist and pass in CI. All four suites run automatically on every
 pull request (`.github/workflows/tests.yml`), and a pull request shouldn't merge while any fail.
 
 | Suite | What it covers | Run it |
@@ -140,6 +147,7 @@ pull request (`.github/workflows/tests.yml`), and a pull request shouldn't merge
 | Frontend | Validation logic, components and pages (Vitest + React Testing Library, mock API) | `cd frontend && npm test` |
 | Resume parsing | The resume parser (`node --test`) | `cd resume-parsing && npm test` (run `npm install` in `frontend/` first, since it shares code from there) |
 | Database | Constraints, RLS, triggers and RPC functions (pgTAP) | see below |
+| Edge Functions | What the `notify-email` function sends (`node --test`) | `node --test supabase/functions/*/*.test.js` |
 
 Use `npm run test:watch` in `frontend/` to re-run tests as you edit.
 
