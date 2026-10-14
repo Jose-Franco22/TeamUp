@@ -125,7 +125,8 @@ select set_config('tests.admin',   tests.sign_in_with_microsoft('admin01@utrgv.e
 select set_config('tests.project2',
   tests.create_full_team(current_setting('tests.owner2')::uuid, current_setting('tests.member2')::uuid)::text, true);
 update public.users set is_admin = true where id = current_setting('tests.admin')::uuid;
-update public.app_settings set formation_deadline = now() - interval '1 day';
+insert into public.milestones (name, due_at, is_formation_deadline)
+values ('Team formation deadline', now() - interval '1 day', true);
 
 select tests.authenticate_as(current_setting('tests.owner2')::uuid);
 select throws_ok(
@@ -185,7 +186,7 @@ select is(
   'the creator is told an admin took the student off');
 
 -- --- Leaving still notifies only the creator ----------------------------------
-update public.app_settings set formation_deadline = null;
+delete from public.milestones;
 select set_config('tests.member4', tests.sign_in_with_microsoft('member04@utrgv.edu', 'Member Four')::text, true);
 select set_config('tests.owner4',  tests.sign_in_with_microsoft('owner04@utrgv.edu', 'Owner Four')::text, true);
 select tests.create_full_team(current_setting('tests.owner4')::uuid, current_setting('tests.member4')::uuid);
