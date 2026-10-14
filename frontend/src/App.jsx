@@ -1,4 +1,5 @@
-import { Link, Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Browse from './pages/Browse';
 import CreateProject from './pages/CreateProject';
@@ -27,8 +28,11 @@ const TABS = [
 export default function App() {
   const { status, user, onboarded, signOut } = useSession();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const signedIn = status === 'authenticated';
   const isAdmin = user?.is_admin === true;
-  const tabs = status !== 'authenticated' ? [] : isAdmin
+  const tabs = !signedIn ? [] : isAdmin
     ? [{ to: '/admin', label: 'Admin' }, { to: '/profile', label: 'Your profile' }]
     : TABS;
 
@@ -36,6 +40,17 @@ export default function App() {
   // the sign-in page. Navigating first means ProtectedRoute never records
   // the page being left, so the next person to sign in on this browser
   // isn't sent back to the previous student's profile.
+  // On a phone the tabs and account controls live in a slide-out menu
+  // (issue #46). Moving to another page, Escape, or a tap outside closes it.
+  useEffect(() => setMenuOpen(false), [pathname, signedIn]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKey = (e) => e.key === 'Escape' && setMenuOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
+
   async function handleSignOut() {
     navigate('/login', { replace: true });
     await signOut();
@@ -43,27 +58,44 @@ export default function App() {
 
   return (
     <>
-      <header className="bar">
+      <header className={signedIn ? 'bar has-menu' : 'bar'}>
         <Link className="mark" to={isAdmin ? '/admin' : '/browse'}>
           Team<span>Up</span>
         </Link>
-        <nav className="nav">
-          {tabs.map((t) => (
-            <NavLink key={t.to} to={t.to} className={({ isActive }) => (isActive ? 'on' : '')}>
-              {t.label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="me">
-          <ThemeToggle />
-          {status === 'authenticated' && (
-            <>
-              {user.name} <Avatar name={user.name} />
-              <button className="btn quiet" onClick={handleSignOut}>
-                Sign out
-              </button>
-            </>
-          )}
+        {signedIn && (
+          <button
+            type="button"
+            className="menu-toggle"
+            aria-controls="site-menu"
+            aria-expanded={menuOpen}
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              {menuOpen ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+            </svg>
+          </button>
+        )}
+        {menuOpen && <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />}
+        <div id="site-menu" className={menuOpen ? 'menu open' : 'menu'}>
+          <nav className="nav">
+            {tabs.map((t) => (
+              <NavLink key={t.to} to={t.to} className={({ isActive }) => (isActive ? 'on' : '')}>
+                {t.label}
+              </NavLink>
+            ))}
+          </nav>
+          <div className="me">
+            <ThemeToggle />
+            {signedIn && (
+              <>
+                <span className="who">{user.name}</span> <Avatar name={user.name} />
+                <button className="btn quiet" onClick={handleSignOut}>
+                  Sign out
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -91,7 +123,7 @@ export default function App() {
         </Routes>
       </main>
 
-      {status === 'authenticated' && !isAdmin && !onboarded && <Walkthrough />}
+      {signedIn && !isAdmin && !onboarded && <Walkthrough />}
     </>
   );
 }
