@@ -9,6 +9,22 @@ export const BIO_MAX = 500;
 export const AVAILABILITY_MIN = 0;
 export const AVAILABILITY_MAX = 40;
 
+// Project fields (issue #23). Mirrored by CHECK constraints in
+// supabase/16_project_validation.sql and by the raises in create_project()
+// and update_project(), which are the real boundary.
+export const TITLE_MIN = 5;
+export const TITLE_MAX = 100;
+export const DESCRIPTION_MIN = 20;
+export const DESCRIPTION_MAX = 2000;
+// A senior project team is 2 to 4. Repeated from api/client.js rather than
+// imported, because client.js imports this file and the cycle is not worth
+// one constant; the test asserts the two agree.
+export const TEAM_SIZE_MIN = 2;
+export const TEAM_SIZE_MAX = 4;
+// project_roles_needed.quantity_needed, as create_project() enforces it.
+export const ROLE_QUANTITY_MIN = 1;
+export const ROLE_QUANTITY_MAX = 3;
+
 // A GitHub profile link: https, github.com (optionally www.), one username
 // segment (letters, digits, hyphens; GitHub caps usernames at 39), optional
 // trailing slash. Same pattern as users_github_url_format_check.
@@ -75,6 +91,131 @@ export function validateProfile(input) {
   return { values, errors, isValid: Object.keys(errors).length === 0 };
 }
 
+// --- Projects (issue #23) -------------------------------------------------
+
+export const TITLE_RANGE = `Title must be between ${TITLE_MIN} and ${TITLE_MAX} characters`;
+export const DESCRIPTION_RANGE = `Description must be between ${DESCRIPTION_MIN} and ${DESCRIPTION_MAX} characters`;
+export const TEAM_SIZE_RANGE = `A team has to be between ${TEAM_SIZE_MIN} and ${TEAM_SIZE_MAX} people`;
+
+// Trim first, then count: "   ab   " is a two-character title, not eight,
+// and it is the trimmed value that gets stored.
+function checkTitle(raw) {
+  const title = String(raw ?? '').trim();
+  if (title === '') return { error: 'Give your project a title' };
+  const length = charCount(title);
+  if (length < TITLE_MIN || length > TITLE_MAX) return { error: TITLE_RANGE };
+  return { value: title };
+}
+
+function checkDescription(raw) {
+  const description = String(raw ?? '').trim();
+  if (description === '') return { error: 'Describe what the project is' };
+  const length = charCount(description);
+  if (length < DESCRIPTION_MIN || length > DESCRIPTION_MAX) return { error: DESCRIPTION_RANGE };
+  return { value: description };
+}
+
+function checkTeamSize(raw) {
+  const text = typeof raw === 'number' ? String(raw) : String(raw ?? '').trim();
+  if (text === '') return { error: 'Choose how many people the team should have' };
+  if (!/^\d+$/.test(text)) return { error: 'Team size must be a whole number' };
+  const size = Number(text);
+  if (size < TEAM_SIZE_MIN || size > TEAM_SIZE_MAX) return { error: TEAM_SIZE_RANGE };
+  return { value: size };
+}
+
+/**
+ * The roles a project is recruiting for.
+ *
+ * Needs the other two numbers to judge: the team size says how many seats
+ * exist, and memberCount how many are already taken. On create that is
+ * always 1 (you); on edit it is the current roster, which is why lowering
+ * the target below it has to be refused.
+ */
+function checkRolesNeeded(raw, { teamSize, memberCount }) {
+  const rows = Array.isArray(raw) ? raw : [];
+
+  const seen = new Set();
+  for (const row of rows) {
+    if (!row?.role_id) return { error: 'Every role you list needs a role selected' };
+    if (seen.has(row.role_id)) return { error: 'You listed the same role twice' };
+    seen.add(row.role_id);
+
+    const quantity = Number(row.quantity_needed);
+    if (!Number.isInteger(quantity) || quantity < ROLE_QUANTITY_MIN || quantity > ROLE_QUANTITY_MAX) {
+      return { error: `Each role needs between ${ROLE_QUANTITY_MIN} and ${ROLE_QUANTITY_MAX} people` };
+    }
+  }
+
+  // Can't judge the seat count without a valid size; that field reports its
+  // own error, and two messages for one mistake is noise.
+  if (teamSize == null) return { value: rows };
+
+  const openSeats = teamSize - memberCount;
+  const assigned = rows.reduce((sum, row) => sum + (Number(row.quantity_needed) || 0), 0);
+  if (assigned > openSeats) {
+    return {
+      error:
+        `A team of ${teamSize} has ${openSeats} open seat${openSeats === 1 ? '' : 's'} ` +
+        `besides you, but you listed ${assigned} people`,
+    };
+  }
+  return { value: rows };
+}
+
+/**
+ * Validates whichever project fields are present in `input`, the same way
+ * validateProfile does, so a partial update only checks what it changes.
+ *
+ * `memberCount` is how many people already hold a seat: 1 when creating,
+ * the current roster size when editing.
+ */
+export function validateProject(input, { memberCount = 1 } = {}) {
+  const values = {};
+  const errors = {};
+
+  if ('title' in input) {
+    const result = checkTitle(input.title);
+    if (result.error) errors.title = result.error;
+    else values.title = result.value;
+  }
+
+  if ('description' in input) {
+    const result = checkDescription(input.description);
+    if (result.error) errors.description = result.error;
+    else values.description = result.value;
+  }
+
+  let teamSize = null;
+  if ('team_size_target' in input) {
+    const result = checkTeamSize(input.team_size_target);
+    if (result.error) errors.team_size_target = result.error;
+    else {
+      values.team_size_target = result.value;
+      teamSize = result.value;
+    }
+  }
+
+  // A size below the people already seated is its own mistake, and a
+  // clearer message than the generic range.
+  if (teamSize != null && memberCount > 1 && teamSize < memberCount) {
+    errors.team_size_target = `${memberCount} people are already on this team, so the target can't be ${teamSize}`;
+    teamSize = null;
+  }
+
+  if ('own_role_id' in input && !input.own_role_id) {
+    errors.own_role_id = 'Choose the role you are taking on';
+  }
+
+  if ('roles_needed' in input) {
+    const result = checkRolesNeeded(input.roles_needed, { teamSize, memberCount });
+    if (result.error) errors.roles_needed = result.error;
+    else values.roles_needed = result.value;
+  }
+
+  return { values, errors, isValid: Object.keys(errors).length === 0 };
+}
+
 // Turns a database CHECK violation on users into the same field message the
 // form would have shown, so a rule enforced only server-side still lands
 // next to the right field. Returns null for any other error.
@@ -83,6 +224,9 @@ const CONSTRAINT_FIELDS = {
   users_github_url_format_check: ['github_url', 'Use your GitHub profile link, like https://github.com/your-username'],
   users_availability_hours_range_check: ['availability_hours', `Hours must be between ${AVAILABILITY_MIN} and ${AVAILABILITY_MAX}`],
   users_availability_hours_check: ['availability_hours', `Hours must be between ${AVAILABILITY_MIN} and ${AVAILABILITY_MAX}`],
+  projects_title_length_check: ['title', TITLE_RANGE],
+  projects_description_length_check: ['description', DESCRIPTION_RANGE],
+  projects_team_size_target_check: ['team_size_target', TEAM_SIZE_RANGE],
 };
 
 export function fieldErrorsFromDbError(error) {

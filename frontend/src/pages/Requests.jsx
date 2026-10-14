@@ -4,6 +4,7 @@ import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
 import StatusPill from '../components/StatusPill';
+import { REQUESTS_CHANGED } from '../components/RequestAlerts';
 
 // Default role for an incoming request: whichever listed role has a skill
 // pinned to it that the applicant actually claims, otherwise the first role
@@ -26,18 +27,29 @@ function defaultRoleFor(r, allRoles) {
 }
 
 export default function Requests() {
-  const { data, loading, error, reload } = useAsync(getRequests, []);
+  const { data, loading, error, reload, setData } = useAsync(getRequests, []);
   const rolesState = useAsync(getRoles, []);
+  // busy[id] is the decision in flight for that row ('accepted' |
+  // 'declined'); rowErrors[id] is the server's refusal, shown on that row.
   const [busy, setBusy] = useState({});
+  const [rowErrors, setRowErrors] = useState({});
   const [roleChoices, setRoleChoices] = useState({});
 
   async function respond(id, status, role) {
     setBusy((b) => ({ ...b, [id]: status }));
+    setRowErrors((e) => ({ ...e, [id]: null }));
     try {
       await respondToRequest(id, status, role);
-      reload();
+      // Refetch in place rather than reload(), which would swap the whole
+      // page for the loading state. Accepting can change other rows too
+      // (the team may now be full), so take the server's list wholesale.
+      setData(await getRequests());
+      // The Requests tab's pending count lives in App; tell it to recount.
+      window.dispatchEvent(new Event(REQUESTS_CHANGED));
     } catch (err) {
-      setBusy((b) => ({ ...b, [id]: err.message }));
+      setRowErrors((e) => ({ ...e, [id]: err.message || 'Something went wrong.' }));
+    } finally {
+      setBusy((b) => ({ ...b, [id]: undefined }));
     }
   }
 
@@ -73,6 +85,8 @@ export default function Requests() {
           {incoming.map((r) => {
             const needed = r.roles_needed || [];
             const role = roleChoices[r.id] ?? defaultRoleFor(r, allRoles);
+            const pending = busy[r.id];
+            const rowError = rowErrors[r.id];
             return (
               <div className="row" key={r.id}>
                 <Avatar name={r.user_name} size={34} />
@@ -86,7 +100,7 @@ export default function Requests() {
                     className="role-select"
                     aria-label={`Role for ${r.user_name}`}
                     value={role}
-                    disabled={!!busy[r.id]}
+                    disabled={!!pending}
                     onChange={(e) => setRoleChoices((c) => ({ ...c, [r.id]: e.target.value }))}
                   >
                     {needed.length > 0 && (
@@ -112,19 +126,26 @@ export default function Requests() {
                   <div className="acts">
                     <button
                       className="btn"
-                      disabled={!!busy[r.id] || !role}
+                      disabled={!!pending || !role}
+                      aria-busy={pending === 'accepted'}
                       onClick={() => respond(r.id, 'accepted', role)}
                     >
-                      Accept
+                      {pending === 'accepted' ? 'Accepting…' : 'Accept'}
                     </button>
                     <button
                       className="btn quiet"
-                      disabled={!!busy[r.id]}
+                      disabled={!!pending}
+                      aria-busy={pending === 'declined'}
                       onClick={() => respond(r.id, 'declined')}
                     >
-                      Decline
+                      {pending === 'declined' ? 'Declining…' : 'Decline'}
                     </button>
                   </div>
+                  {rowError && (
+                    <p className="inline-error" role="alert">
+                      {rowError}
+                    </p>
+                  )}
                 </div>
               </div>
             );

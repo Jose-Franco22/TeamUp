@@ -42,7 +42,12 @@ export default function EditProject() {
   const myRole = project.members.find((m) => m.user_id === user.id);
 
   async function handleSubmit(values) {
-    const updated = await updateProject(project.id, values);
+    // The roster size decides two rules the client cannot work out on its
+    // own: the target can't drop below it, and the open seats count from
+    // it. update_project() re-checks both against the real roster.
+    const updated = await updateProject(project.id, values, {
+      memberCount: project.member_count,
+    });
     // Keep the form on the page with its "Saved" note, but make sure a
     // reload or a later navigation reads the new values.
     projectState.setData(updated);

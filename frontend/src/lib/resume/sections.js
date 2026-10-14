@@ -29,13 +29,15 @@ const BULLET = /^\s*[-*•·o]\s+/;
 // and the whole resume reads as one undifferentiated block.
 const unsplitSmallCaps = (line) => line.replace(/\b([A-Z]) ([A-Z]{2,})\b/g, '$1$2');
 
-export function headingInfo(line) {
-  const text = unsplitSmallCaps(line.trim()).replace(/[:•]+$/, '');
+// Classify one line exactly as written. `capsFallback` turns off the
+// all-capitals guess, which is the part that must not see stitched text.
+function classify(line, { capsFallback = true } = {}) {
+  const text = line.trim().replace(/[:•]+$/, '');
 
   // "Technical Skills: Python, pandas, Git"
   const colon = line.indexOf(':');
   if (colon > 2 && colon <= 30 && line.length > colon + 1) {
-    const label = unsplitSmallCaps(line.slice(0, colon).trim());
+    const label = line.slice(0, colon).trim();
     for (const [name, pattern] of HEADINGS) {
       if (pattern.test(label)) return { name, inline: true };
     }
@@ -45,10 +47,32 @@ export function headingInfo(line) {
   for (const [name, pattern] of HEADINGS) {
     if (pattern.test(text)) return { name, inline: false };
   }
+  if (!capsFallback) return null;
   // Capitals alone are not enough: "GPA 3.92" and "NASA 2025" are content.
   const looksLikeHeading =
     text === text.toUpperCase() && /[A-Z]{3}/.test(text) && !/\d/.test(text) && text.split(/\s+/).length <= 4;
   return looksLikeHeading ? { name: 'other', inline: false } : null;
+}
+
+export function headingInfo(line) {
+  const asWritten = classify(line);
+
+  // A line that already names a section needs no help.
+  if (asWritten && asWritten.name !== 'other') return asWritten;
+
+  // Stitching has to be kept away from the all-capitals fallback. It removes
+  // a space, so an all-caps sentence of five words beginning with a
+  // one-letter word shrinks to four and starts passing the `<= 4` check:
+  // "I AM A TEAM LEAD" became a heading, ending whatever section it sat in
+  // and sending the months and projects below it to the wrong place. Only
+  // the stitched version's *named* sections are believed.
+  const stitched = unsplitSmallCaps(line);
+  if (stitched !== line) {
+    const named = classify(stitched, { capsFallback: false });
+    if (named) return named;
+  }
+
+  return asWritten;
 }
 
 // Name only, for the callers that just want to know "is this a heading".

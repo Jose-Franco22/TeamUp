@@ -1,5 +1,16 @@
 # Backend
 
+> **Admin access (#36):** `supabase/18_admin_access.sql` adds the admin flag,
+> role-change protection, admin-free roster policies, and the `require_admin()` /
+> `project_member_counts()` RPCs. Apply it before deploying this frontend.
+> See [Admin access in README](README.md#admin-access-36) for instructor setup.
+> The handoff notes below describe earlier database work and are historical.
+
+> **Admin dashboard (#37):** apply `supabase/19_admin_dashboard.sql` after `18`.
+> It provides guarded read-only dashboard, team-detail and student-detail RPCs
+> for `/admin`, `/admin/teams/:teamId` and `/admin/students/:studentId`.
+> See [Admin dashboard in README](README.md#admin-dashboard-37).
+
 > **Handoff — who does what.** The frontend is done and is not waiting on design decisions. Every
 > feature below already works end to end against the mocks (`VITE_USE_MOCKS=true`), and
 > `client.js` already contains the real Supabase call for each one. **What's left is the database
@@ -329,13 +340,15 @@ Guests (no session) can still browse — this is `supabase/02_rls_policies.sql`,
 
 - `projects`, `project_roles_needed`, `skills`, `roles`, and `teams` all have an `anon`-readable
   SELECT policy.
-- `team_members` has **no** `anon` policy at all — a guest's query returns zero rows, so no names,
-  no `user_id`s, ever reach the client. `composeProject()` in `client.js` only returns a populated
-  `members` array when there's a signed-in viewer.
-- The public `member_count` a guest still needs comes from `project_member_count()`, a
-  `SECURITY DEFINER` function that returns only a count (see `03_functions.sql`) — the one
-  sanctioned way past the `team_members` restriction, because a count alone doesn't identify
-  anyone.
+- After `18_admin_access.sql`, every signed-in user can read `team_members` rows except
+  those of admin accounts, so students see who is on a team before asking to join. Guests
+  still get no raw membership rows.
+- `project_member_counts(uuid[])` gives guests the seat count for every listed project in
+  one call. Signed-in viewers count from the roster and make no extra call. Guests get no
+  availability data. The older single-project `project_member_count()` remains available.
+- Only trusted database/service-role access can change `users.is_admin`. Admins can read
+  every roster and request, but cannot create or join student teams. Student queries exclude
+  instructor profiles and skills; student requests remain limited to their own/incoming rows.
 
 The frontend already hides member names from guests in the UI (`MemberStrip.jsx`), but **that was
 always a UX nicety, not the security boundary** — the boundary is the RLS policy above, which
@@ -357,6 +370,41 @@ this team" / "Already on a team" / "Request pending" for these cases using `view
 and the project's own `creator_id` / `members`, but **that's UX only** — a stale page, a modified
 request, or a second tab still goes through `create_join_request`, which re-checks everything
 server-side regardless of what the client believes.
+
+## Telling the creator about a request — in-app and email (#26)
+
+`supabase/23_join_request_notifications.sql` replaces `create_join_request()` (same signature) so
+that, in the same transaction as the insert, the project's creator gets a `'join_request'`
+notification: `user_id` is the creator, `actor_id` the student who asked. A refused request raises
+before that insert, so it notifies no one.
+
+In the app, `RequestAlerts.jsx` shows each unread one above every page ("Ana asked to join
+“Trail Finder”. Review on your Requests page") and puts the pending count on the Requests tab
+(`getPendingRequestCount()`). Opening `/requests` marks them read.
+
+### Email notifications
+
+Email goes out from the `notify-email` Edge Function (`supabase/functions/notify-email/`), which a
+database webhook calls for every new `notifications` row. It only emails kinds that
+`email.js`'s `composeEmail()` knows (today just `'join_request'`) and skips the rest, so a later
+story adds its kind there. It reads the notification back by id with the service role, so nothing
+in the email comes from the request body. Until this is set up, everything in-app still works.
+
+One-time setup, with the Supabase CLI linked to the project:
+
+1. Create a [Resend](https://resend.com) account and verify a sending domain (or use
+   `onboarding@resend.dev` while testing, which only delivers to the Resend account's own address).
+2. Set the secrets — `NOTIFY_EMAIL_SECRET` is any long random string:
+   ```bash
+   supabase secrets set RESEND_API_KEY=re_... EMAIL_FROM="TeamUp <notify@your-domain>" \
+     APP_URL=https://<your-vercel-app> NOTIFY_EMAIL_SECRET=<random>
+   ```
+3. Deploy: `supabase functions deploy notify-email`.
+4. Dashboard → **Database → Webhooks → Create a new hook**: table `public.notifications`, event
+   **Insert**, type **Supabase Edge Functions**, function `notify-email`, method POST. Keep the
+   `Authorization` header it adds and add `x-webhook-secret: <the same random string>`.
+5. Check: request to join a project from a second account; the owner gets the email. Failures show
+   under **Edge Functions → notify-email → Logs**.
 
 ## Accepting a join request — one transaction, `respond_to_join_request()`
 
@@ -479,11 +527,26 @@ that lies about who's working on the project, and a seat the owner can't refill 
 occupies it. The seat reopening immediately is what lets a team recover; the deliberate confirm
 step on `Team.jsx` is what addresses someone leaving on a whim.
 
-**Nothing tells the owner.** There is no notification system — a member leaving is visible only as
-a changed roster on `Team.jsx` and a project that has gone back to `'open'`. Telling teammates is
-left to the students, which the leave dialog says outright. If that turns out to be too quiet, an
-in-app activity feed is the cheap version (one table, no infrastructure); real push or email would
-need a service worker or a mail provider, neither of which this project has.
+**The owner is notified, and rosters lock at a deadline.** `20_leave_team_rules.sql` (issue #35)
+adds a `notifications` table: `leave_team()` writes a `'member_left'` row for the project's creator,
+which `Team.jsx` shows them until they dismiss it. It's an in-app feed only — real push or email
+would need a service worker or a mail provider. (#26 later added email for join requests through an
+Edge Function; see [Email notifications](#email-notifications).) The same file
+adds a class-wide formation deadline, read only through `formation_deadline()` (today it returns
+`app_settings.formation_deadline`; #38 will point it at its milestones table). After it,
+`leave_team()` refuses students. Taking a student off is an admin's job (#39), and both paths share
+`private.remove_from_team(p_user_id, p_by_admin)` — the one place a seat is given up: it deletes the
+membership, restores the role, resyncs the project and notifies the creator. Only an admin
+(`users.is_admin`, checked with `private.is_admin()` from `18_admin_access.sql`, #36) can set the
+deadline.
+
+**Removing follows the same rules.** `22_remove_member_rules.sql` (issue #29) sends
+`remove_member()` through `private.remove_from_team()` too. Only the creator can remove a member,
+never themself, and the formation deadline blocks them the same way it blocks leaving. An admin can
+still remove any student except the creator after the deadline. The removed student gets a
+`'member_removed'` notification, which `Team.jsx` shows even once they're off the team. The creator
+is only notified (`'member_left'`, `by_admin`) when an admin did the removal. Once the
+`team_members` row is gone, the student is free to request or start another project.
 
 ## Deleting a team — `delete_team()`
 
@@ -705,7 +768,9 @@ Then work through the checks below.
 - **No RLS write policy was added for `projects`, and none is needed.** `create_project`,
   `update_project` and `delete_team` are `SECURITY DEFINER` and do their own authorization — the
   same template `respond_to_join_request` already uses.
-- **`notifications` was considered and deliberately dropped.** Nothing tells an owner that a member
-  left; see [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
+- **`notifications` was added later** (`20_leave_team_rules.sql`, issue #35) so an owner hears when a
+  member leaves; see [Why leaving is not owner-approved](#why-leaving-is-not-owner-approved).
+  `21_join_request_responses.sql` adds the `request_accepted` / `request_declined` kinds so a
+  requester hears back when their request is answered.
 - **No way to remove yourself as owner** other than deleting the team, and no way to transfer
   ownership. Both are fine for now; flagged in case the scope grows.

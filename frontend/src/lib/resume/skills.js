@@ -375,6 +375,15 @@ const NOT_A_SKILL =
 // and is none of TeamUp's business.
 const NOT_A_SKILLS_LIST = /\b(spoken|native|fluent|language proficienc|interests?|hobbies)\b/i;
 
+// The same line without its label — plenty of resumes just write
+// "English (Fluent), Spanish (Native)" under the skills heading with no
+// "Languages:" in front of it. Matched on a proficiency word *in brackets*
+// rather than anywhere on the line, because "React Native" and "Native app
+// development" are real skills and the looser test would throw away the
+// whole line they appear on.
+const PROFICIENCY_IN_BRACKETS =
+  /\((fluent|native|basic|intermediate|advanced|conversational|proficient|beginner)\)/i;
+
 // Words in the skills section that matched nothing. These are the candidates
 // for growing the skills table — a resume saying "Docker" is a signal, even
 // though no project can ask for it yet.
@@ -390,7 +399,7 @@ export function unmatchedTerms(lines, dictionary, sectionOf) {
     if (heading && !heading.inline) return;
 
     const label = line.includes(':') ? line.slice(0, line.indexOf(':')) : '';
-    if (NOT_A_SKILLS_LIST.test(label)) return;
+    if (label ? NOT_A_SKILLS_LIST.test(label) : PROFICIENCY_IN_BRACKETS.test(line)) return;
 
     // Split on the separators a skills list actually uses: the colon after a
     // category label, and brackets, since "Python (pandas, NumPy)" hides real

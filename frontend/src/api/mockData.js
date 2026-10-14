@@ -100,7 +100,8 @@ export const users = [
   { id: 'u-marcus', email: 'mhall01@utrgv.edu', name: 'Marcus Hall', bio: 'Backend and APIs. Happy to own deployment too.', availability_hours: 11, github_url: '' },
   { id: 'u-ana', email: 'avillarreal01@utrgv.edu', name: 'Ana Villarreal', bio: 'Data and notebooks. Looking for something with messy real data.', availability_hours: 9, github_url: '' },
   { id: 'u-derek', email: 'dcho01@utrgv.edu', name: 'Derek Cho', bio: 'I like testing and keeping a project organized.', availability_hours: 8, github_url: '' },
-];
+  { id: 'u-instructor', email: 'instructor@utrgv.edu', name: 'Course Instructor', bio: '', availability_hours: 0, github_url: '', is_admin: true },
+].map((u) => ({ is_admin: false, ...u }));
 
 const userById = Object.fromEntries(users.map((u) => [u.id, u]));
 
@@ -151,6 +152,36 @@ export function skillsForUser(userId) {
   return userSkills
     .filter((us) => us.user_id === userId)
     .map((us) => ({ ...skillById[us.skill_id], source: us.source }));
+}
+
+// --- PROFILE_EVIDENCE --------------------------------------------------
+// profile_evidence: user_id, skill_id, months, projects, quote
+//
+// What the resume importer writes once a student confirms, and what the
+// matching engine scores as `depth`. Own-rows-only in the real schema, so
+// only ever read for the signed-in student.
+//
+// Deliberately partial: most students here have bare skill tags and no
+// evidence at all, which is the common case and the one the engine has to
+// handle without punishing anyone.
+export const profileEvidence = [
+  { user_id: 'u-sofia', skill_id: 's-react', months: 14, projects: 3, quote: 'Rebuilt the club site in React over two semesters.' },
+  { user_id: 'u-sofia', skill_id: 's-js', months: 20, projects: 4, quote: 'JavaScript across every project since sophomore year.' },
+  { user_id: 'u-sofia', skill_id: 's-figma', months: 6, projects: 1, quote: 'Designed the parking app screens in Figma.' },
+
+  { user_id: 'u-jose', skill_id: 's-python', months: 24, projects: 5, quote: 'Python for every data course and two research projects.' },
+  { user_id: 'u-jose', skill_id: 's-opencv', months: 9, projects: 2, quote: 'Counted cars in campus camera footage using OpenCV.' },
+
+  { user_id: 'u-marcus', skill_id: 's-node', months: 11, projects: 2, quote: 'Node and Express APIs for the inventory tool.' },
+  { user_id: 'u-ana', skill_id: 's-pandas', months: 8, projects: 2, quote: 'pandas pipelines over messy survey exports.' },
+];
+
+export function evidenceForUser(userId) {
+  return Object.fromEntries(
+    profileEvidence
+      .filter((e) => e.user_id === userId)
+      .map((e) => [e.skill_id, { months: e.months, projects: e.projects }])
+  );
 }
 
 // --- PROJECTS ----------------------------------------------------------
@@ -218,6 +249,10 @@ export const projectRolesNeeded = [
   // A role with no skill attached — skill_id is nullable, which is what
   // makes "we need a project manager" expressible at all.
   { project_id: 'p-scam', role_id: 'r-pm', skill_id: null, quantity_needed: 1 },
+  // A role whose seat has been filled. The row is kept so the creator does
+  // not lose the skill pinned to it, but at 0 it is no longer open and is
+  // never advertised — see supabase/15_release_filled_roles.sql.
+  { project_id: 'p-scam', role_id: 'r-devops', skill_id: 's-git', quantity_needed: 0 },
 ];
 
 // --- TEAMS / TEAM_MEMBERS ---------------------------------------------
@@ -262,6 +297,17 @@ export const joinRequests = [
   { id: 'jr-4', project_id: 'p-lab', user_id: 'u-adan', status: 'declined', created_at: '2026-08-26T11:00:00Z' },
 ];
 
+// --- APP_SETTINGS / NOTIFICATIONS -------------------------------------
+// See supabase/20_leave_team_rules.sql. app_settings is a single row;
+// formation_deadline null means rosters never lock. Admins are users with
+// is_admin (above), as in 18_admin_access.sql. notifications: id, user_id
+// (recipient), kind, project_id, actor_id, by_admin, created_at, read_at.
+// 21_join_request_responses.sql adds the request_accepted/declined kinds.
+// 23_join_request_notifications.sql adds 'join_request', for the creator.
+export const appSettings = { formation_deadline: null };
+
+export const notifications = [];
+
 // --- Composition helpers ----------------------------------------------
 // These stand in for the joins the backend will do. Keeping them here
 // documents exactly what each endpoint is expected to return.
@@ -285,9 +331,9 @@ function viewerRequestStatus(projectId, viewerId) {
 
 export function buildProject(project, viewerId = null) {
   const team = teams.find((t) => t.project_id === project.id);
-  const members = team
+  const allMembers = team
     ? teamMembers
-        .filter((tm) => tm.team_id === team.id)
+        .filter((tm) => tm.team_id === team.id && !userById[tm.user_id].is_admin)
         .map((tm) => ({
           user_id: tm.user_id,
           name: userById[tm.user_id].name,
@@ -295,11 +341,17 @@ export function buildProject(project, viewerId = null) {
           role: roleById[tm.role_id]?.name ?? null,
         }))
     : [];
+  // Same rule as team_members RLS: any signed-in viewer sees the roster, guests
+  // only the seat count.
+  const members = viewerId ? allMembers : [];
 
   // skill_id is nullable, so skill_name/category come back null for a role
   // listed without a specific skill attached to it.
+  // quantity_needed drops to 0 as seats are filled (15_release_filled_roles).
+  // A role at 0 is no longer open, so it is not advertised and the matching
+  // engine never scores anyone against it.
   const roles_needed = projectRolesNeeded
-    .filter((r) => r.project_id === project.id)
+    .filter((r) => r.project_id === project.id && r.quantity_needed > 0)
     .map((r) => ({
       role_id: r.role_id,
       role_name: roleById[r.role_id].name,
@@ -309,8 +361,8 @@ export function buildProject(project, viewerId = null) {
       quantity_needed: r.quantity_needed,
     }));
 
-  const avgHours = members.length
-    ? Math.round(members.reduce((sum, m) => sum + userById[m.user_id].availability_hours, 0) / members.length)
+  const avgHours = allMembers.length
+    ? Math.round(allMembers.reduce((sum, m) => sum + userById[m.user_id].availability_hours, 0) / allMembers.length)
     : 0;
 
   return {
@@ -320,8 +372,8 @@ export function buildProject(project, viewerId = null) {
     formed_at: team ? team.formed_at : null,
     members,
     roles_needed,
-    member_count: members.length,
-    avg_availability_hours: avgHours,
+    member_count: allMembers.length,
+    avg_availability_hours: viewerId ? avgHours : null,
     viewer_request_status: viewerRequestStatus(project.id, viewerId),
   };
 }
