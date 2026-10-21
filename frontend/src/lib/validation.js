@@ -309,3 +309,41 @@ export function validateMilestone({ name, due_at, message }) {
 
   return { values, errors, isValid: Object.keys(errors).length === 0 };
 }
+
+// --- Announcements --------------------------------------------------------
+// Mirrored by announcements_title_text / announcements_body_text and the
+// raises in save_announcement() (supabase/29_announcements.sql). Same
+// junk rules as a milestone message, but both fields are required.
+export const ANNOUNCEMENT_TITLE_MAX = 120;
+export const ANNOUNCEMENT_BODY_MAX = 2000;
+
+export function validateAnnouncement({ title, body }) {
+  const errors = {};
+  const values = {};
+
+  const t = String(title ?? '').trim();
+  if (t === '') errors.title = 'Give the announcement a title';
+  else if (charCount(t) > ANNOUNCEMENT_TITLE_MAX) {
+    errors.title = `Keep the title to ${ANNOUNCEMENT_TITLE_MAX} characters or fewer`;
+  } else if (/[\x00-\x1F\x7F]/.test(t) || INVISIBLE.test(t)) {
+    errors.title = "The title can't contain line breaks, hidden or control characters";
+  } else if (!HAS_WORDS.test(t)) {
+    errors.title = 'The title has to include letters or numbers';
+  } else values.title = t;
+
+  const b = String(body ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/^[ \t\n]+|[ \t\n]+$/g, '');
+  if (b === '') errors.body = 'Write a message';
+  else if (charCount(b) > ANNOUNCEMENT_BODY_MAX) {
+    errors.body = `Keep the message to ${ANNOUNCEMENT_BODY_MAX} characters or fewer`;
+  } else if (CONTROL.test(b) || INVISIBLE.test(b)) {
+    errors.body = "The message can't contain hidden or control characters";
+  } else if (!HAS_WORDS.test(b)) {
+    errors.body = 'The message has to include letters or numbers';
+  } else if (TWO_BLANK_LINES.test(b)) {
+    errors.body = 'Leave at most one blank line in a row';
+  } else values.body = b;
+
+  return { values, errors, isValid: Object.keys(errors).length === 0 };
+}

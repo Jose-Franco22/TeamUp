@@ -19,6 +19,8 @@ import {
   milestones,
   formationDeadline,
   adminActions,
+  announcements,
+  announcementsSeenAt,
   notifications,
   buildProject,
   skillsForUser,
@@ -30,6 +32,7 @@ import { isOpenProject } from '../lib/browseFilters';
 import {
   ValidationError,
   fieldErrorsFromDbError,
+  validateAnnouncement,
   validateMilestone,
   validateProfile,
   validateProject,
@@ -393,6 +396,8 @@ export async function saveMilestone({ id = null, name, due_at, is_formation_dead
       due_at: values.due_at,
       is_formation_deadline: Boolean(is_formation_deadline),
       message: values.message,
+      // A new or changed milestone counts as news on the Announcements tab.
+      updated_at: new Date().toISOString(),
     });
     if (!existing) milestones.push(row);
     return { ...row };
@@ -418,6 +423,99 @@ export async function deleteMilestone(id) {
     return;
   }
   const { error } = await supabase.rpc('delete_milestone', { p_id: id });
+  if (error) throw error;
+}
+
+// --- Announcements --------------------------------------------------------
+// Admins and advisers post them; everyone signed in reads them on
+// /announcements beside the milestones. The tab's badge counts what's new
+// since the viewer last opened that page — see supabase/29_announcements.sql.
+
+export async function getAnnouncementFeed() {
+  if (USE_MOCKS) {
+    await delay();
+    requireSessionUserId();
+    return announcements
+      .slice()
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map((a) => ({ ...a, author_name: users.find((u) => u.id === a.author_id)?.name ?? null }));
+  }
+  const { data, error } = await supabase.rpc('announcement_feed');
+  if (error) throw error;
+  return data;
+}
+
+// Posts an announcement when `id` is missing, edits it otherwise.
+export async function saveAnnouncement({ id = null, title, body }) {
+  const { values, errors, isValid } = validateAnnouncement({ title, body });
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    const adminId = requireAdminSessionUserId();
+    const now = new Date().toISOString();
+    if (id) {
+      const row = announcements.find((a) => a.id === id);
+      if (!row) throw new Error('Announcement not found');
+      Object.assign(row, { title: values.title, body: values.body, updated_at: now });
+      return { ...row };
+    }
+    const row = {
+      id: `an-${Date.now()}-${announcements.length}`,
+      title: values.title,
+      body: values.body,
+      author_id: adminId,
+      created_at: now,
+      updated_at: now,
+    };
+    announcements.push(row);
+    return { ...row };
+  }
+  const { data, error } = await supabase.rpc('save_announcement', {
+    p_id: id,
+    p_title: values.title,
+    p_body: values.body,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteAnnouncement(id) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const index = announcements.findIndex((a) => a.id === id);
+    if (index === -1) throw new Error('Announcement not found');
+    announcements.splice(index, 1);
+    return;
+  }
+  const { error } = await supabase.rpc('delete_announcement', { p_id: id });
+  if (error) throw error;
+}
+
+// Announcements and milestones new or changed since the viewer last opened
+// /announcements. Always 0 for admins, who write them.
+export async function getUnseenAnnouncementCount() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (users.find((u) => u.id === id)?.is_admin) return 0;
+    const seen = announcementsSeenAt[id] ? new Date(announcementsSeenAt[id]) : null;
+    const isNew = (row) => !seen || new Date(row.updated_at ?? row.created_at ?? 0) > seen;
+    return announcements.filter(isNew).length + milestones.filter(isNew).length;
+  }
+  const { data, error } = await supabase.rpc('unseen_announcement_count');
+  if (error) throw error;
+  return data ?? 0;
+}
+
+export async function markAnnouncementsSeen() {
+  if (USE_MOCKS) {
+    await delay();
+    announcementsSeenAt[requireSessionUserId()] = new Date().toISOString();
+    return;
+  }
+  const { error } = await supabase.rpc('mark_announcements_seen');
   if (error) throw error;
 }
 

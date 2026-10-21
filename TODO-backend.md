@@ -567,6 +567,15 @@ functions build SQL from text (no `EXECUTE`), and every id argument is typed `uu
 attempts are stored or refused as plain values. `milestone_input_safety.test.sql` throws garbage,
 SQL and HTML payloads at all of it.
 
+**Announcements.** `29_announcements.sql` adds `public.announcements` (title, body, author,
+timestamps), readable by signed-in users and written only through the admin RPCs
+`save_announcement()` and `delete_announcement()`. The title and body CHECK constraints use the
+same rules as milestone messages, and both are required. `announcement_feed()` returns them with
+the author's name, because students can't read admin rows under `users` RLS.
+`unseen_announcement_count()` and `mark_announcements_seen()` drive the tab's badge through
+`users.announcements_seen_at`. Anything with `updated_at` after that time counts as new, so an
+edited announcement or a moved deadline shows up again. Admins always get 0.
+
 **Admins place students.** `27_admin_placement.sql` (issue #39) adds `admin_assign_student()` and
 `admin_move_student()`. Both take a student, a team with an open seat, and a role, and work after the
 deadline. They seat a student the way an accepted request does: the role's seat is taken, the

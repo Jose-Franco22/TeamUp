@@ -145,8 +145,8 @@ student can ask to join the same project again later.
 
 ## Deadlines, milestones and admin placement (#38, #39)
 
-Apply `supabase/26_milestones.sql`, `supabase/27_admin_placement.sql`, then
-`supabase/28_milestone_messages.sql`, after `24`. Each milestone can carry an optional message
+Apply `supabase/26_milestones.sql`, `supabase/27_admin_placement.sql`,
+`supabase/28_milestone_messages.sql`, then `supabase/29_announcements.sql`, after `24`. Each milestone can carry an optional message
 explaining what's expected. Admins add
 milestones on the **Milestones** tab (`/admin/milestones`), and can mark one as the team formation deadline. After it, students can't
 post projects, send requests, leave or remove members. Students see what's coming up in a banner at
@@ -154,6 +154,15 @@ the top of every page. On a student's admin page, an admin can assign them to a 
 seat, move them to another team, or remove them, even after the deadline. Each change notifies the
 people affected and is listed under **Recent admin changes** on `/admin`. TODO-backend.md has the
 details, next to the leaving and removing rules.
+
+## Announcements
+
+Everyone signed in has an **Announcements** tab (`/announcements`): upcoming deadlines with their
+messages, announcements from admins and advisers (newest first, with who posted them), and past
+deadlines. Admins and advisers post, edit and delete announcements on the same page. Students' tab
+shows how many announcements and milestones are new or changed since they last opened it. Titles
+and messages follow the same rules as milestone messages: no blank or punctuation-only text, no
+control or invisible characters. Anything typed is shown as plain text.
 
 ## Testing
 

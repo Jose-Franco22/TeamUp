@@ -795,3 +795,39 @@ button:disabled { opacity: 0.45; cursor: default; }
   overflow-wrap: anywhere;
 }
 .milestone-list li { flex: 1 1 220px; }
+
+/* ---------- announcements ---------- */
+.milestone-more { margin: 10px 0 0; font-size: 12.5px; }
+.deadline-list,
+.post-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.deadline-list .card,
+.post-list .card { margin-bottom: 0; }
+.deadline { display: flex; gap: 18px; align-items: flex-start; }
+.deadline-when { flex: none; width: 150px; display: flex; flex-direction: column; gap: 2px; }
+.deadline-when b { font-size: 14px; font-weight: 600; color: var(--open); }
+.deadline-when span { font-size: 12.5px; color: var(--slate); }
+.deadline-what { flex: 1; min-width: 0; }
+.deadline-what h3,
+.post h3,
+.post-form h3 { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.deadline-what .pill { margin-left: 8px; }
+.post-meta { margin: 3px 0 0; font-size: 12.5px; color: var(--mute); }
+.post-body {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.post-form { margin-bottom: 10px; }
+.post-form h3 { margin-bottom: 12px; }
+.post-status { margin: 0 0 10px; color: var(--open); }
+.past-list { padding-block: 14px; }
+@media (max-width: 620px) {
+  .deadline { flex-direction: column; gap: 8px; }
+  .deadline-when { width: auto; flex-direction: row; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+}
+/* Each section's heading is its first-of-type, which zeroes its top margin
+   (.section:first-of-type above); put the gap back between sections. */
+.page-section + .page-section { margin-top: 26px; }

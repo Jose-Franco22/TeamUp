@@ -320,13 +320,24 @@ export function setFormationDeadline(dueAt) {
     if (milestones[i].is_formation_deadline) milestones.splice(i, 1);
   }
   if (dueAt) {
-    milestones.push({ id: `ms-deadline-${Date.now()}`, name: 'Team formation deadline', due_at: dueAt, is_formation_deadline: true, message: '' });
+    milestones.push({
+      id: `ms-deadline-${Date.now()}`, name: 'Team formation deadline', due_at: dueAt,
+      is_formation_deadline: true, message: '', updated_at: new Date().toISOString(),
+    });
   }
 }
 
 export const notifications = [];
 
 export const adminActions = [];
+
+// --- ANNOUNCEMENTS -----------------------------------------------------
+// See supabase/29_announcements.sql. announcements: id, title, body,
+// author_id, created_at, updated_at. announcementsSeenAt stands in for
+// users.announcements_seen_at: user id -> ISO time they last opened
+// /announcements (missing means never, so everything is new).
+export const announcements = [];
+export const announcementsSeenAt = {};
 
 // --- Composition helpers ----------------------------------------------
 // These stand in for the joins the backend will do. Keeping them here

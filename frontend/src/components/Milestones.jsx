@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { deleteMilestone, getMilestones, saveMilestone } from '../api/client';
 import { MILESTONE_MESSAGE_MAX, ValidationError, charCount, validateMilestone } from '../lib/validation';
 
@@ -69,6 +69,9 @@ export function MilestoneBanner({ limit = 3 }) {
           ))}
         </ul>
       )}
+      <p className="milestone-more">
+        <Link to="/announcements">All deadlines and announcements</Link>
+      </p>
     </section>
   );
 }
