@@ -1,7 +1,7 @@
 // The Announcements page, against the mock API: what students see, what
 // admins can post, and that nothing typed is ever run as HTML.
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Announcements, { relativeDue } from './Announcements';
@@ -30,6 +30,17 @@ function renderPage(as) {
   setSessionUserId(as.id);
   render(<MemoryRouter><Announcements /></MemoryRouter>);
 }
+
+// The admin form shows before the feed and deadlines load, so wait for both
+// before typing; otherwise their "Loading…" status is still on the page.
+async function renderLoadedPage(as) {
+  renderPage(as);
+  await waitFor(() => expect(screen.queryByText(/^Loading/)).not.toBeInTheDocument());
+}
+
+// A save or delete is two mock calls (the change, then a refetch), each with
+// the mock API's delay, which can outlast findBy's default 1s on a slow CI runner.
+const AFTER_SAVE = { timeout: 3000 };
 
 const STUDENT = { id: 'u-sofia', name: 'Sofia Garza', is_admin: false };
 const ADMIN = { id: 'u-instructor', name: 'Course Instructor', is_admin: true };
@@ -80,15 +91,15 @@ test('empty states', async () => {
 
 test('an admin posts an announcement, and it shows at the top with their name', async () => {
   const user = userEvent.setup();
-  renderPage(ADMIN);
-  const form = await screen.findByRole('form', { name: 'Post an announcement' });
+  await renderLoadedPage(ADMIN);
+  const form = screen.getByRole('form', { name: 'Post an announcement' });
   await user.type(within(form).getByLabelText('Title'), 'Demo day moved');
   await user.type(within(form).getByLabelText('Message'), 'Now on the 12th, same room.');
   await user.click(within(form).getByRole('button', { name: 'Post announcement' }));
 
-  expect(await screen.findByRole('status')).toHaveTextContent('Posted “Demo day moved”.');
-  const posts = await screen.findByRole('list', { name: 'Announcements' });
-  await within(posts).findByRole('heading', { name: 'Demo day moved' });
+  expect(await screen.findByText('Posted “Demo day moved”.', {}, AFTER_SAVE)).toHaveAttribute('role', 'status');
+  const posts = screen.getByRole('list', { name: 'Announcements' });
+  await within(posts).findByRole('heading', { name: 'Demo day moved' }, AFTER_SAVE);
   const first = within(posts).getAllByRole('listitem')[0];
   expect(within(first).getByRole('heading')).toHaveTextContent('Demo day moved');
   expect(first).toHaveTextContent('Course Instructor');
@@ -115,20 +126,20 @@ test('garbage is caught in the form and nothing is posted', async () => {
 
 test('an admin edits and deletes an announcement', async () => {
   const user = userEvent.setup();
-  renderPage(ADMIN);
-  await user.click(await screen.findByRole('button', { name: 'Edit Welcome to senior project' }));
+  await renderLoadedPage(ADMIN);
+  await user.click(screen.getByRole('button', { name: 'Edit Welcome to senior project' }));
   const form = screen.getByRole('form', { name: 'Edit announcement' });
   const title = within(form).getByLabelText('Title');
   expect(title).toHaveValue('Welcome to senior project');
   await user.clear(title);
   await user.type(title, 'Welcome, everyone');
   await user.click(within(form).getByRole('button', { name: 'Save changes' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('Saved “Welcome, everyone”.');
-  expect(await screen.findByRole('heading', { name: 'Welcome, everyone' })).toBeInTheDocument();
+  expect(await screen.findByText('Saved “Welcome, everyone”.', {}, AFTER_SAVE)).toHaveAttribute('role', 'status');
+  expect(await screen.findByRole('heading', { name: 'Welcome, everyone' }, AFTER_SAVE)).toBeInTheDocument();
 
   await user.click(screen.getByRole('button', { name: 'Delete Welcome, everyone' }));
   await user.click(screen.getByRole('button', { name: 'Delete “Welcome, everyone”' }));
-  expect(await screen.findByText('No announcements yet.')).toBeInTheDocument();
+  expect(await screen.findByText('No announcements yet.', {}, AFTER_SAVE)).toBeInTheDocument();
   expect(announcements).toHaveLength(0);
 });
 
