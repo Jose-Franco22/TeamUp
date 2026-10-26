@@ -216,6 +216,22 @@ export function validateProject(input, { memberCount = 1 } = {}) {
   return { values, errors, isValid: Object.keys(errors).length === 0 };
 }
 
+// --- Join requests (issue #32) --------------------------------------------
+
+// The optional note sent with a join request. Mirrored by
+// join_requests_message_length_check and the raise in create_join_request()
+// (supabase/24_join_request_message.sql).
+export const JOIN_MESSAGE_MAX = 300;
+export const JOIN_MESSAGE_TOO_LONG = `Your message can be at most ${JOIN_MESSAGE_MAX} characters`;
+
+// Trimmed, like the database does before measuring. Empty is fine: the
+// message is optional.
+export function validateJoinMessage(raw) {
+  const message = String(raw ?? '').trim();
+  if (charCount(message) > JOIN_MESSAGE_MAX) return { error: JOIN_MESSAGE_TOO_LONG };
+  return { value: message };
+}
+
 // Turns a database CHECK violation on users into the same field message the
 // form would have shown, so a rule enforced only server-side still lands
 // next to the right field. Returns null for any other error.
@@ -227,6 +243,7 @@ const CONSTRAINT_FIELDS = {
   projects_title_length_check: ['title', TITLE_RANGE],
   projects_description_length_check: ['description', DESCRIPTION_RANGE],
   projects_team_size_target_check: ['team_size_target', TEAM_SIZE_RANGE],
+  join_requests_message_length_check: ['message', JOIN_MESSAGE_TOO_LONG],
 };
 
 export function fieldErrorsFromDbError(error) {

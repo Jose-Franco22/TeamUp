@@ -1,5 +1,6 @@
 // Issue #17 — Logic tests for profile validation.
 // Issue #23 — Logic tests for project validation (second half of the file).
+// Issue #32 — Logic tests for the join request message (at the end).
 import { describe, expect, test } from 'vitest';
 import {
   BIO_MAX,
@@ -7,6 +8,8 @@ import {
   DESCRIPTION_MIN,
   DESCRIPTION_RANGE,
   GITHUB_URL_PATTERN,
+  JOIN_MESSAGE_MAX,
+  JOIN_MESSAGE_TOO_LONG,
   TEAM_SIZE_MAX,
   TEAM_SIZE_MIN,
   TEAM_SIZE_RANGE,
@@ -16,9 +19,11 @@ import {
   ValidationError,
   charCount,
   fieldErrorsFromDbError,
+  validateJoinMessage,
   validateProfile,
   validateProject,
 } from './validation';
+import { JOIN_BLOCKED } from './joinRequests';
 
 describe('availability_hours', () => {
   test.each([0, 20, 40, '0', '20', '40', ' 12 '])('accepts %j', (value) => {
@@ -423,5 +428,56 @@ describe('validateProject: the database agrees', () => {
     // the form, so a student never sees two different sentences for one rule.
     expect(sql).toContain(TITLE_RANGE);
     expect(sql).toContain(DESCRIPTION_RANGE);
+  });
+});
+
+// --- Join request message (issue #32) --------------------------------------
+
+describe('join request message', () => {
+  test('is capped at 300 characters', () => {
+    expect(JOIN_MESSAGE_MAX).toBe(300);
+  });
+
+  test.each([
+    ['empty', ''],
+    ['missing', undefined],
+    ['blank', '   '],
+    ['300 characters', 'a'.repeat(300)],
+    ['300 emoji, which Postgres counts as 300', '😀'.repeat(300)],
+    ['300 characters with surrounding spaces', `  ${'a'.repeat(300)}  `],
+  ])('accepts %s', (_label, value) => {
+    const { error, value: clean } = validateJoinMessage(value);
+    expect(error).toBeUndefined();
+    expect(clean).toBe(String(value ?? '').trim());
+  });
+
+  test('rejects 301 characters, with the same sentence the database raises', () => {
+    expect(validateJoinMessage('a'.repeat(301))).toEqual({ error: JOIN_MESSAGE_TOO_LONG });
+    expect(JOIN_MESSAGE_TOO_LONG).toBe('Your message can be at most 300 characters');
+  });
+
+  test('a constraint violation from the database maps back to the message field', () => {
+    expect(
+      fieldErrorsFromDbError({
+        code: '23514',
+        message: 'new row violates check constraint "join_requests_message_length_check"',
+      })
+    ).toEqual({ message: JOIN_MESSAGE_TOO_LONG });
+  });
+
+  // The migration and this file have to agree, or the counter allows what
+  // the database refuses — and every reason the page shows for a blocked
+  // request must be the sentence create_join_request() raises.
+  test('the migration enforces the same limit and raises the same sentences', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const sql = readFileSync(resolve(process.cwd(), '../supabase/24_join_request_message.sql'), 'utf8');
+
+    expect(sql).toContain(`char_length(message) <= ${JOIN_MESSAGE_MAX}`);
+    expect(sql).toContain(`char_length(v_message) > ${JOIN_MESSAGE_MAX}`);
+    expect(sql).toContain(JOIN_MESSAGE_TOO_LONG);
+    for (const sentence of Object.values(JOIN_BLOCKED)) {
+      expect(sql).toContain(sentence.replaceAll("'", "''"));
+    }
   });
 });
