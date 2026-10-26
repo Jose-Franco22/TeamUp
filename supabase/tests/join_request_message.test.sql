@@ -9,6 +9,8 @@ select set_config('tests.full_member', tests.sign_in_with_microsoft('member02@ut
 select set_config('tests.ana', tests.sign_in_with_microsoft('ana01@utrgv.edu', 'Ana')::text, true);
 select set_config('tests.ben', tests.sign_in_with_microsoft('ben01@utrgv.edu', 'Ben')::text, true);
 select set_config('tests.cal', tests.sign_in_with_microsoft('cal01@utrgv.edu', 'Cal')::text, true);
+select set_config('tests.dee', tests.sign_in_with_microsoft('dee01@utrgv.edu', 'Dee')::text, true);
+select set_config('tests.eve', tests.sign_in_with_microsoft('eve01@utrgv.edu', 'Eve')::text, true);
 select set_config('tests.pm', (select id from public.roles where name = 'Project Manager')::text, true);
 
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
@@ -82,9 +84,6 @@ select throws_ok(
 
 -- 300 characters is fine (on a fresh project, so nothing else refuses it);
 -- 301 is not. Emoji count as one character each, as in the frontend.
-select set_config('tests.dee', tests.sign_in_with_microsoft('dee01@utrgv.edu', 'Dee')::text, true);
-select set_config('tests.eve', tests.sign_in_with_microsoft('eve01@utrgv.edu', 'Eve')::text, true);
-
 select tests.authenticate_as(current_setting('tests.dee')::uuid);
 select throws_ok(
   format('select public.create_join_request(%L, %L)', current_setting('tests.p1'), repeat('a', 301)),
