@@ -382,6 +382,16 @@ In the app, `RequestAlerts.jsx` shows each unread one above every page ("Ana ask
 “Trail Finder”. Review on your Requests page") and puts the pending count on the Requests tab
 (`getPendingRequestCount()`). Opening `/requests` marks them read.
 
+## A note with the request, and the rest of the refusals (#32)
+
+`supabase/24_join_request_message.sql` adds `join_requests.message` (trimmed, null when empty, at
+most 300 characters by `join_requests_message_length_check`) and replaces `create_join_request()`
+with `create_join_request(p_project_id uuid, p_message text default null)`. The one-argument
+version is dropped first, since both together would make a one-argument call ambiguous. Two more
+refusals run after the original three: the project is full (counted from the roster), and the
+formation deadline (`formation_deadline()`) has passed. The sentences it raises are the ones in
+`frontend/src/lib/joinRequests.js`; `validation.test.js` fails if they drift.
+
 ### Email notifications
 
 Email goes out from the `notify-email` Edge Function (`supabase/functions/notify-email/`), which a

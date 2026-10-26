@@ -136,6 +136,13 @@ project, its creator gets an in-app notice naming them, with a link to `/request
 Requests tab shows how many requests are waiting. Email copies need a one-time Edge Function and
 webhook setup — see [Email notifications in TODO-backend.md](TODO-backend.md#email-notifications).
 
+## Join request messages (#32)
+
+Apply `supabase/24_join_request_message.sql` after `23`. A student can add an optional note (up to
+300 characters) when asking to join, and the creator sees it on the Requests page. Requests are
+now also refused when the project is full or the formation deadline has passed, and Browse shows
+the specific reason on each card a student can't request.
+
 ## Testing
 
 Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.

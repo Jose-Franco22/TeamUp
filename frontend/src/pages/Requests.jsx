@@ -93,6 +93,7 @@ export default function Requests() {
                 <div>
                   <div className="nm">{r.user_name}</div>
                   <div className="sub">{r.skills.join(', ') || 'No skills listed'}</div>
+                  {r.message && <p className="request-note">“{r.message}”</p>}
                 </div>
                 <div className="sub">{r.availability_hours} hrs/wk</div>
                 <div className="decision">

@@ -25,9 +25,11 @@ import {
 } from './mockData';
 import { supabase } from '../lib/supabaseClient';
 import { isOpenProject } from '../lib/browseFilters';
+import { JOIN_BLOCKED, isPastDeadline } from '../lib/joinRequests';
 import {
   ValidationError,
   fieldErrorsFromDbError,
+  validateJoinMessage,
   validateProfile,
   validateProject,
 } from '../lib/validation';
@@ -815,7 +817,7 @@ export async function updateCurrentUser(patch) {
 // --- Join requests -----------------------------------------------------
 
 const REQUEST_SELECT = `
-  id, project_id, user_id, status, created_at,
+  id, project_id, user_id, status, message, created_at,
   requester:users!user_id ( name, availability_hours, user_skills ( skills ( name ) ) ),
   project:projects!project_id (
     title, creator_id, team_size_target,
@@ -876,6 +878,7 @@ export async function getRequests() {
       project_id: r.project_id,
       user_id: r.user_id,
       status: r.status,
+      message: r.message ?? null,
       created_at: r.created_at,
       user_name: r.requester.name,
       availability_hours: r.requester.availability_hours,
@@ -932,28 +935,40 @@ export async function getPendingRequestCount() {
   return count ?? 0;
 }
 
-export async function createJoinRequest(projectId) {
+// `message` is the optional note to the creator (issue #32), up to
+// JOIN_MESSAGE_MAX characters. create_join_request() trims it and checks
+// the length again — see supabase/24_join_request_message.sql.
+export async function createJoinRequest(projectId, message = '') {
+  const { value: cleanMessage, error: messageError } = validateJoinMessage(message);
+  if (messageError) throw new ValidationError({ message: messageError });
+
   if (USE_MOCKS) {
     await delay();
     const id = requireStudentSessionUserId();
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new Error('Project not found');
-    if (project.creator_id === id) throw new Error('You cannot request to join your own project');
+    if (project.creator_id === id) throw new Error(JOIN_BLOCKED.own);
     const team = teams.find((t) => t.project_id === projectId);
     const isMember = team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === id);
     if (isMember) throw new Error("You're already on this team");
     // A student can only be on one team at a time.
     const onAnyTeam = teamMembers.some((tm) => tm.user_id === id);
-    if (onAnyTeam) throw new Error('You are already on a team and cannot request to join another project');
+    if (onAnyTeam) throw new Error(JOIN_BLOCKED.onTeam);
     const existing = joinRequests.find(
       (r) => r.project_id === projectId && r.user_id === id && r.status === 'pending'
     );
-    if (existing) throw new Error('You already have a pending request for this project');
+    if (existing) throw new Error(JOIN_BLOCKED.pending);
+    const memberCount = team ? teamMembers.filter((tm) => tm.team_id === team.id).length : 0;
+    if (project.status === 'full' || memberCount >= project.team_size_target) {
+      throw new Error(JOIN_BLOCKED.full);
+    }
+    if (isPastDeadline(appSettings.formation_deadline)) throw new Error(JOIN_BLOCKED.deadline);
     const row = {
       id: `jr-${Date.now()}`,
       project_id: projectId,
       user_id: id,
       status: 'pending',
+      message: cleanMessage || null,
       created_at: new Date().toISOString(),
     };
     joinRequests.push(row);
@@ -970,12 +985,25 @@ export async function createJoinRequest(projectId) {
     });
     return row;
   }
-  // create_join_request() runs all four checks, the insert and the creator's
+  // create_join_request() runs every check, the insert and the creator's
   // notification in one transaction server-side — see
-  // supabase/23_join_request_notifications.sql.
-  const { data, error } = await supabase.rpc('create_join_request', { p_project_id: projectId });
+  // supabase/24_join_request_message.sql.
+  const { data, error } = await supabase.rpc('create_join_request', {
+    p_project_id: projectId,
+    p_message: cleanMessage || null,
+  });
   if (error) throw error;
   return data;
+}
+
+// When rosters lock, for pages that need to say so before the student tries
+// something the deadline would refuse. Null means no deadline.
+export async function getFormationDeadline() {
+  if (USE_MOCKS) {
+    await delay();
+    return appSettings.formation_deadline;
+  }
+  return (await fetchLeaveRules()).formation_deadline;
 }
 
 // `roleId` is the creator's pick from the project's roles_needed — a

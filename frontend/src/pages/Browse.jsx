@@ -1,6 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createJoinRequest, getCurrentUser, getProjects, getRoles } from '../api/client';
+import {
+  createJoinRequest,
+  getCurrentUser,
+  getFormationDeadline,
+  getProjects,
+  getRoles,
+} from '../api/client';
 import { useSession } from '../auth/SessionContext';
 import useAsync from '../components/useAsync';
 import { ErrorState, Loading, Empty } from '../components/States';
@@ -15,6 +21,8 @@ import {
   isOpenProject,
   rankProjects,
 } from '../lib/browseFilters';
+import { JOIN_BLOCKED, isPastDeadline } from '../lib/joinRequests';
+import { JOIN_MESSAGE_MAX, charCount } from '../lib/validation';
 
 export default function Browse() {
   const { status, user } = useSession();
@@ -30,9 +38,18 @@ export default function Browse() {
     [isAuthenticated]
   );
   const rolesState = useAsync(getRoles, []);
+  // Only used to say up front that requests are closed. If it fails the
+  // button stays live and create_join_request() still refuses with the
+  // same sentence.
+  const deadlineState = useAsync(
+    () => (isAuthenticated ? getFormationDeadline() : Promise.resolve(null)),
+    [isAuthenticated]
+  );
 
   // project_id -> 'sending' | 'sent' | error message
   const [requests, setRequests] = useState({});
+  // project_id -> the note being written, for each card whose composer is open
+  const [drafts, setDrafts] = useState({});
   const [onlyMatches, setOnlyMatches] = useState(false);
   const [onlyOpen, setOnlyOpen] = useState(true);
   const [query, setQuery] = useState('');
@@ -72,15 +89,24 @@ export default function Browse() {
     setOnlyOpen(true);
   }
 
-  async function handleJoin(projectId) {
+  function openComposer(projectId) {
     if (!isAuthenticated) {
       navigate('/login', { state: { from: { pathname: '/browse' } } });
       return;
     }
+    setDrafts((d) => ({ ...d, [projectId]: d[projectId] ?? '' }));
+  }
+
+  function closeComposer(projectId) {
+    setDrafts(({ [projectId]: _closed, ...rest }) => rest);
+  }
+
+  async function handleJoin(projectId) {
     setRequests((r) => ({ ...r, [projectId]: 'sending' }));
     try {
-      await createJoinRequest(projectId);
+      await createJoinRequest(projectId, drafts[projectId] ?? '');
       setRequests((r) => ({ ...r, [projectId]: 'sent' }));
+      closeComposer(projectId);
     } catch (err) {
       setRequests((r) => ({ ...r, [projectId]: err.message }));
     }
@@ -113,6 +139,8 @@ export default function Browse() {
   // rather than per-card.
   const onAnyTeam =
     isAuthenticated && all.some((p) => p.members.some((m) => m.user_id === user.id));
+
+  const pastDeadline = isPastDeadline(deadlineState.data);
 
   const empty = describeEmpty({ total: all.length, openCount, filters });
 
@@ -212,6 +240,23 @@ export default function Browse() {
             const isPending =
               isAuthenticated && (req === 'sent' || p.viewer_request_status === 'pending');
             const isFull = p.status === 'full' || p.member_count >= p.team_size_target;
+            // Why this student can't ask, if they can't — the same sentence
+            // create_join_request() would raise. Own project and own team
+            // say so on the button already.
+            const blockedReason =
+              !isAuthenticated || isCreator || isMember
+                ? null
+                : onAnyTeam
+                  ? JOIN_BLOCKED.onTeam
+                  : isPending
+                    ? JOIN_BLOCKED.pending
+                    : isFull
+                      ? JOIN_BLOCKED.full
+                      : pastDeadline
+                        ? JOIN_BLOCKED.deadline
+                        : null;
+            const draft = drafts[p.id];
+            const composing = draft !== undefined && !blockedReason;
             return (
               <article className="card" key={p.id}>
                 <h2>
@@ -236,7 +281,7 @@ export default function Browse() {
 
                 <div className="foot">
                   {!isAuthenticated ? (
-                    <button className="btn" onClick={() => handleJoin(p.id)}>
+                    <button className="btn" onClick={() => openComposer(p.id)}>
                       Sign in to request
                     </button>
                   ) : isCreator ? (
@@ -253,13 +298,17 @@ export default function Browse() {
                     <button className="btn" disabled>
                       Request pending
                     </button>
-                  ) : (
-                    <button
-                      className="btn"
-                      disabled={isFull || req === 'sending'}
-                      onClick={() => handleJoin(p.id)}
-                    >
-                      {req === 'sending' ? 'Sending…' : 'Request to join'}
+                  ) : isFull ? (
+                    <button className="btn" disabled>
+                      Project full
+                    </button>
+                  ) : pastDeadline ? (
+                    <button className="btn" disabled>
+                      Requests closed
+                    </button>
+                  ) : composing ? null : (
+                    <button className="btn" onClick={() => openComposer(p.id)}>
+                      Request to join
                     </button>
                   )}
                   {isAuthenticated && (
@@ -269,6 +318,16 @@ export default function Browse() {
                     </span>
                   )}
                 </div>
+                {blockedReason && <p className="hint blocked">{blockedReason}</p>}
+                {composing && (
+                  <JoinComposer
+                    value={draft}
+                    sending={req === 'sending'}
+                    onChange={(text) => setDrafts((d) => ({ ...d, [p.id]: text }))}
+                    onSend={() => handleJoin(p.id)}
+                    onCancel={() => closeComposer(p.id)}
+                  />
+                )}
                 {req && req !== 'sending' && req !== 'sent' && (
                   <p className="inline-error" role="alert">{req}</p>
                 )}
@@ -278,5 +337,39 @@ export default function Browse() {
         </div>
       )}
     </>
+  );
+}
+
+// The optional note to the creator, with a running count of what's left.
+// Typing past the limit is allowed (so a paste isn't silently cut off) but
+// sending isn't until it's back under.
+function JoinComposer({ value, sending, onChange, onSend, onCancel }) {
+  const left = JOIN_MESSAGE_MAX - charCount(value.trim());
+  const id = useId();
+  return (
+    <div className="join-composer">
+      <label htmlFor={id}>Why you're a good fit (optional)</label>
+      <textarea
+        id={id}
+        rows={3}
+        value={value}
+        disabled={sending}
+        aria-describedby={`${id}-count`}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <p id={`${id}-count`} className={`counter${left < 0 ? ' over' : ''}`} aria-live="polite">
+        {left >= 0
+          ? `${left} character${left === 1 ? '' : 's'} left`
+          : `${-left} character${left === -1 ? '' : 's'} over the ${JOIN_MESSAGE_MAX} limit`}
+      </p>
+      <div className="acts">
+        <button className="btn" disabled={sending || left < 0} onClick={onSend}>
+          {sending ? 'Sending…' : 'Send request'}
+        </button>
+        <button className="btn quiet" disabled={sending} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
