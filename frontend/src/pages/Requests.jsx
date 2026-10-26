@@ -93,6 +93,16 @@ export default function Requests() {
                 <div>
                   <div className="nm">{r.user_name}</div>
                   <div className="sub">{r.skills.join(', ') || 'No skills listed'}</div>
+                  <div className="sub">
+                    {r.github_url ? (
+                      <a href={r.github_url} target="_blank" rel="noreferrer">
+                        {r.github_url.replace(/^https:\/\/(www\.)?/i, '').replace(/\/$/, '')}
+                      </a>
+                    ) : (
+                      'No GitHub linked'
+                    )}
+                  </div>
+                  {r.message && <p className="req-message">{r.message}</p>}
                 </div>
                 <div className="sub">{r.availability_hours} hrs/wk</div>
                 <div className="decision">
