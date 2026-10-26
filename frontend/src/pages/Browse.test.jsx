@@ -23,6 +23,7 @@ let session = { status: 'authenticated', user: { id: 'u-jose' } };
 vi.mock('../auth/SessionContext', () => ({ useSession: () => session }));
 
 vi.mock('../api/client', () => ({
+  MAX_REQUEST_MESSAGE: 500,
   getProjects: vi.fn(),
   getCurrentUser: vi.fn(),
   getRoles: vi.fn(),
@@ -427,7 +428,7 @@ describe('requesting to join', () => {
     await renderBrowse();
     const card = screen.getByText('Campus parking tracker').closest('article');
     await user.click(within(card).getByRole('button', { name: /request to join/i }));
-    await waitFor(() => expect(client.createJoinRequest).toHaveBeenCalledWith('p-parking'));
+    await waitFor(() => expect(client.createJoinRequest).toHaveBeenCalledWith('p-parking', ''));
     expect(within(card).getByRole('button', { name: /request pending/i })).toBeDisabled();
   });
 
@@ -443,5 +444,38 @@ describe('requesting to join', () => {
     );
     const other = screen.getByText('Degree plan builder').closest('article');
     expect(within(other).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  test('a message can be added, and is sent trimmed with the request', async () => {
+    const user = userEvent.setup();
+    await renderBrowse();
+    const card = screen.getByText('Campus parking tracker').closest('article');
+    expect(within(card).queryByLabelText(/message to the creator/i)).not.toBeInTheDocument();
+
+    await user.click(within(card).getByRole('button', { name: 'Add a message' }));
+    const box = within(card).getByLabelText(/message to the creator/i);
+    expect(box).toHaveAttribute('maxlength', '500');
+    await user.type(box, '  I have parked in every lot.  ');
+    expect(within(card).getByText('31 / 500')).toBeInTheDocument();
+
+    await user.click(within(card).getByRole('button', { name: /request to join/i }));
+    await waitFor(() =>
+      expect(client.createJoinRequest).toHaveBeenCalledWith('p-parking', 'I have parked in every lot.')
+    );
+    // Once it's sent there's nothing left to write.
+    expect(within(card).queryByLabelText(/message to the creator/i)).not.toBeInTheDocument();
+  });
+
+  test('closing the message box sends the request without one', async () => {
+    const user = userEvent.setup();
+    await renderBrowse();
+    const card = screen.getByText('Campus parking tracker').closest('article');
+
+    await user.click(within(card).getByRole('button', { name: 'Add a message' }));
+    await user.type(within(card).getByLabelText(/message to the creator/i), 'Never mind');
+    await user.click(within(card).getByRole('button', { name: 'No message' }));
+    await user.click(within(card).getByRole('button', { name: /request to join/i }));
+
+    await waitFor(() => expect(client.createJoinRequest).toHaveBeenCalledWith('p-parking', ''));
   });
 });

@@ -284,17 +284,24 @@ export const teamMembers = [
 ];
 
 // --- JOIN_REQUESTS -----------------------------------------------------
-// join_requests: id, project_id, user_id, status
+// join_requests: id, project_id, user_id, status, message (24_join_request_message.sql)
 //
 // Adan and Rita are deliberately unteamed here (see the invariant above) so
 // their pending requests below are valid states, not conflicts. Sofia,
 // Marcus, Ana and Derek are unteamed too and have no requests out at all --
 // they are the accounts to sign in as when testing 'request to join'.
 export const joinRequests = [
-  { id: 'jr-1', project_id: 'p-parking', user_id: 'u-adan', status: 'pending', created_at: '2026-09-01T14:00:00Z' },
-  { id: 'jr-2', project_id: 'p-parking', user_id: 'u-rita', status: 'pending', created_at: '2026-08-31T09:00:00Z' },
-  { id: 'jr-3', project_id: 'p-degree', user_id: 'u-adan', status: 'pending', created_at: '2026-08-30T11:00:00Z' },
-  { id: 'jr-4', project_id: 'p-lab', user_id: 'u-adan', status: 'declined', created_at: '2026-08-26T11:00:00Z' },
+  {
+    id: 'jr-1',
+    project_id: 'p-parking',
+    user_id: 'u-adan',
+    status: 'pending',
+    message: "I park in Lot E every day and know exactly where it fills up first. Happy to own the frontend.",
+    created_at: '2026-09-01T14:00:00Z',
+  },
+  { id: 'jr-2', project_id: 'p-parking', user_id: 'u-rita', status: 'pending', message: '', created_at: '2026-08-31T09:00:00Z' },
+  { id: 'jr-3', project_id: 'p-degree', user_id: 'u-adan', status: 'pending', message: '', created_at: '2026-08-30T11:00:00Z' },
+  { id: 'jr-4', project_id: 'p-lab', user_id: 'u-adan', status: 'declined', message: '', created_at: '2026-08-26T11:00:00Z' },
 ];
 
 // --- APP_SETTINGS / NOTIFICATIONS -------------------------------------

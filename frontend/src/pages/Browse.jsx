@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createJoinRequest, getCurrentUser, getProjects, getRoles } from '../api/client';
+import {
+  MAX_REQUEST_MESSAGE,
+  createJoinRequest,
+  getCurrentUser,
+  getProjects,
+  getRoles,
+} from '../api/client';
 import { useSession } from '../auth/SessionContext';
 import useAsync from '../components/useAsync';
 import { ErrorState, Loading, Empty } from '../components/States';
@@ -33,6 +39,10 @@ export default function Browse() {
 
   // project_id -> 'sending' | 'sent' | error message
   const [requests, setRequests] = useState({});
+  // project_id -> the optional note to the creator, and whether its box is
+  // open. Closed means no message, so "Request to join" stays one click.
+  const [messages, setMessages] = useState({});
+  const [composing, setComposing] = useState({});
   const [onlyMatches, setOnlyMatches] = useState(false);
   const [onlyOpen, setOnlyOpen] = useState(true);
   const [query, setQuery] = useState('');
@@ -79,7 +89,7 @@ export default function Browse() {
     }
     setRequests((r) => ({ ...r, [projectId]: 'sending' }));
     try {
-      await createJoinRequest(projectId);
+      await createJoinRequest(projectId, composing[projectId] ? (messages[projectId] || '').trim() : '');
       setRequests((r) => ({ ...r, [projectId]: 'sent' }));
     } catch (err) {
       setRequests((r) => ({ ...r, [projectId]: err.message }));
@@ -212,6 +222,10 @@ export default function Browse() {
             const isPending =
               isAuthenticated && (req === 'sent' || p.viewer_request_status === 'pending');
             const isFull = p.status === 'full' || p.member_count >= p.team_size_target;
+            const canRequest =
+              isAuthenticated && !isCreator && !isMember && !onAnyTeam && !isPending && !isFull;
+            const message = messages[p.id] || '';
+            const messageId = `request-message-${p.id}`;
             return (
               <article className="card" key={p.id}>
                 <h2>
@@ -233,6 +247,23 @@ export default function Browse() {
                   memberCount={p.member_count}
                   isAuthenticated={isAuthenticated}
                 />
+
+                {canRequest && composing[p.id] && (
+                  <div className="field request-message">
+                    <label htmlFor={messageId}>Message to the creator (optional)</label>
+                    <textarea
+                      id={messageId}
+                      value={message}
+                      maxLength={MAX_REQUEST_MESSAGE}
+                      disabled={req === 'sending'}
+                      placeholder="Why you'd be a good fit, what you'd like to work on…"
+                      onChange={(e) => setMessages((m) => ({ ...m, [p.id]: e.target.value }))}
+                    />
+                    <p className="counter">
+                      {message.length} / {MAX_REQUEST_MESSAGE}
+                    </p>
+                  </div>
+                )}
 
                 <div className="foot">
                   {!isAuthenticated ? (
@@ -260,6 +291,17 @@ export default function Browse() {
                       onClick={() => handleJoin(p.id)}
                     >
                       {req === 'sending' ? 'Sending…' : 'Request to join'}
+                    </button>
+                  )}
+                  {canRequest && (
+                    <button
+                      className="btn quiet"
+                      aria-expanded={!!composing[p.id]}
+                      aria-controls={composing[p.id] ? messageId : undefined}
+                      disabled={req === 'sending'}
+                      onClick={() => setComposing((c) => ({ ...c, [p.id]: !c[p.id] }))}
+                    >
+                      {composing[p.id] ? 'No message' : 'Add a message'}
                     </button>
                   )}
                   {isAuthenticated && (
