@@ -13,8 +13,8 @@ select set_config('tests.pm', (select id from public.roles where name = 'Project
 update public.users
    set availability_hours = 12, github_url = 'https://github.com/ana-requester'
  where id = current_setting('tests.ana')::uuid;
-insert into public.user_skills (user_id, skill_id)
-select current_setting('tests.ana')::uuid, id from public.skills where name = 'React';
+insert into public.user_skills (user_id, skill_id, source)
+select current_setting('tests.ana')::uuid, id, 'manual' from public.skills where name = 'React';
 
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select set_config('tests.p1',
