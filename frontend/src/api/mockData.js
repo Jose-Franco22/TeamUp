@@ -313,9 +313,9 @@ export const notifications = [];
 // documents exactly what each endpoint is expected to return.
 
 // The viewer's own join_requests status for a project — null (never
-// requested), 'pending', 'accepted', or 'declined'. A pending request
-// wins over an older declined one so the UI can disable "Request to
-// join" while a request is outstanding. This is part of the API
+// requested), 'pending', 'accepted', 'declined' or 'withdrawn'. A pending
+// request wins over an older declined or withdrawn one so the UI can
+// disable "Request to join" while a request is outstanding. This is part of the API
 // contract: GET /api/projects and GET /api/projects/:id must return
 // viewer_request_status computed from the *authenticated* caller's own
 // requests (null for an unauthenticated caller) — never from a

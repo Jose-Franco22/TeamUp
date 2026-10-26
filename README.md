@@ -136,6 +136,13 @@ project, its creator gets an in-app notice naming them, with a link to `/request
 Requests tab shows how many requests are waiting. Email copies need a one-time Edge Function and
 webhook setup — see [Email notifications in TODO-backend.md](TODO-backend.md#email-notifications).
 
+## Withdrawing a join request (#33)
+
+Apply `supabase/24_withdraw_join_request.sql` after `23`. Each pending request under **Sent by
+you** on the Requests page has a Withdraw button. A withdrawn request shows as withdrawn to the
+student, drops out of the creator's list (and their unread alert for it is cleared), and the
+student can ask to join the same project again later.
+
 ## Testing
 
 Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.
