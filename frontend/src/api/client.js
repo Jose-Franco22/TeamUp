@@ -978,6 +978,41 @@ export async function createJoinRequest(projectId) {
   return data;
 }
 
+// The requester takes back a request that's still pending. The row stays,
+// as 'withdrawn', so it drops out of the owner's list but still shows on
+// the requester's, and they can ask for the same project again later.
+export async function withdrawJoinRequest(requestId) {
+  if (USE_MOCKS) {
+    await delay();
+    const me = requireSessionUserId();
+    const r = joinRequests.find((x) => x.id === requestId);
+    // Same checks, in the same order, as withdraw_join_request().
+    if (!r || r.user_id !== me) throw new Error('Only the student who sent this request can withdraw it');
+    if (r.status !== 'pending') throw new Error('Only a pending request can be withdrawn');
+    r.status = 'withdrawn';
+    // The creator's "asked to join" alert no longer needs them.
+    const creatorId = projects.find((p) => p.id === r.project_id)?.creator_id;
+    const now = new Date().toISOString();
+    notifications
+      .filter(
+        (n) =>
+          n.user_id === creatorId &&
+          n.kind === 'join_request' &&
+          n.project_id === r.project_id &&
+          n.actor_id === me &&
+          !n.read_at
+      )
+      .forEach((n) => {
+        n.read_at = now;
+      });
+    return r;
+  }
+  // See supabase/24_withdraw_join_request.sql.
+  const { data, error } = await supabase.rpc('withdraw_join_request', { p_request_id: requestId });
+  if (error) throw error;
+  return data;
+}
+
 // `roleId` is the creator's pick from the project's roles_needed — a
 // roles.id, not a free-text string (see 04_roles_and_team_deletion.sql) —
 // and only applies when accepting.

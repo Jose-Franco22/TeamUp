@@ -5,6 +5,7 @@ const TONE = {
   accepted: 'good',
   pending: 'warn',
   declined: 'quiet',
+  withdrawn: 'quiet',
 };
 
 export default function StatusPill({ status }) {
