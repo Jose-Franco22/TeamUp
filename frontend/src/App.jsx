@@ -10,10 +10,14 @@ import Team from './pages/Team';
 import Admin from './pages/Admin';
 import AdminTeam from './pages/AdminTeam';
 import AdminStudent from './pages/AdminStudent';
+import AdminMilestones from './pages/AdminMilestones';
+import Announcements from './pages/Announcements';
 import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
 import Walkthrough from './components/Walkthrough';
 import { PendingBadge, RequestNotices, useRequestAlerts } from './components/RequestAlerts';
+import { MilestoneBanner } from './components/Milestones';
+import { useUnseenAnnouncements } from './components/AnnouncementAlerts';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 
@@ -24,6 +28,7 @@ const TABS = [
   { to: '/profile', label: 'Your profile' },
   { to: '/requests', label: 'Requests' },
   { to: '/team', label: 'Your team' },
+  { to: '/announcements', label: 'Announcements' },
 ];
 
 export default function App() {
@@ -34,10 +39,17 @@ export default function App() {
   const signedIn = status === 'authenticated';
   const isAdmin = user?.is_admin === true;
   const tabs = !signedIn ? [] : isAdmin
-    ? [{ to: '/admin', label: 'Admin' }, { to: '/profile', label: 'Your profile' }]
+    ? [
+        { to: '/admin', label: 'Admin' },
+        { to: '/admin/milestones', label: 'Milestones' },
+        { to: '/announcements', label: 'Announcements' },
+        { to: '/profile', label: 'Your profile' },
+      ]
     : TABS;
   // Admins are never on a team, so they never own a project to hear about.
   const requestAlerts = useRequestAlerts(signedIn && !isAdmin);
+  // Admins post the announcements, so only students get the "new" count.
+  const unseenAnnouncements = useUnseenAnnouncements(signedIn && !isAdmin);
 
   // Every page but /login needs a session, so signing out goes straight to
   // the sign-in page. Navigating first means ProtectedRoute never records
@@ -83,9 +95,18 @@ export default function App() {
         <div id="site-menu" className={menuOpen ? 'menu open' : 'menu'}>
           <nav className="nav">
             {tabs.map((t) => (
-              <NavLink key={t.to} to={t.to} className={({ isActive }) => (isActive ? 'on' : '')}>
+              <NavLink
+                key={t.to}
+                to={t.to}
+                className={({ isActive }) =>
+                  // /admin covers the team and student pages under it, but
+                  // not the Milestones tab, which has its own highlight.
+                  isActive && !(t.to === '/admin' && pathname.startsWith('/admin/milestones')) ? 'on' : ''
+                }
+              >
                 {t.label}
                 {t.to === '/requests' && <PendingBadge count={requestAlerts.pending} />}
+                {t.to === '/announcements' && <PendingBadge count={unseenAnnouncements} label="new" />}
               </NavLink>
             ))}
           </nav>
@@ -104,6 +125,8 @@ export default function App() {
       </header>
 
       <main className="shell">
+        {/* The Announcements page lists every deadline itself. */}
+        {signedIn && !isAdmin && pathname !== '/announcements' && <MilestoneBanner />}
         <RequestNotices notices={requestAlerts.notices} onDismiss={requestAlerts.dismiss} />
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -118,11 +141,13 @@ export default function App() {
             </Route>
             <Route element={<ProtectedRoute adminOnly />}>
               <Route path="/admin" element={<Admin />} />
+              <Route path="/admin/milestones" element={<AdminMilestones />} />
               <Route path="/admin/teams/:teamId" element={<AdminTeam />} />
               <Route path="/admin/students/:studentId" element={<AdminStudent />} />
               <Route path="/admin/*" element={<p className="empty">Page not found.</p>} />
             </Route>
             <Route path="/profile" element={<Profile />} />
+            <Route path="/announcements" element={<Announcements />} />
             <Route path="*" element={<p className="empty">Page not found.</p>} />
           </Route>
         </Routes>

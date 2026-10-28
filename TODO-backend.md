@@ -532,8 +532,8 @@ adds a `notifications` table: `leave_team()` writes a `'member_left'` row for th
 which `Team.jsx` shows them until they dismiss it. It's an in-app feed only — real push or email
 would need a service worker or a mail provider. (#26 later added email for join requests through an
 Edge Function; see [Email notifications](#email-notifications).) The same file
-adds a class-wide formation deadline, read only through `formation_deadline()` (today it returns
-`app_settings.formation_deadline`; #38 will point it at its milestones table). After it,
+adds a class-wide formation deadline, read only through `formation_deadline()` (since #38 it
+returns the `milestones` row flagged `is_formation_deadline`, from `26_milestones.sql`). After it,
 `leave_team()` refuses students. Taking a student off is an admin's job (#39), and both paths share
 `private.remove_from_team(p_user_id, p_by_admin)` — the one place a seat is given up: it deletes the
 membership, restores the role, resyncs the project and notifies the creator. Only an admin
@@ -547,6 +547,45 @@ still remove any student except the creator after the deadline. The removed stud
 `'member_removed'` notification, which `Team.jsx` shows even once they're off the team. The creator
 is only notified (`'member_left'`, `by_admin`) when an admin did the removal. Once the
 `team_members` row is gone, the student is free to request or start another project.
+
+**Deadlines and milestones.** `26_milestones.sql` (issue #38) adds `public.milestones` (name,
+`due_at`, `is_formation_deadline`), readable by everyone and written only through the admin RPCs
+`save_milestone()` and `delete_milestone()`. A partial unique index allows one formation deadline;
+flagging another milestone moves the flag. `app_settings` is dropped once its date has been carried
+over. After the deadline, a trigger on `projects` and `join_requests` inserts stops students posting
+projects or sending requests (it only checks browser roles, so the SQL editor can still seed data).
+`leave_team()` and `remove_member()` already refuse students. Students see upcoming milestones in a
+banner on every page; admins manage them on the Milestones tab (`/admin/milestones`).
+
+`28_milestone_messages.sql` adds an optional `message` to each milestone and keeps garbage out of
+every milestone field, with CHECK constraints as the boundary and the same raises in
+`save_milestone()` (mirrored in `lib/validation.js`). The name and message have to contain letters
+or numbers, and can't hold control characters or invisible ones (zero-width, bidirectional
+overrides, BOM). The name can't hold line breaks; the message allows them, but not two blank lines
+in a row, and is capped at 1000 characters. Due dates have to fall in 2000–2099. None of the #38/#39
+functions build SQL from text (no `EXECUTE`), and every id argument is typed `uuid`, so injection
+attempts are stored or refused as plain values. `milestone_input_safety.test.sql` throws garbage,
+SQL and HTML payloads at all of it.
+
+**Announcements.** `29_announcements.sql` adds `public.announcements` (title, body, author,
+timestamps), readable by signed-in users and written only through the admin RPCs
+`save_announcement()` and `delete_announcement()`. The title and body CHECK constraints use the
+same rules as milestone messages, and both are required. `announcement_feed()` returns them with
+the author's name, because students can't read admin rows under `users` RLS.
+`unseen_announcement_count()` and `mark_announcements_seen()` drive the tab's badge through
+`users.announcements_seen_at`. Anything with `updated_at` after that time counts as new, so an
+edited announcement or a moved deadline shows up again. Admins always get 0.
+
+**Admins place students.** `27_admin_placement.sql` (issue #39) adds `admin_assign_student()` and
+`admin_move_student()`. Both take a student, a team with an open seat, and a role, and work after the
+deadline. They seat a student the way an accepted request does: the role's seat is taken, the
+project fills, and any pending requests are declined. A move also reopens the old team, and a
+project's creator can't be moved. The student gets `'member_assigned'`, the new team's owner gets
+`'member_added'`, and on a move the old owner gets `'member_left'` (all `by_admin`). Every admin
+assign, move and removal writes a `public.admin_actions` row (admin, action, student, teams, role,
+time), readable only by admins and shown on `/admin` via `admin_recent_actions()`. Accepting a
+request that was already pending at the deadline is still allowed; the issue didn't ask for that to
+lock.
 
 ## Deleting a team — `delete_team()`
 

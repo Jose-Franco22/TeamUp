@@ -237,3 +237,113 @@ export function fieldErrorsFromDbError(error) {
   }
   return null;
 }
+
+// --- Milestones (issue #38) -----------------------------------------------
+// Mirrored by milestones_name_length, milestones_message_text and the
+// raises in save_milestone() (supabase/26_milestones.sql and
+// 28_milestone_messages.sql), which are the real boundary.
+export const MILESTONE_NAME_MAX = 80;
+export const MILESTONE_MESSAGE_MAX = 1000;
+// milestones_due_at_range: a date picker accepts year 1 or 275760.
+export const MILESTONE_DUE_MIN = new Date('2000-01-01T00:00:00Z');
+export const MILESTONE_DUE_MAX = new Date('2100-01-01T00:00:00Z');
+
+// Built from code points so the characters stay visible in this file.
+const span = (from, to) => `${String.fromCodePoint(from)}-${String.fromCodePoint(to)}`;
+// Zero-width characters, bidirectional marks/overrides/isolates, and the
+// byte-order mark: they make text read differently from what's stored.
+const INVISIBLE = new RegExp(
+  `[${span(0x200b, 0x200f)}${span(0x202a, 0x202e)}${span(0x2060, 0x2069)}${String.fromCodePoint(0xfeff)}]`,
+  'u'
+);
+// Control characters other than tab and line feed.
+const CONTROL = /[\x00-\x08\x0B-\x1F\x7F]/;
+const HAS_WORDS = /[\p{L}\p{N}]/u;
+const TWO_BLANK_LINES = /\n[ \t]*\n[ \t]*\n/;
+
+// The message an admin writes for a milestone: optional, but when there is
+// one it has to read like a message. Windows line endings become plain
+// ones and whitespace at either end is dropped, as save_milestone() does.
+function checkMilestoneMessage(raw) {
+  const message = String(raw ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/^[ \t\n]+|[ \t\n]+$/g, '');
+  if (message === '') return { value: '' };
+  if (charCount(message) > MILESTONE_MESSAGE_MAX) {
+    return { error: `Keep the message to ${MILESTONE_MESSAGE_MAX} characters or fewer` };
+  }
+  if (CONTROL.test(message) || INVISIBLE.test(message)) {
+    return { error: "The message can't contain hidden or control characters" };
+  }
+  if (!HAS_WORDS.test(message)) return { error: 'The message has to include letters or numbers' };
+  if (TWO_BLANK_LINES.test(message)) return { error: 'Leave at most one blank line in a row' };
+  return { value: message };
+}
+
+// `due_at` is whatever the form holds — a datetime-local string such as
+// "2026-11-01T23:59", read as the viewer's local time — or an ISO string.
+// The cleaned value is an ISO timestamp, ready to send.
+export function validateMilestone({ name, due_at, message }) {
+  const errors = {};
+  const values = {};
+
+  const trimmed = String(name ?? '').trim();
+  if (trimmed === '') errors.name = 'Give the milestone a name';
+  else if (charCount(trimmed) > MILESTONE_NAME_MAX) {
+    errors.name = `Keep the name to ${MILESTONE_NAME_MAX} characters or fewer`;
+  } else if (/[\x00-\x1F\x7F]/.test(trimmed) || INVISIBLE.test(trimmed)) {
+    errors.name = "The name can't contain line breaks, hidden or control characters";
+  } else if (!HAS_WORDS.test(trimmed)) {
+    errors.name = 'The name has to include letters or numbers';
+  } else values.name = trimmed;
+
+  const when = due_at ? new Date(due_at) : null;
+  if (!when || Number.isNaN(when.getTime())) errors.due_at = 'Pick a due date and time';
+  else if (when < MILESTONE_DUE_MIN || when >= MILESTONE_DUE_MAX) {
+    errors.due_at = 'Pick a due date between 2000 and 2099';
+  } else values.due_at = when.toISOString();
+
+  const checked = checkMilestoneMessage(message);
+  if (checked.error) errors.message = checked.error;
+  else values.message = checked.value;
+
+  return { values, errors, isValid: Object.keys(errors).length === 0 };
+}
+
+// --- Announcements --------------------------------------------------------
+// Mirrored by announcements_title_text / announcements_body_text and the
+// raises in save_announcement() (supabase/29_announcements.sql). Same
+// junk rules as a milestone message, but both fields are required.
+export const ANNOUNCEMENT_TITLE_MAX = 120;
+export const ANNOUNCEMENT_BODY_MAX = 2000;
+
+export function validateAnnouncement({ title, body }) {
+  const errors = {};
+  const values = {};
+
+  const t = String(title ?? '').trim();
+  if (t === '') errors.title = 'Give the announcement a title';
+  else if (charCount(t) > ANNOUNCEMENT_TITLE_MAX) {
+    errors.title = `Keep the title to ${ANNOUNCEMENT_TITLE_MAX} characters or fewer`;
+  } else if (/[\x00-\x1F\x7F]/.test(t) || INVISIBLE.test(t)) {
+    errors.title = "The title can't contain line breaks, hidden or control characters";
+  } else if (!HAS_WORDS.test(t)) {
+    errors.title = 'The title has to include letters or numbers';
+  } else values.title = t;
+
+  const b = String(body ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/^[ \t\n]+|[ \t\n]+$/g, '');
+  if (b === '') errors.body = 'Write a message';
+  else if (charCount(b) > ANNOUNCEMENT_BODY_MAX) {
+    errors.body = `Keep the message to ${ANNOUNCEMENT_BODY_MAX} characters or fewer`;
+  } else if (CONTROL.test(b) || INVISIBLE.test(b)) {
+    errors.body = "The message can't contain hidden or control characters";
+  } else if (!HAS_WORDS.test(b)) {
+    errors.body = 'The message has to include letters or numbers';
+  } else if (TWO_BLANK_LINES.test(b)) {
+    errors.body = 'Leave at most one blank line in a row';
+  } else values.body = b;
+
+  return { values, errors, isValid: Object.keys(errors).length === 0 };
+}
