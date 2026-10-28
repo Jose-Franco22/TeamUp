@@ -142,13 +142,13 @@ select tests.authenticate_as(current_setting('tests.memberA')::uuid);
 select throws_ok(
   $$ select public.create_project('After the deadline', 'Posted after rosters locked.', 2::smallint,
        (select id from public.roles where name = 'Backend Developer'), '[]'::jsonb) $$,
-  'P0001', 'The team formation deadline has passed — new projects can''t be posted',
+  'P0001', 'The team formation deadline has passed, so new projects can''t be posted',
   'after the deadline, a student can''t post a project');
 
 select tests.authenticate_as(current_setting('tests.memberB')::uuid);
 select throws_ok(
   $$ select public.create_join_request(current_setting('tests.studentProject')::uuid) $$,
-  'P0001', 'The team formation deadline has passed — ask an admin to place you on a team',
+  'P0001', 'The team formation deadline has passed, so new join requests are closed',
   'after the deadline, a student can''t send a request');
 
 select tests.authenticate_as(current_setting('tests.memberD')::uuid);

@@ -73,11 +73,11 @@ test('after the deadline students are locked out, but admins can still place and
   setFormationDeadline('2020-01-01T00:00:00Z');
 
   setSessionUserId('u-marcus');
-  await expect(createJoinRequest('p-parking')).rejects.toThrow('ask an admin to place you on a team');
+  await expect(createJoinRequest('p-parking')).rejects.toThrow('so new join requests are closed');
   await expect(createProject({
     title: 'Too late project', description: 'Posted after rosters locked for the class.',
     team_size_target: 2, creator_role_id: 'r-backend', roles_needed: [],
-  })).rejects.toThrow("new projects can't be posted");
+  })).rejects.toThrow("so new projects can't be posted");
 
   setSessionUserId(ADMIN);
   await adminAssignStudent('u-marcus', 't-degree', 'r-backend');

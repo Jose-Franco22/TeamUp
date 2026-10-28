@@ -84,8 +84,8 @@ function assertBeforeFormationDeadline(what) {
   if (!deadline || new Date(deadline) > new Date()) return;
   throw new Error(
     what === 'project'
-      ? "The team formation deadline has passed — new projects can't be posted"
-      : 'The team formation deadline has passed — ask an admin to place you on a team'
+      ? "The team formation deadline has passed, so new projects can't be posted"
+      : 'The team formation deadline has passed, so new join requests are closed'
   );
 }
 

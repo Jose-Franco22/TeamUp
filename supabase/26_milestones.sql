@@ -177,9 +177,9 @@ begin
   end if;
 
   if tg_table_name = 'projects' then
-    raise exception 'The team formation deadline has passed — new projects can''t be posted';
+    raise exception 'The team formation deadline has passed, so new projects can''t be posted';
   end if;
-  raise exception 'The team formation deadline has passed — ask an admin to place you on a team';
+  raise exception 'The team formation deadline has passed, so new join requests are closed';
 end;
 $$;
 
