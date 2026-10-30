@@ -52,6 +52,9 @@ export default function NotificationBell() {
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const root = useRef(null);
+  // Ids already on the list or already counted. Realtime can deliver the same
+  // row twice (on reconnect, say), and the count must only go up once.
+  const seen = useRef(new Set());
 
   useEffect(() => {
     let live = true;
@@ -60,6 +63,7 @@ export default function NotificationBell() {
     getNotificationFeed()
       .then((feed) => {
         if (!live) return;
+        seen.current = new Set(feed.items.map((n) => n.id));
         setItems(feed.items);
         setUnread(feed.unread);
       })
@@ -72,9 +76,9 @@ export default function NotificationBell() {
   useEffect(
     () =>
       subscribeToNotifications((n) => {
-        setItems((list) =>
-          list.some((m) => m.id === n.id) ? list : [n, ...list].slice(0, NOTIFICATION_FEED_SIZE)
-        );
+        if (seen.current.has(n.id)) return;
+        seen.current.add(n.id);
+        setItems((list) => [n, ...list].slice(0, NOTIFICATION_FEED_SIZE));
         if (!n.read_at) setUnread((count) => count + 1);
       }),
     []

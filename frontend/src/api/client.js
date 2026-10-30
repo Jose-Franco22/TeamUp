@@ -1739,7 +1739,7 @@ export async function markAllNotificationsRead() {
 // Calls onNew(notification) — shaped like getNotifications() rows — each
 // time one is written for the viewer, until the returned function is
 // called. Real mode listens on Supabase Realtime, which only sends rows the
-// select policy lets the viewer read (24_notification_bell.sql); the insert
+// select policy lets the viewer read (30_notification_bell.sql); the insert
 // carries no names, so each one is read back once with them.
 export function subscribeToNotifications(onNew) {
   if (USE_MOCKS) {

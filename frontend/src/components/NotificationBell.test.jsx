@@ -79,6 +79,22 @@ describe('NotificationBell', () => {
     expect(screen.getByText('Rita Cano asked to join “Campus parking tracker”')).toBeInTheDocument();
   });
 
+  // Realtime can send the same row again on reconnect; the list already
+  // ignored the repeat, and the count has to as well.
+  test('the same notification delivered twice only counts once', async () => {
+    const seeded = note();
+    renderBell([seeded]);
+    expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
+
+    act(() => addMockNotification(seeded));
+    expect(screen.getByTestId('bell-badge')).toHaveTextContent('1');
+
+    const fresh = note({ actor_id: 'u-rita' });
+    act(() => addMockNotification(fresh));
+    act(() => addMockNotification(fresh));
+    expect(screen.getByTestId('bell-badge')).toHaveTextContent('2');
+  });
+
   test('a notification for someone else doesn’t change the count', async () => {
     renderBell([note()]);
     expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');

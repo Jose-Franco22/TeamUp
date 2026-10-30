@@ -1,5 +1,5 @@
 -- The notification bell in the header (issue #20). Run after
--- 23_join_request_notifications.sql.
+-- 29_announcements.sql.
 --
 -- The table, its select-own RLS policy and mark_notifications_read() come
 -- from 20_leave_team_rules.sql; every kind is written by its own story's
@@ -15,7 +15,7 @@ create or replace function public.mark_all_notifications_read()
 returns void
 language plpgsql
 security definer
-set search_path = public
+set search_path = ''
 as $$
 begin
   if auth.uid() is null then
