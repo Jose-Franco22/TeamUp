@@ -222,7 +222,7 @@ export default function Browse() {
                 {/* The ranking, made legible: the number the list was sorted
                     by, and the reason behind it. A score with no reason is
                     not worth showing. */}
-                <FitChip fit={fit} />
+                <FitChip fit={fit} project={p} student={student} />
 
                 <p className="lbl">Roles needed</p>
                 <RolesNeeded roles={p.roles_needed} mySkillIds={mySkillIds} />

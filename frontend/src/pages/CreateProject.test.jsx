@@ -71,6 +71,14 @@ async function renderForm() {
 
 // The minimum a project needs: valid text, your own role, and the one
 // default role row either filled in or removed.
+// The skill field is a searchable picker, not a <select>: open it, search,
+// click the match.
+async function pickSkill(user, name) {
+  await user.click(screen.getByRole('button', { name: 'Skill' }));
+  await user.type(screen.getByRole('searchbox', { name: 'Search skills' }), name);
+  await user.click(screen.getByRole('option', { name: new RegExp(`^${name}`) }));
+}
+
 async function fillValid(user, fields) {
   await user.type(fields.title, TITLE);
   await user.type(fields.description, DESCRIPTION);
@@ -265,7 +273,7 @@ describe('posting the project', () => {
     const user = userEvent.setup();
     const fields = await renderForm();
     await fillValid(user, fields);
-    await user.selectOptions(screen.getByLabelText('Skill'), 's-pg');
+    await pickSkill(user, 'PostgreSQL');
     await user.click(fields.submit);
 
     await waitFor(() => expect(client.createProject).toHaveBeenCalled());
@@ -405,9 +413,10 @@ describe('the roles needed rows', () => {
     await renderForm();
     await user.selectOptions(screen.getByLabelText('Role'), 'r-backend');
 
-    const options = within(screen.getByLabelText('Skill'))
+    await user.click(screen.getByRole('button', { name: 'Skill' }));
+    const options = within(screen.getByRole('listbox', { name: 'Skill' }))
       .getAllByRole('option')
-      .map((o) => o.value);
+      .map((o) => o.dataset.value);
     expect(options).toContain('s-pg');
     expect(options).not.toContain('s-react');
   });
@@ -416,11 +425,27 @@ describe('the roles needed rows', () => {
     const user = userEvent.setup();
     await renderForm();
     await user.selectOptions(screen.getByLabelText('Role'), 'r-backend');
-    await user.selectOptions(screen.getByLabelText('Skill'), 's-pg');
-    expect(screen.getByLabelText('Skill')).toHaveValue('s-pg');
+    await pickSkill(user, 'PostgreSQL');
+    expect(screen.getByRole('button', { name: 'Skill' })).toHaveAttribute('data-value', 's-pg');
 
     await user.selectOptions(screen.getByLabelText('Role'), 'r-frontend');
-    expect(screen.getByLabelText('Skill')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Skill' })).toHaveAttribute('data-value', '');
+  });
+
+  test('the skill list has a search box that narrows it as you type', async () => {
+    const user = userEvent.setup();
+    await renderForm();
+    await user.selectOptions(screen.getByLabelText('Role'), 'r-frontend');
+    await user.click(screen.getByRole('button', { name: 'Skill' }));
+    await user.type(screen.getByRole('searchbox', { name: 'Search skills' }), 'rea');
+
+    const names = within(screen.getByRole('listbox', { name: 'Skill' }))
+      .getAllByRole('option')
+      .map((o) => o.dataset.value);
+    expect(names).toEqual(['s-react']);
+
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Skill' })).toHaveTextContent('React');
   });
 
   test('removing the empty row makes the form valid without listing any role', async () => {
