@@ -13,7 +13,6 @@ import AdminStudent from './pages/AdminStudent';
 import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
 import Walkthrough from './components/Walkthrough';
-import NotificationBell from './components/NotificationBell';
 import { PendingBadge, RequestNotices, useRequestAlerts } from './components/RequestAlerts';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
@@ -102,8 +101,6 @@ export default function App() {
             )}
           </div>
         </div>
-        {/* Outside the slide-out menu so it stays in the bar on a phone. */}
-        {signedIn && !isAdmin && <NotificationBell />}
       </header>
 
       <main className="shell">

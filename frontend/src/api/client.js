@@ -958,7 +958,7 @@ export async function createJoinRequest(projectId) {
     };
     joinRequests.push(row);
     // The creator hears about it straight away (23_join_request_notifications.sql).
-    addMockNotification({
+    notifications.push({
       id: `n-${Date.now()}-${notifications.length}`,
       user_id: project.creator_id,
       kind: 'join_request',
@@ -1035,7 +1035,7 @@ export async function respondToRequest(requestId, status, roleId) {
         });
     }
 
-    addMockNotification({
+    notifications.push({
       id: `n-${Date.now()}-${notifications.length}`,
       user_id: r.user_id,
       kind: status === 'accepted' ? 'request_accepted' : 'request_declined',
@@ -1209,7 +1209,7 @@ export async function leaveTeam() {
 
     teamMembers.splice(teamMembers.indexOf(membership), 1);
     syncProjectFillState(project, team);
-    addMockNotification({
+    notifications.push({
       id: `n-${Date.now()}-${notifications.length}`,
       user_id: project.creator_id,
       kind: 'member_left',
@@ -1255,7 +1255,7 @@ export async function removeMember(userId) {
     teamMembers.splice(teamMembers.indexOf(membership), 1);
     syncProjectFillState(project, team);
     const notify = (n) =>
-      addMockNotification({
+      notifications.push({
         id: `n-${Date.now()}-${notifications.length}`,
         project_id: project.id,
         by_admin: isAdmin,
@@ -1289,47 +1289,25 @@ export async function getNotifications() {
     const id = requireSessionUserId();
     return notifications
       .filter((n) => n.user_id === id && !n.read_at)
-      .sort(newestFirst)
-      .map(nameMockNotification);
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map((n) => ({
+        ...n,
+        actor_name: users.find((u) => u.id === n.actor_id)?.name ?? 'Someone',
+        project_title: projects.find((p) => p.id === n.project_id)?.title ?? 'a project',
+      }));
   }
 
   const { data, error } = await supabase
     .from('notifications')
-    .select(NOTIFICATION_COLUMNS)
+    .select('id, kind, project_id, actor_id, by_admin, created_at, read_at, actor:users!actor_id ( name ), project:projects ( title )')
     .is('read_at', null)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return data.map(nameNotification);
-}
-
-// What the header bell shows (issue #20): the latest NOTIFICATION_FEED_SIZE
-// notifications, read or not, and how many of all of them are unread — the
-// unread count isn't capped by the list, so the badge stays right for
-// someone with 30 waiting.
-export const NOTIFICATION_FEED_SIZE = 20;
-
-export async function getNotificationFeed() {
-  if (USE_MOCKS) {
-    await delay();
-    const id = requireSessionUserId();
-    const mine = notifications.filter((n) => n.user_id === id);
-    return {
-      items: [...mine].sort(newestFirst).slice(0, NOTIFICATION_FEED_SIZE).map(nameMockNotification),
-      unread: mine.filter((n) => !n.read_at).length,
-    };
-  }
-
-  const [list, count] = await Promise.all([
-    supabase
-      .from('notifications')
-      .select(NOTIFICATION_COLUMNS)
-      .order('created_at', { ascending: false })
-      .limit(NOTIFICATION_FEED_SIZE),
-    supabase.from('notifications').select('id', { count: 'exact', head: true }).is('read_at', null),
-  ]);
-  if (list.error) throw list.error;
-  if (count.error) throw count.error;
-  return { items: list.data.map(nameNotification), unread: count.count ?? 0 };
+  return data.map(({ actor, project, ...n }) => ({
+    ...n,
+    actor_name: actor?.name ?? 'Someone',
+    project_title: project?.title ?? 'a project',
+  }));
 }
 
 export async function markNotificationsRead(ids) {
@@ -1345,99 +1323,6 @@ export async function markNotificationsRead(ids) {
 
   const { error } = await supabase.rpc('mark_notifications_read', { p_ids: ids });
   if (error) throw error;
-}
-
-export async function markAllNotificationsRead() {
-  if (USE_MOCKS) {
-    await delay();
-    const id = requireSessionUserId();
-    const now = new Date().toISOString();
-    for (const n of notifications) {
-      if (n.user_id === id && !n.read_at) n.read_at = now;
-    }
-    return;
-  }
-
-  const { error } = await supabase.rpc('mark_all_notifications_read');
-  if (error) throw error;
-}
-
-// Calls onNew(notification) — shaped like getNotifications() rows — each
-// time one is written for the viewer, until the returned function is
-// called. Real mode listens on Supabase Realtime, which only sends rows the
-// select policy lets the viewer read (24_notification_bell.sql); the insert
-// carries no names, so each one is read back once with them.
-export function subscribeToNotifications(onNew) {
-  if (USE_MOCKS) {
-    // Fixed at subscribe time, like the Realtime filter below, so a write
-    // made while acting as someone else still reaches this viewer.
-    const viewerId = sessionUserId;
-    const listener = (n) => {
-      if (n.user_id === viewerId) onNew(nameMockNotification(n));
-    };
-    mockNotificationListeners.add(listener);
-    return () => mockNotificationListeners.delete(listener);
-  }
-
-  let channel = null;
-  let stopped = false;
-  getViewerId()
-    .then((viewerId) => {
-      if (stopped || !viewerId) return;
-      channel = supabase
-        .channel(`notifications:${viewerId}`)
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${viewerId}` },
-          async ({ new: row }) => {
-            const { data } = await supabase
-              .from('notifications')
-              .select(NOTIFICATION_COLUMNS)
-              .eq('id', row.id)
-              .maybeSingle();
-            if (!stopped && data) onNew(nameNotification(data));
-          }
-        )
-        .subscribe();
-    })
-    .catch(() => {});
-  return () => {
-    stopped = true;
-    if (channel) supabase.removeChannel(channel);
-  };
-}
-
-const NOTIFICATION_COLUMNS =
-  'id, kind, project_id, actor_id, by_admin, created_at, read_at, actor:users!actor_id ( name ), project:projects ( title )';
-
-function nameNotification({ actor, project, ...n }) {
-  return {
-    ...n,
-    actor_name: actor?.name ?? 'Someone',
-    project_title: project?.title ?? 'a project',
-  };
-}
-
-function nameMockNotification(n) {
-  return {
-    ...n,
-    actor_name: users.find((u) => u.id === n.actor_id)?.name ?? 'Someone',
-    project_title: projects.find((p) => p.id === n.project_id)?.title ?? 'a project',
-  };
-}
-
-function newestFirst(a, b) {
-  return new Date(b.created_at) - new Date(a.created_at);
-}
-
-// Mock mode's stand-in for the database writing a notification and Realtime
-// announcing it: every mock write goes through here, so the bell hears about
-// it the same way it would from Supabase.
-const mockNotificationListeners = new Set();
-
-export function addMockNotification(n) {
-  notifications.push(n);
-  for (const listener of mockNotificationListeners) listener(n);
 }
 
 // Mirrors sync_project_fill_state(): a roster change in either direction
