@@ -6,9 +6,11 @@ import ResumeImport from './ResumeImport';
 import SkillPicker from './SkillPicker';
 
 // First-sign-in walkthrough. Shown over whatever page the student landed on
-// until they finish or skip it; either way it ends on /browse. Step 1 is
-// done in place (skills are added right here) so the tour is the first
-// step of the process rather than a description of it.
+// until they finish or skip it. Step 1 is done in place (skills are added
+// right here) so the tour is the first step of the process rather than a
+// description of it. Step 2 ends it with the student's choice: join
+// someone else's team from Browse, or start their own. Skipping lands on
+// /browse.
 
 function SkillsStep() {
   const [skills, setSkills] = useState(null);
@@ -54,26 +56,37 @@ const STEPS = [
     body: SkillsStep,
   },
   {
-    title: 'Browse open projects',
-    body: () => (
-      <p className="desc">
-        The Browse page lists every project, what it's building, and which roles it still needs.
-        Roles that match one of your skills are highlighted, so you can see where you fit at a
-        glance.
-      </p>
-    ),
-  },
-  {
-    title: 'Request to join',
-    body: () => (
-      <p className="desc">
-        Found one that needs what you have? Send a request — the project's creator accepts or
-        declines it, and you'll see the answer under Requests. Once a roster reaches its target
-        size, the project closes and the team is formed. You can only be on one team at a time.
-      </p>
-    ),
+    title: 'Find your team',
+    body: ChoiceStep,
   },
 ];
+
+function ChoiceStep({ onChoose }) {
+  return (
+    <>
+      <p className="desc">
+        Join a project someone else started, or start your own and recruit for it. You can only be
+        on one team at a time, and you can change your mind until you join or create one.
+      </p>
+      <div className="tour-choices">
+        <button type="button" className="tour-choice" onClick={() => onChoose('/browse')}>
+          <b>Browse projects</b>
+          <span>
+            See every open project and the roles it still needs. Roles that match your skills are
+            highlighted — send a request, and the creator accepts or declines it.
+          </span>
+        </button>
+        <button type="button" className="tour-choice" onClick={() => onChoose('/projects/new')}>
+          <b>Create a project</b>
+          <span>
+            Post your idea, pick your own role, and list who you're looking for. Your team forms
+            once the roster reaches its target size.
+          </span>
+        </button>
+      </div>
+    </>
+  );
+}
 
 export default function Walkthrough() {
   const { user, completeOnboarding } = useSession();
@@ -85,9 +98,10 @@ export default function Walkthrough() {
     dialogRef.current?.focus();
   }, [step]);
 
-  function finish() {
+  // Skipping, Escape, or picking where to go all end the tour.
+  function finish(to = '/browse') {
     completeOnboarding();
-    navigate('/browse');
+    navigate(to);
   }
 
   const { title, body: Body } = STEPS[step];
@@ -118,10 +132,10 @@ export default function Walkthrough() {
         </ol>
 
         <h2 id="tour-title">{title}</h2>
-        <Body />
+        <Body onChoose={finish} />
 
         <div className="tour-foot">
-          <button className="btn quiet" onClick={finish}>
+          <button className="btn quiet" onClick={() => finish()}>
             Skip tour
           </button>
           {step > 0 && (
@@ -129,9 +143,12 @@ export default function Walkthrough() {
               Back
             </button>
           )}
-          <button className="btn" onClick={() => (last ? finish() : setStep(step + 1))}>
-            {last ? 'Browse projects' : 'Next'}
-          </button>
+          {/* The last step's choices are its way forward, so it has no Next. */}
+          {!last && (
+            <button className="btn" onClick={() => setStep(step + 1)}>
+              Next
+            </button>
+          )}
         </div>
       </div>
     </div>

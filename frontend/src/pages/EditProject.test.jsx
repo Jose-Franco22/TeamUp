@@ -113,7 +113,7 @@ describe('the form opens with the current values', () => {
   test('the roles being recruited for are listed, with their skill and quantity', async () => {
     await renderEdit();
     expect(screen.getByLabelText('Role')).toHaveValue('r-frontend');
-    expect(screen.getByLabelText('Skill')).toHaveValue('s-react');
+    expect(screen.getByRole('button', { name: 'Skill' })).toHaveAttribute('data-value', 's-react');
     expect(screen.getByLabelText('How many people needed for this role')).toHaveValue(2);
   });
 
