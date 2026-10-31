@@ -834,20 +834,30 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 /* ---------- milestones (issue #38) ---------- */
 .milestone-banner { padding: 14px 18px; }
+.milestone-countdown { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+/* Inside 48 hours of the next deadline (issue #22). */
+.milestone-banner.warn { background: var(--warn-bg); border-color: var(--warn); }
+.milestone-banner.warn .milestone-countdown { color: var(--warn); }
 .milestone-locked { margin: 0 0 8px; font-size: 13.5px; color: var(--warn); }
 .milestone-locked:last-child { margin-bottom: 0; }
 .milestone-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 28px; }
 .milestone-list li { display: flex; flex-direction: column; min-width: 0; }
 .milestone-name { font-size: 13.5px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
 .milestone-due { font-size: 12.5px; color: var(--slate); }
-.milestone-admin-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
-.milestone-admin-list li > div { min-width: 0; overflow-wrap: anywhere; }
+.milestone-admin-list li,
+.next-step-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.milestone-admin-list li > div,
+.next-step-list li > div { min-width: 0; overflow-wrap: anywhere; }
 .milestone-form,
 .placement-form { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .milestone-form h3,
 .placement-form h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
 .milestone-form .switch { align-items: flex-start; margin-bottom: 4px; }
 .milestone-form .switch input { margin-top: 3px; flex: none; }
+
+/* ---------- next steps (issue #42) ---------- */
+.next-step-progress { white-space: nowrap; }
+.next-step-progress.done { color: var(--open); }
 
 /* ---------- admin placement (issue #39) ---------- */
 .placement { margin-top: 14px; }

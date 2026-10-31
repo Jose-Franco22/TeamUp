@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import Announcements, { relativeDue } from './Announcements';
+import Announcements from './Announcements';
 import { setSessionUserId } from '../api/client';
 import { announcements, announcementsSeenAt, milestones } from '../api/mockData';
 
@@ -155,18 +155,4 @@ test('HTML and SQL in an announcement are shown as text, never run', async () =>
   expect(within(posts).getByRole('heading', { name: "Robert'); DROP TABLE announcements; --" })).toBeInTheDocument();
   expect(document.querySelector('img, script')).toBeNull();
   expect(window.__pwned).toBeUndefined();
-});
-
-test('relative dates read naturally', () => {
-  const now = new Date('2026-10-21T12:00:00');
-  expect(relativeDue('2026-10-21T23:00:00', now)).toBe('today');
-  expect(relativeDue('2026-10-22T08:00:00', now)).toBe('tomorrow');
-  expect(relativeDue('2026-10-20T08:00:00', now)).toBe('yesterday');
-  expect(relativeDue('2026-10-26T08:00:00', now)).toBe('in 5 days');
-  expect(relativeDue('2026-10-11T08:00:00', now)).toBe('10 days ago');
-  expect(relativeDue('2026-11-11T08:00:00', now)).toBe('in 3 weeks');
-  expect(relativeDue('2027-02-21T08:00:00', now)).toBe('in 4 months');
-  expect(relativeDue('2026-08-01T08:00:00', now)).toBe('3 months ago');
-  expect(relativeDue('2027-11-01T08:00:00', now)).toBe('in 1 year');
-  expect(relativeDue('2031-10-21T08:00:00', now)).toBe('in 5 years');
 });

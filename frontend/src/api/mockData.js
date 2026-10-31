@@ -331,6 +331,14 @@ export const notifications = [];
 
 export const adminActions = [];
 
+// --- NEXT STEPS --------------------------------------------------------
+// See supabase/33_next_steps.sql. nextSteps: id, title, due_at (or null),
+// sort_order (1..n, the order teams see). nextStepCompletions: team_id,
+// step_id, completed_by, completed_at — one per step a team has checked
+// off (written by #30).
+export const nextSteps = [];
+export const nextStepCompletions = [];
+
 // --- ANNOUNCEMENTS -----------------------------------------------------
 // See supabase/29_announcements.sql. announcements: id, title, body,
 // author_id, created_at, updated_at. announcementsSeenAt stands in for

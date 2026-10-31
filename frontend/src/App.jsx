@@ -11,6 +11,7 @@ import Admin from './pages/Admin';
 import AdminTeam from './pages/AdminTeam';
 import AdminStudent from './pages/AdminStudent';
 import AdminMilestones from './pages/AdminMilestones';
+import AdminNextSteps from './pages/AdminNextSteps';
 import Announcements from './pages/Announcements';
 import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
@@ -21,6 +22,9 @@ import { MilestoneBanner } from './components/Milestones';
 import { useUnseenAnnouncements } from './components/AnnouncementAlerts';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
+
+// Admin pages with a tab of their own, so the Admin tab isn't lit on them.
+const ADMIN_OWN_TABS = ['/admin/milestones', '/admin/next-steps'];
 
 // Everything but /login needs a signed-in user, so guests get no tabs.
 const TABS = [
@@ -43,6 +47,7 @@ export default function App() {
     ? [
         { to: '/admin', label: 'Admin' },
         { to: '/admin/milestones', label: 'Milestones' },
+        { to: '/admin/next-steps', label: 'Next steps' },
         { to: '/announcements', label: 'Announcements' },
         { to: '/profile', label: 'Your profile' },
       ]
@@ -101,8 +106,9 @@ export default function App() {
                 to={t.to}
                 className={({ isActive }) =>
                   // /admin covers the team and student pages under it, but
-                  // not the Milestones tab, which has its own highlight.
-                  isActive && !(t.to === '/admin' && pathname.startsWith('/admin/milestones')) ? 'on' : ''
+                  // not the Milestones and Next steps tabs, which have their
+                  // own highlight.
+                  isActive && !(t.to === '/admin' && ADMIN_OWN_TABS.some((tab) => pathname.startsWith(tab))) ? 'on' : ''
                 }
               >
                 {t.label}
@@ -145,6 +151,7 @@ export default function App() {
             <Route element={<ProtectedRoute adminOnly />}>
               <Route path="/admin" element={<Admin />} />
               <Route path="/admin/milestones" element={<AdminMilestones />} />
+              <Route path="/admin/next-steps" element={<AdminNextSteps />} />
               <Route path="/admin/teams/:teamId" element={<AdminTeam />} />
               <Route path="/admin/students/:studentId" element={<AdminStudent />} />
               <Route path="/admin/*" element={<p className="empty">Page not found.</p>} />

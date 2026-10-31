@@ -587,6 +587,19 @@ time), readable only by admins and shown on `/admin` via `admin_recent_actions()
 request that was already pending at the deadline is still allowed; the issue didn't ask for that to
 lock.
 
+**Next steps.** `33_next_steps.sql` (issue #42) adds `public.next_steps` (`title`, optional
+`due_at`, `sort_order` 1..n), readable by signed-in users and written only through the admin RPCs
+`save_next_step()`, `delete_next_step()` and `reorder_next_steps()`. The title follows the
+milestone name rules (CHECK constraints, mirrored in `lib/validation.js`). `sort_order` is unique,
+but the constraint is checked at the end of each statement, so a reorder is one atomic `UPDATE`.
+`reorder_next_steps()` takes every id in the new order and refuses anything else, so a stale list
+can't scramble the order. Deleting a step closes the gap. It also adds
+`public.next_step_completions` (`team_id`, `step_id`, `completed_by`, `completed_at`; primary key
+`(team_id, step_id)`, cascading from both), readable by that team's members and admins, with no
+write path yet: #30 adds the function that checks an item off, and the "team complete"
+notification. `admin_dashboard()` and `admin_team_details()` add `next_steps: { done, total }` to
+each team.
+
 ## Deleting a team — `delete_team()`
 
 > This section assumes the function approach. A single DELETE policy on `projects` would also

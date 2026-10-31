@@ -1,6 +1,6 @@
 // Issue #38: the admin's milestone form and the students' banner, against the
 // mock API.
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -176,4 +176,72 @@ test('HTML and SQL typed into a milestone are shown as plain text, never run', a
 
   expect(document.querySelector('img, script')).toBeNull();
   expect(window.__pwned).toBeUndefined();
+});
+
+// --- Issue #22: the countdown to the next deadline -------------------------
+// Only Date is faked, so the mock API's delay() still runs on real timers.
+describe('the banner counts down to the next deadline', () => {
+  const NOW = new Date('2026-10-21T12:00:00Z');
+  const HOUR = 60 * 60 * 1000;
+  const later = (ms) => new Date(NOW.getTime() + ms).toISOString();
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    setSessionUserId('u-adan');
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const renderBanner = async () => {
+    render(<MemoryRouter><MilestoneBanner /></MemoryRouter>);
+    return screen.findByRole('region', { name: 'Upcoming deadlines' });
+  };
+
+  test('shows the next deadline with its countdown', async () => {
+    milestones.push(
+      { id: 'ms-p', name: 'Proposal due', due_at: later(20 * 24 * HOUR), is_formation_deadline: false },
+      { id: 'ms-t', name: 'Teams due', due_at: later(4 * 24 * HOUR), is_formation_deadline: true },
+    );
+    const banner = await renderBanner();
+    expect(within(banner).getByText('Team formation closes in 4 days')).toBeInTheDocument();
+    expect(banner).not.toHaveClass('warn');
+  });
+
+  test('a milestone other than the formation deadline counts down by name', async () => {
+    milestones.push({ id: 'ms-p', name: 'Proposal due', due_at: later(24 * HOUR), is_formation_deadline: false });
+    const banner = await renderBanner();
+    expect(within(banner).getByText('Proposal due in 1 day')).toBeInTheDocument();
+  });
+
+  test('switches to the warning style within 48 hours', async () => {
+    milestones.push({ id: 'ms-t', name: 'Teams due', due_at: later(5 * HOUR), is_formation_deadline: true });
+    const banner = await renderBanner();
+    expect(within(banner).getByText('Team formation closes in 5 hours')).toBeInTheDocument();
+    expect(banner).toHaveClass('warn');
+  });
+
+  test('just outside 48 hours is not a warning yet', async () => {
+    milestones.push({ id: 'ms-t', name: 'Teams due', due_at: later(49 * HOUR), is_formation_deadline: true });
+    expect(await renderBanner()).not.toHaveClass('warn');
+  });
+
+  test('past deadlines show as closed and the countdown moves on to the next one', async () => {
+    milestones.push(
+      { id: 'ms-t', name: 'Teams due', due_at: later(-2 * HOUR), is_formation_deadline: true },
+      { id: 'ms-k', name: 'Kickoff', due_at: later(-48 * HOUR), is_formation_deadline: false },
+      { id: 'ms-p', name: 'Proposal due', due_at: later(10 * 24 * HOUR), is_formation_deadline: false },
+    );
+    const banner = await renderBanner();
+    expect(within(banner).getByText(/Team formation closed/)).toBeInTheDocument();
+    expect(within(banner).getByText('Proposal due in 10 days')).toBeInTheDocument();
+    expect(within(banner).queryByText('Kickoff')).not.toBeInTheDocument();
+    expect(within(banner).queryByText(/closes in/)).not.toBeInTheDocument();
+    expect(banner).not.toHaveClass('warn');
+  });
+
+  test('no banner when there are no milestones', async () => {
+    render(<MemoryRouter><MilestoneBanner /></MemoryRouter>);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.queryByRole('region', { name: 'Upcoming deadlines' })).not.toBeInTheDocument();
+  });
 });
