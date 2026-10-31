@@ -241,6 +241,15 @@ select is(
 
 -- --- deleting a project nobody asked about -------------------------------
 
+-- Counted before and after rather than against a fixed number: earlier
+-- sections of this file delete projects that had pending requests too, so
+-- the running total is not 1 and asserting it would only measure how many
+-- tests came first.
+select set_config(
+  'tests.notices_before',
+  (select count(*)::text from public.notifications where kind = 'project_removed'),
+  true);
+
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select set_config('tests.project', tests.make_project()::text, true);
 select set_config('tests.team', tests.team_of(current_setting('tests.project')::uuid)::text, true);
@@ -250,7 +259,7 @@ select lives_ok(
 select tests.clear_authentication();
 select is(
   (select count(*)::int from public.notifications where kind = 'project_removed'),
-  1,
+  current_setting('tests.notices_before')::int,
   'and tells nobody, because there was nobody to tell');
 
 select * from finish();
