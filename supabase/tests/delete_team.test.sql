@@ -175,7 +175,7 @@ select set_config('tests.req_declined',
 
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select lives_ok(
-  $ select public.respond_to_join_request(current_setting('tests.req_declined')::uuid, 'declined') $,
+  $$ select public.respond_to_join_request(current_setting('tests.req_declined')::uuid, 'declined') $$,
   'one of the two is turned down before the project is deleted');
 
 select tests.clear_authentication();
@@ -187,7 +187,7 @@ select is(
 
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select lives_ok(
-  $ select public.delete_team(current_setting('tests.team')::uuid) $,
+  $$ select public.delete_team(current_setting('tests.team')::uuid) $$,
   'the creator deletes the project out from under them');
 
 select tests.clear_authentication();
@@ -245,7 +245,7 @@ select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select set_config('tests.project', tests.make_project()::text, true);
 select set_config('tests.team', tests.team_of(current_setting('tests.project')::uuid)::text, true);
 select lives_ok(
-  $ select public.delete_team(current_setting('tests.team')::uuid) $,
+  $$ select public.delete_team(current_setting('tests.team')::uuid) $$,
   'a project with no requests deletes without complaint');
 select tests.clear_authentication();
 select is(
