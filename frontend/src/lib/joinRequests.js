@@ -1,7 +1,9 @@
 // Why a student can't request to join a project (issue #32). Each
 // sentence is word for word what create_join_request() raises
-// (supabase/24_join_request_message.sql), so Browse can say it before the
+// (supabase/25_join_request_message.sql), so Browse can say it before the
 // student even tries and the server says the same thing if they do.
+// `deadline` is also what the join_requests trigger in 26_milestones.sql
+// raises, so keep the two identical.
 export const JOIN_BLOCKED = {
   own: 'You cannot request to join your own project',
   onTeam: 'You are already on a team and cannot request to join another project',

@@ -87,7 +87,7 @@ function assertBeforeFormationDeadline(what) {
   throw new Error(
     what === 'project'
       ? "The team formation deadline has passed, so new projects can't be posted"
-      : 'The team formation deadline has passed, so new join requests are closed'
+      : JOIN_BLOCKED.deadline
   );
 }
 
@@ -1269,7 +1269,7 @@ export async function getPendingRequestCount() {
 
 // `message` is the optional note to the creator (issue #32), up to
 // JOIN_MESSAGE_MAX characters. create_join_request() trims it and checks
-// the length again — see supabase/24_join_request_message.sql.
+// the length again — see supabase/25_join_request_message.sql.
 export async function createJoinRequest(projectId, message = '') {
   const { value: cleanMessage, error: messageError } = validateJoinMessage(message);
   if (messageError) throw new ValidationError({ message: messageError });
@@ -1319,7 +1319,7 @@ export async function createJoinRequest(projectId, message = '') {
   }
   // create_join_request() runs every check, the insert and the creator's
   // notification in one transaction server-side — see
-  // supabase/24_join_request_message.sql.
+  // supabase/25_join_request_message.sql.
   const { data, error } = await supabase.rpc('create_join_request', {
     p_project_id: projectId,
     p_message: cleanMessage || null,

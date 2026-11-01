@@ -471,7 +471,7 @@ describe('join request message', () => {
   test('the migration enforces the same limit and raises the same sentences', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const sql = readFileSync(resolve(process.cwd(), '../supabase/24_join_request_message.sql'), 'utf8');
+    const sql = readFileSync(resolve(process.cwd(), '../supabase/25_join_request_message.sql'), 'utf8');
 
     expect(sql).toContain(`char_length(message) <= ${JOIN_MESSAGE_MAX}`);
     expect(sql).toContain(`char_length(v_message) > ${JOIN_MESSAGE_MAX}`);

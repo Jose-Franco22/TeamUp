@@ -220,7 +220,7 @@ export function validateProject(input, { memberCount = 1 } = {}) {
 
 // The optional note sent with a join request. Mirrored by
 // join_requests_message_length_check and the raise in create_join_request()
-// (supabase/24_join_request_message.sql).
+// (supabase/25_join_request_message.sql).
 export const JOIN_MESSAGE_MAX = 300;
 export const JOIN_MESSAGE_TOO_LONG = `Your message can be at most ${JOIN_MESSAGE_MAX} characters`;
 

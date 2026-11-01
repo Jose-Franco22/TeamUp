@@ -1,5 +1,5 @@
 -- Join requests with a message, and every reason one is refused (issue #32):
--- 24_join_request_message.sql.
+-- 25_join_request_message.sql.
 begin;
 select plan(13);
 
