@@ -103,7 +103,9 @@ select throws_ok(
   'join_requests_message_length_check refuses a 301-character message');
 
 -- --- After the formation deadline -----------------------------------------
-update public.app_settings set formation_deadline = now() - interval '1 day';
+-- The deadline is the milestone flagged is_formation_deadline (26_milestones.sql).
+insert into public.milestones (name, due_at, is_formation_deadline)
+values ('Team formation deadline', now() - interval '1 day', true);
 
 select tests.authenticate_as(current_setting('tests.eve')::uuid);
 select throws_ok(
@@ -112,7 +114,7 @@ select throws_ok(
   'a request after the formation deadline is refused');
 select tests.clear_authentication();
 
-update public.app_settings set formation_deadline = now() + interval '1 day';
+update public.milestones set due_at = now() + interval '1 day' where is_formation_deadline;
 select tests.authenticate_as(current_setting('tests.eve')::uuid);
 select lives_ok(
   format('select public.create_join_request(%L)', current_setting('tests.p1')),
