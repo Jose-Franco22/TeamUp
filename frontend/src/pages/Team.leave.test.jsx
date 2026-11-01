@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Team from './Team';
 import * as client from '../api/client';
-import { appSettings, notifications, projects, teamMembers, teams } from '../api/mockData';
+import { setFormationDeadline, notifications, projects, teamMembers, teams } from '../api/mockData';
 import { SessionProvider } from '../auth/SessionContext';
 
 // Spy on leaveTeam but keep the real (mock-mode) implementation, so a test
@@ -34,7 +34,7 @@ afterEach(() => {
   teams.splice(0, teams.length, ...snapshot.teams);
   projects.splice(0, projects.length, ...snapshot.projects);
   notifications.length = 0;
-  appSettings.formation_deadline = null;
+  setFormationDeadline(null);
 });
 
 async function renderTeamAs(userId) {
@@ -90,21 +90,21 @@ describe('leaving', () => {
 
 describe('formation deadline', () => {
   test('after the deadline the Leave button is gone and the student is pointed to an admin', async () => {
-    appSettings.formation_deadline = '2020-01-01T00:00:00Z';
+    setFormationDeadline('2020-01-01T00:00:00Z');
     await renderTeamAs(MEMBER);
     expect(leaveButton()).not.toBeInTheDocument();
     expect(screen.getByText(/ask an admin to take you off the team/)).toBeInTheDocument();
   });
 
   test('before the deadline the student is warned when rosters lock', async () => {
-    appSettings.formation_deadline = '2999-01-01T00:00:00Z';
+    setFormationDeadline('2999-01-01T00:00:00Z');
     await renderTeamAs(MEMBER);
     expect(leaveButton()).toBeInTheDocument();
     expect(screen.getByText(/Rosters lock on/)).toBeInTheDocument();
   });
 
   test('leaveTeam() itself refuses after the deadline', async () => {
-    appSettings.formation_deadline = '2020-01-01T00:00:00Z';
+    setFormationDeadline('2020-01-01T00:00:00Z');
     client.setSessionUserId(MEMBER);
     await expect(client.leaveTeam()).rejects.toThrow(/formation deadline has passed/);
     expect(teamMembers.some((tm) => tm.user_id === MEMBER)).toBe(true);
