@@ -339,6 +339,19 @@ export const adminActions = [];
 export const announcements = [];
 export const announcementsSeenAt = {};
 
+// --- NEXT STEPS ----------------------------------------------------------
+// See supabase/31_next_steps.sql. nextSteps: id, title, due_at (null for no
+// due date), created_at — the admin-managed list, seeded the same way.
+// teamNextSteps: team_id, next_step_id, completed_by, completed_at — one row
+// per item a team has checked off.
+export const nextSteps = [
+  { id: 'ns-roster', title: 'Confirm your roster', due_at: null, created_at: '2026-08-01T00:00:00.001Z' },
+  { id: 'ns-repo', title: 'Create the repo and add your adviser', due_at: null, created_at: '2026-08-01T00:00:00.002Z' },
+  { id: 'ns-meeting', title: 'Schedule your first adviser meeting', due_at: null, created_at: '2026-08-01T00:00:00.003Z' },
+  { id: 'ns-proposal', title: 'Submit your project proposal', due_at: null, created_at: '2026-08-01T00:00:00.004Z' },
+];
+export const teamNextSteps = [];
+
 // --- Composition helpers ----------------------------------------------
 // These stand in for the joins the backend will do. Keeping them here
 // documents exactly what each endpoint is expected to return.

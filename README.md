@@ -164,6 +164,15 @@ shows how many announcements and milestones are new or changed since they last o
 and messages follow the same rules as milestone messages: no blank or punctuation-only text, no
 control or invisible characters. Anything typed is shown as plain text.
 
+## Next steps for complete teams (#30)
+
+Apply `supabase/31_next_steps.sql` after `30`. When a team's last seat fills, every member gets a
+"team complete" notification, and the team page shows a **Next steps** checklist. Admins keep the
+list on the **Milestones** tab (`/admin/milestones`) — it starts with confirm your roster, create
+the repo and add your adviser, schedule the first adviser meeting, and submit the proposal — and
+can give any item a due date. Any member can check an item off (or undo it); the team sees who did
+each one and when, and overdue items are highlighted.
+
 ## Testing
 
 Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.

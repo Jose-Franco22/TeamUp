@@ -21,6 +21,8 @@ import {
   adminActions,
   announcements,
   announcementsSeenAt,
+  nextSteps,
+  teamNextSteps,
   notifications,
   buildProject,
   skillsForUser,
@@ -34,6 +36,7 @@ import {
   fieldErrorsFromDbError,
   validateAnnouncement,
   validateMilestone,
+  validateNextStep,
   validateProfile,
   validateProject,
 } from '../lib/validation';
@@ -519,6 +522,172 @@ export async function markAnnouncementsSeen() {
   if (error) throw error;
 }
 
+// --- Next steps (#30) -----------------------------------------------------
+// What a team does once it's full. Admins keep one list for the class
+// (save_next_step()/delete_next_step()); each team checks the items off on
+// its own (set_next_step_done()). See supabase/31_next_steps.sql.
+
+// Due-date order, undated last, then the order they were added — the same
+// order team_checklist() returns.
+function nextStepOrder(a, b) {
+  if (a.due_at && b.due_at && a.due_at !== b.due_at) return new Date(a.due_at) - new Date(b.due_at);
+  if (Boolean(a.due_at) !== Boolean(b.due_at)) return a.due_at ? -1 : 1;
+  return new Date(a.created_at) - new Date(b.created_at);
+}
+
+// The admin's list.
+export async function getNextSteps() {
+  if (USE_MOCKS) {
+    await delay();
+    requireSessionUserId();
+    return nextSteps.slice().sort(nextStepOrder).map((s) => ({ ...s }));
+  }
+  const { data, error } = await supabase
+    .from('next_steps')
+    .select('id, title, due_at, created_at')
+    .order('due_at', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+// Adds an item when `id` is missing, edits it otherwise. An empty due_at
+// means no due date.
+export async function saveNextStep({ id = null, title, due_at = null }) {
+  const { values, errors, isValid } = validateNextStep({ title, due_at });
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const existing = id ? nextSteps.find((s) => s.id === id) : null;
+    if (id && !existing) throw new Error('Next step not found');
+    const row = existing ?? { id: `ns-${Date.now()}-${nextSteps.length}`, created_at: new Date().toISOString() };
+    Object.assign(row, { title: values.title, due_at: values.due_at });
+    if (!existing) nextSteps.push(row);
+    return { ...row };
+  }
+  const { data, error } = await supabase.rpc('save_next_step', {
+    p_id: id,
+    p_title: values.title,
+    p_due_at: values.due_at,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteNextStep(id) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const index = nextSteps.findIndex((s) => s.id === id);
+    if (index === -1) throw new Error('Next step not found');
+    nextSteps.splice(index, 1);
+    for (let i = teamNextSteps.length - 1; i >= 0; i -= 1) {
+      if (teamNextSteps[i].next_step_id === id) teamNextSteps.splice(i, 1);
+    }
+    return;
+  }
+  const { error } = await supabase.rpc('delete_next_step', { p_id: id });
+  if (error) throw error;
+}
+
+function mockAssertOnTeam(teamId, viewerId, message) {
+  if (!teamMembers.some((tm) => tm.team_id === teamId && tm.user_id === viewerId)) throw new Error(message);
+}
+
+function mockChecklist(teamId) {
+  return nextSteps
+    .slice()
+    .sort(nextStepOrder)
+    .map((s) => {
+      const done = teamNextSteps.find((d) => d.team_id === teamId && d.next_step_id === s.id);
+      return {
+        id: s.id,
+        title: s.title,
+        due_at: s.due_at,
+        completed_at: done?.completed_at ?? null,
+        completed_by: done?.completed_by ?? null,
+        completed_by_name: done ? users.find((u) => u.id === done.completed_by)?.name ?? null : null,
+      };
+    });
+}
+
+// One team's checklist: every item, whether the team has done it, and who
+// did. Members of the team (and admins) only.
+export async function getTeamChecklist(teamId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!users.find((u) => u.id === id)?.is_admin) {
+      mockAssertOnTeam(teamId, id, 'Only members of this team can see its checklist');
+    }
+    return mockChecklist(teamId);
+  }
+  const { data, error } = await supabase.rpc('team_checklist', { p_team_id: teamId });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Checks an item off (done = true) or undoes it, and returns the updated
+// checklist. Any member of a full team can; checking off an item someone
+// already did keeps their name on it.
+export async function setNextStepDone(teamId, nextStepId, done) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    mockAssertOnTeam(teamId, id, 'Only members of this team can check off its next steps');
+    const team = teams.find((t) => t.id === teamId);
+    if (projects.find((p) => p.id === team.project_id)?.status !== 'full') {
+      throw new Error('The checklist opens once the team is full');
+    }
+    if (!nextSteps.some((s) => s.id === nextStepId)) throw new Error('Next step not found');
+    const index = teamNextSteps.findIndex((d) => d.team_id === teamId && d.next_step_id === nextStepId);
+    if (done && index === -1) {
+      teamNextSteps.push({
+        team_id: teamId,
+        next_step_id: nextStepId,
+        completed_by: id,
+        completed_at: new Date().toISOString(),
+      });
+    } else if (!done && index !== -1) {
+      teamNextSteps.splice(index, 1);
+    }
+    return mockChecklist(teamId);
+  }
+  const { data, error } = await supabase.rpc('set_next_step_done', {
+    p_team_id: teamId,
+    p_next_step_id: nextStepId,
+    p_done: Boolean(done),
+  });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// The trigger in 31_next_steps.sql: when a project goes from open to full,
+// every member gets a 'team_complete' notification. Called after each mock
+// write that can fill a team, with the status from before it.
+function mockNotifyIfTeamCompleted(previousStatus, project, team) {
+  if (previousStatus === 'full' || project.status !== 'full') return;
+  const actorId = sessionUserId;
+  const byAdmin = Boolean(users.find((u) => u.id === actorId)?.is_admin);
+  const now = new Date().toISOString();
+  teamMembers
+    .filter((tm) => tm.team_id === team.id)
+    .forEach((tm, i) =>
+      addMockNotification({
+        id: `n-${Date.now()}-${notifications.length}-${i}`,
+        user_id: tm.user_id,
+        kind: 'team_complete',
+        project_id: project.id,
+        actor_id: actorId,
+        by_admin: byAdmin,
+        created_at: now,
+        read_at: null,
+      })
+    );
+}
+
 async function getViewerId() {
   const {
     data: { session },
@@ -882,6 +1051,7 @@ export async function updateProject(
       );
     }
 
+    const previousStatus = project.status;
     Object.assign(project, {
       // The validated, trimmed values — update_project() btrims server-side.
       title: values.title,
@@ -890,6 +1060,7 @@ export async function updateProject(
       status: roster.length >= team_size_target ? 'full' : 'open',
     });
     team.formed_at = roster.length >= team_size_target ? team.formed_at || new Date().toISOString() : null;
+    mockNotifyIfTeamCompleted(previousStatus, project, team);
 
     const mine = roster.find((tm) => tm.user_id === id);
     mine.role_id = own_role_id;
@@ -1387,8 +1558,10 @@ export async function respondToRequest(requestId, status, roleId) {
       teamMembers.push({ team_id: team.id, user_id: r.user_id, role_id: roleId });
       const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
       if (count >= project.team_size_target) {
+        const previousStatus = project.status;
         project.status = 'full';
         team.formed_at = new Date().toISOString();
+        mockNotifyIfTeamCompleted(previousStatus, project, team);
       }
 
       // A student can only be on one team, so accepting this request
@@ -1819,6 +1992,8 @@ export function addMockNotification(n) {
 function syncProjectFillState(project, team) {
   const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
   const full = count >= project.team_size_target;
+  const previousStatus = project.status;
   project.status = full ? 'full' : 'open';
   team.formed_at = full ? team.formed_at || new Date().toISOString() : null;
+  mockNotifyIfTeamCompleted(previousStatus, project, team);
 }

@@ -347,3 +347,36 @@ export function validateAnnouncement({ title, body }) {
 
   return { values, errors, isValid: Object.keys(errors).length === 0 };
 }
+
+// --- Next steps (issue #30) -------------------------------------------------
+// The checklist a team sees once it's full. Mirrored by
+// next_steps_title_text, next_steps_due_at_range and the raises in
+// save_next_step() (supabase/31_next_steps.sql). The title follows the
+// announcement-title rules; the due date is optional.
+export const NEXT_STEP_TITLE_MAX = 120;
+
+export function validateNextStep({ title, due_at }) {
+  const errors = {};
+  const values = {};
+
+  const t = String(title ?? '').trim();
+  if (t === '') errors.title = 'Give the step a title';
+  else if (charCount(t) > NEXT_STEP_TITLE_MAX) {
+    errors.title = `Keep the title to ${NEXT_STEP_TITLE_MAX} characters or fewer`;
+  } else if (/[\x00-\x1F\x7F]/.test(t) || INVISIBLE.test(t)) {
+    errors.title = "The title can't contain line breaks, hidden or control characters";
+  } else if (!HAS_WORDS.test(t)) {
+    errors.title = 'The title has to include letters or numbers';
+  } else values.title = t;
+
+  if (!due_at) values.due_at = null;
+  else {
+    const when = new Date(due_at);
+    if (Number.isNaN(when.getTime())) errors.due_at = 'Pick a valid date and time, or leave it blank';
+    else if (when < MILESTONE_DUE_MIN || when >= MILESTONE_DUE_MAX) {
+      errors.due_at = 'Pick a due date between 2000 and 2099';
+    } else values.due_at = when.toISOString();
+  }
+
+  return { values, errors, isValid: Object.keys(errors).length === 0 };
+}
