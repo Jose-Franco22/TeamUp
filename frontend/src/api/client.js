@@ -39,10 +39,6 @@ const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
 export const MIN_TEAM_SIZE = 2;
 export const MAX_TEAM_SIZE = 4;
 
-// The longest note a student can send with a join request — the same limit
-// as join_requests_message_length_check (24_join_request_message.sql).
-export const MAX_REQUEST_MESSAGE = 500;
-
 // Small delay so loading states are visible during development.
 const delay = (ms = 250) => new Promise((r) => setTimeout(r, ms));
 
@@ -844,7 +840,7 @@ export async function getRequests() {
         const project = projects.find((p) => p.id === r.project_id);
         return {
           ...r,
-          message: r.message ?? '',
+          message: r.message ?? null,
           user_name: u.name,
           availability_hours: u.availability_hours,
           github_url: u.github_url,
@@ -891,7 +887,7 @@ export async function getRequests() {
       user_id: r.user_id,
       status: r.status,
       created_at: r.created_at,
-      message: r.message ?? '',
+      message: r.message ?? null,
       user_name: r.requester.name,
       availability_hours: r.requester.availability_hours,
       github_url: r.requester.github_url ?? '',
@@ -948,9 +944,7 @@ export async function getPendingRequestCount() {
   return count ?? 0;
 }
 
-// `message` is an optional note to the project's creator, shown with the
-// request on their Requests page (24_join_request_message.sql).
-export async function createJoinRequest(projectId, message = '') {
+export async function createJoinRequest(projectId) {
   if (USE_MOCKS) {
     await delay();
     const id = requireStudentSessionUserId();
@@ -967,15 +961,11 @@ export async function createJoinRequest(projectId, message = '') {
       (r) => r.project_id === projectId && r.user_id === id && r.status === 'pending'
     );
     if (existing) throw new Error('You already have a pending request for this project');
-    if (message.trim().length > MAX_REQUEST_MESSAGE) {
-      throw new Error(`Keep your message to ${MAX_REQUEST_MESSAGE} characters or fewer`);
-    }
     const row = {
       id: `jr-${Date.now()}`,
       project_id: projectId,
       user_id: id,
       status: 'pending',
-      message: message.trim(),
       created_at: new Date().toISOString(),
     };
     joinRequests.push(row);
@@ -994,11 +984,8 @@ export async function createJoinRequest(projectId, message = '') {
   }
   // create_join_request() runs all four checks, the insert and the creator's
   // notification in one transaction server-side — see
-  // supabase/23_join_request_notifications.sql and 24_join_request_message.sql.
-  const { data, error } = await supabase.rpc('create_join_request', {
-    p_project_id: projectId,
-    p_message: message,
-  });
+  // supabase/23_join_request_notifications.sql.
+  const { data, error } = await supabase.rpc('create_join_request', { p_project_id: projectId });
   if (error) throw error;
   return data;
 }

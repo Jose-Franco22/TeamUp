@@ -138,10 +138,9 @@ webhook setup — see [Email notifications in TODO-backend.md](TODO-backend.md#e
 
 ## Reviewing a requester (#27)
 
-Apply `supabase/24_join_request_message.sql` after `23`. It adds an optional `message` (up to 500
-characters) to each join request, and `create_join_request()` takes it as a second argument. Each
-incoming request on the Requests page shows the student's skills, availability, GitHub link and
-message, oldest request first. On Browse, "Add a message" opens an optional note to send with the request.
+Each incoming request on the Requests page shows the student's skills, availability, GitHub link
+and, when they wrote one, their message (stored by #32's `24_join_request_message.sql`), oldest
+request first.
 
 ## Testing
 

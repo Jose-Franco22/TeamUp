@@ -1,7 +1,7 @@
--- Reviewing a requester before deciding (issue #27):
--- 24_join_request_message.sql, and the RLS the Requests page relies on.
+-- Reviewing a requester before deciding (issue #27): the RLS the Requests
+-- page relies on to show an owner each requester's profile.
 begin;
-select plan(10);
+select plan(7);
 
 select set_config('tests.owner', tests.sign_in_with_microsoft('owner01@utrgv.edu', 'Owner')::text, true);
 select set_config('tests.owner2', tests.sign_in_with_microsoft('owner02@utrgv.edu', 'Owner Two')::text, true);
@@ -23,45 +23,25 @@ select tests.authenticate_as(current_setting('tests.owner2')::uuid);
 select set_config('tests.p2',
   (public.create_project('Study Buddy', 'Match classmates into study groups.', 4::smallint, current_setting('tests.pm')::uuid, '[]'::jsonb)).id::text, true);
 
--- Ana asks to join both, with a message to the first; Ben asks to join the
--- first without one.
+-- Ana asks to join both; Ben asks to join the first.
 select tests.authenticate_as(current_setting('tests.ana')::uuid);
-select public.create_join_request(current_setting('tests.p1')::uuid, '  I built a trail map app last spring.  ');
+select public.create_join_request(current_setting('tests.p1')::uuid);
 select public.create_join_request(current_setting('tests.p2')::uuid);
 select tests.authenticate_as(current_setting('tests.ben')::uuid);
 select public.create_join_request(current_setting('tests.p1')::uuid);
-select tests.clear_authentication();
-
--- --- The message ----------------------------------------------------------
-select is(
-  (select message from public.join_requests
-    where user_id = current_setting('tests.ana')::uuid and project_id = current_setting('tests.p1')::uuid),
-  'I built a trail map app last spring.',
-  'the message is stored, trimmed');
-
-select is(
-  (select message from public.join_requests where user_id = current_setting('tests.ben')::uuid),
-  '',
-  'a request without a message stores an empty one');
-
-select tests.authenticate_as(current_setting('tests.ben')::uuid);
-select throws_ok(
-  format('select public.create_join_request(%L, %L)', current_setting('tests.p2'), repeat('x', 501)),
-  'P0001', 'Keep your message to 500 characters or fewer',
-  'a message over 500 characters is refused');
 select tests.clear_authentication();
 
 -- --- The owner can read the requester's profile ---------------------------
 -- The same embed client.js getRequests() selects, as the project's owner.
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select results_eq(
-  format($q$select u.name, u.availability_hours::int, u.github_url, jr.message
+  format($q$select u.name, u.availability_hours::int, u.github_url
       from public.join_requests jr
       join public.users u on u.id = jr.user_id
      where jr.project_id = %L and jr.user_id = %L$q$,
     current_setting('tests.p1'), current_setting('tests.ana')),
-  $$values ('Ana Requester'::text, 12, 'https://github.com/ana-requester'::text, 'I built a trail map app last spring.'::text)$$,
-  'the owner can read the requester''s name, availability, GitHub link and message');
+  $$values ('Ana Requester'::text, 12, 'https://github.com/ana-requester'::text)$$,
+  'the owner can read the requester''s name, availability and GitHub link');
 
 select results_eq(
   format($q$select s.name

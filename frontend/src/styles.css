@@ -302,7 +302,6 @@ button:disabled { opacity: 0.45; cursor: default; }
   flex-wrap: wrap;
 }
 .card .foot { border-top: 1px solid var(--line); margin-top: 18px; }
-.card .request-message { margin: 18px 0 0; }
 
 .btn {
   display: inline-block;

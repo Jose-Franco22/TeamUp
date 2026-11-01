@@ -116,7 +116,7 @@ describe('ordering', () => {
       project_id: 'p-parking',
       user_id: 'u-omar',
       status: 'pending',
-      message: '',
+      message: null,
       created_at: '2026-09-05T08:00:00Z',
     });
     joinRequests.unshift({
@@ -124,7 +124,7 @@ describe('ordering', () => {
       project_id: 'p-parking',
       user_id: 'u-priya',
       status: 'pending',
-      message: '',
+      message: null,
       created_at: '2026-08-20T08:00:00Z',
     });
     await renderRequests();
