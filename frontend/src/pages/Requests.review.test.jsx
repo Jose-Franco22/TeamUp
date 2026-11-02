@@ -1,5 +1,5 @@
 // Issue #27 — the owner can review a requester before deciding: name,
-// skills, availability, GitHub link and message, oldest request first.
+// skills, availability and GitHub link, oldest request first.
 // Runs against the mock API.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
@@ -16,7 +16,7 @@ vi.mock('../api/client', async (importOriginal) => {
 
 // Nicolas owns "Campus parking tracker", which has two pending requests:
 // Rita Cano (jr-2, sent 31 Aug, no message) and Adan Barrera (jr-1, sent
-// 1 Sep, with a message).
+// 1 Sep).
 const OWNER = 'u-nicolas';
 
 const snapshot = {};
@@ -67,39 +67,6 @@ describe("the requester's profile", () => {
     // Rita never linked a GitHub; the row says so instead of a dead link.
     expect(within(rita).queryByRole('link')).not.toBeInTheDocument();
     expect(within(rita).getByText('No GitHub linked')).toBeInTheDocument();
-  });
-});
-
-describe("the requester's message", () => {
-  test('is shown when there is one', async () => {
-    await renderRequests();
-    expect(
-      within(rowFor('Adan Barrera')).getByText(/I park in Lot E every day/)
-    ).toBeInTheDocument();
-  });
-
-  test('is left out when there is none, and the row still works', async () => {
-    await renderRequests();
-    const rita = rowFor('Rita Cano');
-    expect(rita.querySelector('.req-message')).toBeNull();
-    expect(within(rita).getByRole('button', { name: 'Accept' })).toBeEnabled();
-  });
-
-  test('a request with no message field at all still renders', async () => {
-    // Rows from before the message column existed, or a partial response.
-    const actual = await vi.importActual('../api/client');
-    client.getRequests.mockImplementationOnce(async () => {
-      const data = await actual.getRequests();
-      return {
-        ...data,
-        incoming: data.incoming.map(({ message: _m, github_url: _g, ...rest }) => rest),
-      };
-    });
-    await renderRequests();
-
-    expect(incomingNames()).toEqual(['Rita Cano', 'Adan Barrera']);
-    expect(document.querySelector('.req-message')).toBeNull();
-    expect(screen.getAllByText('No GitHub linked')).toHaveLength(2);
   });
 });
 

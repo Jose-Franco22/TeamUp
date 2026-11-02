@@ -815,7 +815,7 @@ export async function updateCurrentUser(patch) {
 // --- Join requests -----------------------------------------------------
 
 const REQUEST_SELECT = `
-  id, project_id, user_id, status, message, created_at,
+  id, project_id, user_id, status, created_at,
   requester:users!user_id ( name, availability_hours, github_url, user_skills ( skills ( name ) ) ),
   project:projects!project_id (
     title, creator_id, team_size_target,
@@ -840,7 +840,6 @@ export async function getRequests() {
         const project = projects.find((p) => p.id === r.project_id);
         return {
           ...r,
-          message: r.message ?? null,
           user_name: u.name,
           availability_hours: u.availability_hours,
           github_url: u.github_url,
@@ -887,7 +886,6 @@ export async function getRequests() {
       user_id: r.user_id,
       status: r.status,
       created_at: r.created_at,
-      message: r.message ?? null,
       user_name: r.requester.name,
       availability_hours: r.requester.availability_hours,
       github_url: r.requester.github_url ?? '',

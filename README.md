@@ -138,9 +138,9 @@ webhook setup — see [Email notifications in TODO-backend.md](TODO-backend.md#e
 
 ## Reviewing a requester (#27)
 
-Each incoming request on the Requests page shows the student's skills, availability, GitHub link
-and, when they wrote one, their message (stored by #32's `24_join_request_message.sql`), oldest
-request first.
+Each incoming request on the Requests page shows the student's skills, availability and GitHub
+link, oldest request first. The student's message, when they wrote one, comes with #32
+(`35_join_request_message.sql`).
 
 ## Testing
 
