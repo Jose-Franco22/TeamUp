@@ -132,7 +132,7 @@ select is(
 -- --- Notifications -------------------------------------------------------
 select tests.clear_authentication();
 -- Ana's accept also filled the team, so she has a 'team_complete' too
--- (31_next_steps.sql). That's next_steps.test.sql's to check, not this file's.
+-- (34_next_steps.sql). That's next_steps.test.sql's to check, not this file's.
 select results_eq(
   format($q$select kind from public.notifications where user_id = %L and kind <> 'team_complete'$q$, current_setting('tests.ana')),
   $$values ('request_accepted')$$,

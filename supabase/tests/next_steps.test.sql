@@ -1,4 +1,4 @@
--- Next steps once a team is complete (issue #30): 31_next_steps.sql.
+-- Next steps once a team is complete (issue #30): 34_next_steps.sql.
 begin;
 select plan(29);
 

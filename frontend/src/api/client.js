@@ -525,7 +525,7 @@ export async function markAnnouncementsSeen() {
 // --- Next steps (#30) -----------------------------------------------------
 // What a team does once it's full. Admins keep one list for the class
 // (save_next_step()/delete_next_step()); each team checks the items off on
-// its own (set_next_step_done()). See supabase/31_next_steps.sql.
+// its own (set_next_step_done()). See supabase/34_next_steps.sql.
 
 // Due-date order, undated last, then the order they were added — the same
 // order team_checklist() returns.
@@ -664,7 +664,7 @@ export async function setNextStepDone(teamId, nextStepId, done) {
   return data ?? [];
 }
 
-// The trigger in 31_next_steps.sql: when a project goes from open to full,
+// The trigger in 34_next_steps.sql: when a project goes from open to full,
 // every member gets a 'team_complete' notification. Called after each mock
 // write that can fill a team, with the status from before it.
 function mockNotifyIfTeamCompleted(previousStatus, project, team) {

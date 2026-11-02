@@ -1,5 +1,6 @@
 -- Next steps once a team is complete (issue #30). Run after
--- 30_notification_bell.sql.
+-- 32_notify_on_project_delete.sql. 31-33 are taken by 31_set_member_role.sql,
+-- 32_notify_on_project_delete.sql and #42's 33_next_steps.sql.
 --
 -- When a team's last seat fills, every member hears about it, and the team
 -- page shows a checklist of what to do next. The items are one list for the
@@ -26,12 +27,15 @@ begin;
 -- 'team_complete' goes to every member, the one whose action filled the
 -- team included. actor_id is whoever filled it (the owner who accepted, or
 -- the admin who placed someone), by_admin when that was an admin.
+-- 'project_removed' is #25's (32_notify_on_project_delete.sql); it's listed
+-- here too so this rewrite doesn't drop it.
 alter table public.notifications
   drop constraint if exists notifications_kind_check;
 alter table public.notifications
   add constraint notifications_kind_check
   check (kind in ('join_request', 'member_added', 'member_assigned', 'member_left',
-                  'member_removed', 'request_accepted', 'request_declined', 'team_complete'));
+                  'member_removed', 'project_removed', 'request_accepted', 'request_declined',
+                  'team_complete'));
 
 -- --- next_steps ----------------------------------------------------------
 -- Title rules match an announcement title (29_announcements.sql): 1-120

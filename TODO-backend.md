@@ -587,7 +587,7 @@ time), readable only by admins and shown on `/admin` via `admin_recent_actions()
 request that was already pending at the deadline is still allowed; the issue didn't ask for that to
 lock.
 
-**Next steps (#30).** `31_next_steps.sql` adds `public.next_steps` (title, optional `due_at`),
+**Next steps (#30).** `34_next_steps.sql` adds `public.next_steps` (title, optional `due_at`),
 readable by signed-in users and written only through the admin RPCs `save_next_step()` and
 `delete_next_step()`; it's seeded with four starting items. `public.team_next_steps` holds one row
 per item a team has done (`completed_by`, `completed_at`), readable only by that team's members and

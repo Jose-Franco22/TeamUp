@@ -340,7 +340,7 @@ export const announcements = [];
 export const announcementsSeenAt = {};
 
 // --- NEXT STEPS ----------------------------------------------------------
-// See supabase/31_next_steps.sql. nextSteps: id, title, due_at (null for no
+// See supabase/34_next_steps.sql. nextSteps: id, title, due_at (null for no
 // due date), created_at — the admin-managed list, seeded the same way.
 // teamNextSteps: team_id, next_step_id, completed_by, completed_at — one row
 // per item a team has checked off.

@@ -111,7 +111,7 @@ test('isOverdue: past due and not done', () => {
   expect(isOverdue({ due_at: null, completed_at: null }, now)).toBe(false);
 });
 
-// The mock stands in for the trigger in 31_next_steps.sql.
+// The mock stands in for the trigger in 34_next_steps.sql.
 test('when the last seat fills, every member gets a "team complete" notification', async () => {
   const snapshot = {
     projects: projects.map((p) => ({ ...p })),

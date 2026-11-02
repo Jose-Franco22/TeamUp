@@ -351,7 +351,7 @@ export function validateAnnouncement({ title, body }) {
 // --- Next steps (issue #30) -------------------------------------------------
 // The checklist a team sees once it's full. Mirrored by
 // next_steps_title_text, next_steps_due_at_range and the raises in
-// save_next_step() (supabase/31_next_steps.sql). The title follows the
+// save_next_step() (supabase/34_next_steps.sql). The title follows the
 // announcement-title rules; the due date is optional.
 export const NEXT_STEP_TITLE_MAX = 120;
 

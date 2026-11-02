@@ -166,7 +166,7 @@ control or invisible characters. Anything typed is shown as plain text.
 
 ## Next steps for complete teams (#30)
 
-Apply `supabase/31_next_steps.sql` after `30`. When a team's last seat fills, every member gets a
+Apply `supabase/34_next_steps.sql` after `32`. When a team's last seat fills, every member gets a
 "team complete" notification, and the team page shows a **Next steps** checklist. Admins keep the
 list on the **Milestones** tab (`/admin/milestones`) — it starts with confirm your roster, create
 the repo and add your adviser, schedule the first adviser meeting, and submit the proposal — and
