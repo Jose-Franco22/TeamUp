@@ -38,6 +38,8 @@ comment on column public.notifications.project_title is
 -- --- the new kind ---------------------------------------------------------
 -- Rewritten in full rather than added to, which is how every migration since
 -- 21_ has done it: the constraint is the list, so the list has to be stated.
+-- 'team_complete' is #30's (34_next_steps.sql); it's listed here too so
+-- whichever of the two runs last doesn't drop the other's kind.
 
 alter table public.notifications
   drop constraint if exists notifications_kind_check;
@@ -46,7 +48,7 @@ alter table public.notifications
   add constraint notifications_kind_check
   check (kind in ('join_request', 'member_added', 'member_assigned', 'member_left',
                   'member_removed', 'project_removed', 'request_accepted',
-                  'request_declined'));
+                  'request_declined', 'team_complete'));
 
 -- --- delete_team ----------------------------------------------------------
 -- Identical to 04_roles_and_team_deletion.sql except for the block marked

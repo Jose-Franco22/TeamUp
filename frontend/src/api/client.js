@@ -1794,9 +1794,9 @@ export function subscribeToNotifications(onNew) {
   };
 }
 
-const NOTIFICATION_COLUMNS =
-  'id, kind, project_id, project_title, actor_id, by_admin, created_at, read_at, ' +
-  'actor:users!actor_id ( name ), project:projects ( title )';
+// `*` rather than a column list, so project_title (32_notify_on_project_delete.sql)
+// is read once it exists, and the feed still loads on a database without it.
+const NOTIFICATION_COLUMNS = '*, actor:users!actor_id ( name ), project:projects ( title )';
 
 function nameNotification({ actor, project, ...n }) {
   return {
