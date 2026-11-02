@@ -1,5 +1,6 @@
 -- A short note with a join request, and the rest of the reasons a request
--- is refused (issue #32). Run after 24_withdraw_join_request.sql.
+-- is refused (issue #32). Numbered after every migration already applied
+-- (up to 34_); it only depends on 24_withdraw_join_request.sql.
 --
 -- Supersedes create_join_request() from 23_join_request_notifications.sql.
 -- What's new:

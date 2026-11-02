@@ -384,7 +384,7 @@ In the app, `RequestAlerts.jsx` shows each unread one above every page ("Ana ask
 
 ## A note with the request, and the rest of the refusals (#32)
 
-`supabase/25_join_request_message.sql` adds `join_requests.message` (trimmed, null when empty, at
+`supabase/35_join_request_message.sql` adds `join_requests.message` (trimmed, null when empty, at
 most 300 characters by `join_requests_message_length_check`) and replaces `create_join_request()`
 with `create_join_request(p_project_id uuid, p_message text default null)`. The one-argument
 version is dropped first, since both together would make a one-argument call ambiguous. Two more

@@ -1,6 +1,6 @@
 // Why a student can't request to join a project (issue #32). Each
 // sentence is word for word what create_join_request() raises
-// (supabase/25_join_request_message.sql), so Browse can say it before the
+// (supabase/35_join_request_message.sql), so Browse can say it before the
 // student even tries and the server says the same thing if they do.
 // `deadline` is also what the join_requests trigger in 26_milestones.sql
 // raises, so keep the two identical.

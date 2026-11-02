@@ -80,15 +80,12 @@ function requireAdminSessionUserId() {
 }
 
 // The trigger in supabase/26_milestones.sql: once the formation deadline
-// has passed, students can't post projects or send requests.
-function assertBeforeFormationDeadline(what) {
-  const deadline = formationDeadline();
-  if (!deadline || new Date(deadline) > new Date()) return;
-  throw new Error(
-    what === 'project'
-      ? "The team formation deadline has passed, so new projects can't be posted"
-      : JOIN_BLOCKED.deadline
-  );
+// has passed, students can't post projects. Requests check it in
+// createJoinRequest(), alongside the other reasons a request is refused.
+function assertBeforeFormationDeadline() {
+  if (isPastDeadline(formationDeadline())) {
+    throw new Error("The team formation deadline has passed, so new projects can't be posted");
+  }
 }
 
 function mockNotify(n) {
@@ -761,7 +758,7 @@ export async function createProject({
     // A student can only be on one team — same rule as createJoinRequest.
     const onAnyTeam = teamMembers.some((tm) => tm.user_id === id);
     if (onAnyTeam) throw new Error('You are already on a team and cannot create another project');
-    assertBeforeFormationDeadline('project');
+    assertBeforeFormationDeadline();
 
     const projectId = `p-${Date.now()}`;
     const project = {
@@ -1269,7 +1266,7 @@ export async function getPendingRequestCount() {
 
 // `message` is the optional note to the creator (issue #32), up to
 // JOIN_MESSAGE_MAX characters. create_join_request() trims it and checks
-// the length again — see supabase/25_join_request_message.sql.
+// the length again — see supabase/35_join_request_message.sql.
 export async function createJoinRequest(projectId, message = '') {
   const { value: cleanMessage, error: messageError } = validateJoinMessage(message);
   if (messageError) throw new ValidationError({ message: messageError });
@@ -1319,7 +1316,7 @@ export async function createJoinRequest(projectId, message = '') {
   }
   // create_join_request() runs every check, the insert and the creator's
   // notification in one transaction server-side — see
-  // supabase/25_join_request_message.sql.
+  // supabase/35_join_request_message.sql.
   const { data, error } = await supabase.rpc('create_join_request', {
     p_project_id: projectId,
     p_message: cleanMessage || null,
