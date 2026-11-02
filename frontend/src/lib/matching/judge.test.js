@@ -14,6 +14,9 @@
 import { describe, expect, test, vi } from 'vitest';
 import { buildPayload, judgeIsAvailable, judgeUnavailableMessage, requestVerdict } from './judge';
 
+// Stands in for the signed-in user's session.
+const TOKEN = async () => 'user-session-token';
+
 const ENV = {
   VITE_SUPABASE_URL: 'https://example.supabase.co',
   VITE_SUPABASE_ANON_KEY: 'anon-key-for-tests',
@@ -147,7 +150,7 @@ describe('judgeIsAvailable', () => {
 describe('a verdict comes back', () => {
   test('is returned, and the call went to our own function, not to Google', async () => {
     const fetchImpl = vi.fn(async () => ok({ points: 72, band: 'strong', verdict: 'Good fit for the React role.' }));
-    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl });
+    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl, getAccessToken: TOKEN });
 
     expect(result).toEqual({
       ok: true,
@@ -158,14 +161,26 @@ describe('a verdict comes back', () => {
     expect(url).toBe('https://example.supabase.co/functions/v1/fit-review');
     expect(url).not.toContain('googleapis.com');
     expect(options.method).toBe('POST');
-    // The key that matters never leaves the server; only the public anon key
-    // is used here, and it authorises nothing this function reads.
+    // The key that matters never leaves the server.
     expect(JSON.stringify(options)).not.toMatch(/AIza/);
+    // The function is called as the signed-in user, not with the anon key,
+    // so it can refuse anyone who isn't signed in.
+    expect(options.headers.Authorization).toBe('Bearer user-session-token');
+  });
+
+  test('is not asked for at all without a signed-in session', async () => {
+    const fetchImpl = vi.fn();
+    const result = await requestVerdict(
+      { project: PROJECT, student: STUDENT, fit: FIT },
+      { env: ENV, fetchImpl, getAccessToken: async () => null }
+    );
+    expect(result).toMatchObject({ ok: false, reason: 'signed_out' });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   test('a verdict with no sentence still scores', async () => {
     const fetchImpl = vi.fn(async () => ok({ points: 30, band: 'long-shot' }));
-    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl });
+    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl, getAccessToken: TOKEN });
     expect(result.ok).toBe(true);
     expect(result.verdict).toEqual({ points: 30, band: 'long-shot', verdict: '' });
   });
@@ -173,7 +188,7 @@ describe('a verdict comes back', () => {
   // The whole point of stage two: it is allowed to disagree with stage one.
   test('the model may score far below the jury, and that is passed through', async () => {
     const fetchImpl = vi.fn(async () => ok({ points: 12, band: 'long-shot', verdict: 'Not what they need.' }));
-    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl });
+    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl, getAccessToken: TOKEN });
     expect(result.verdict.points).toBe(12);
     expect(FIT.points).toBe(86);
   });
@@ -184,7 +199,7 @@ describe('a verdict comes back', () => {
 describe('when the review cannot be had', () => {
   test('no Supabase config: it never calls out at all', async () => {
     const fetchImpl = vi.fn();
-    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: {}, fetchImpl });
+    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: {}, fetchImpl, getAccessToken: TOKEN });
     expect(result).toMatchObject({ ok: false, reason: 'not_configured' });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -198,7 +213,7 @@ describe('when the review cannot be had', () => {
     ['something else upstream', 500, { error: 'upstream_error' }, 'upstream_error'],
   ])('%s is reported, not thrown', async (_label, status, body, reason) => {
     const fetchImpl = vi.fn(async () => fail(status, body));
-    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl });
+    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl, getAccessToken: TOKEN });
     expect(result.ok).toBe(false);
     expect(result.reason).toBe(reason);
     expect(result.message).toBeTruthy();
@@ -208,7 +223,7 @@ describe('when the review cannot be had', () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
     });
-    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl });
+    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl, getAccessToken: TOKEN });
     expect(result).toMatchObject({ ok: false, reason: 'unreachable' });
   });
 
@@ -218,7 +233,7 @@ describe('when the review cannot be had', () => {
       error.name = 'AbortError';
       throw error;
     });
-    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl });
+    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl, getAccessToken: TOKEN });
     expect(result).toMatchObject({ ok: false, reason: 'timeout' });
   });
 
@@ -229,7 +244,7 @@ describe('when the review cannot be had', () => {
     ['nothing at all', null],
   ])('a 200 with %s is refused rather than shown', async (_label, body) => {
     const fetchImpl = vi.fn(async () => ok(body));
-    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl });
+    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl, getAccessToken: TOKEN });
     expect(result).toMatchObject({ ok: false, reason: 'unusable_reply' });
   });
 
@@ -240,7 +255,7 @@ describe('when the review cannot be had', () => {
         throw new SyntaxError('Unexpected token <');
       },
     }));
-    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl });
+    const result = await requestVerdict({ project: PROJECT, student: STUDENT, fit: FIT }, { env: ENV, fetchImpl, getAccessToken: TOKEN });
     expect(result).toMatchObject({ ok: false, reason: 'unusable_reply' });
   });
 

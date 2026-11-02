@@ -2,7 +2,7 @@
 // Run with `node --test supabase/functions/`.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { BANDS, RESPONSE_SCHEMA, buildPrompt, parseVerdict } from './prompt.js';
+import { BANDS, LIMITS, RESPONSE_SCHEMA, buildPrompt, checkPayload, parseVerdict } from './prompt.js';
 
 const payload = {
   project: {
@@ -139,5 +139,30 @@ describe('parseVerdict', () => {
     ]) {
       assert.equal(parseVerdict(bad), null, `accepted ${JSON.stringify(bad)}`);
     }
+  });
+});
+
+describe('checkPayload', () => {
+  test('accepts what the app sends', () => {
+    assert.equal(checkPayload(payload), null);
+  });
+
+  test('needs a project, a student and the jury', () => {
+    assert.ok(checkPayload(null));
+    assert.ok(checkPayload({ project: payload.project, student: payload.student }));
+  });
+
+  test('refuses text past what the app itself allows', () => {
+    const long = (n) => 'x'.repeat(n + 1);
+    assert.ok(checkPayload({ ...payload, project: { ...payload.project, title: long(LIMITS.title) } }));
+    assert.ok(checkPayload({ ...payload, project: { ...payload.project, description: long(LIMITS.description) } }));
+    assert.ok(checkPayload({ ...payload, jury: { ...payload.jury, reasons: [long(LIMITS.text)] } }));
+  });
+
+  test('refuses more roles, skills or reasons than a real request has', () => {
+    const many = (n, item) => Array.from({ length: n + 1 }, () => item);
+    assert.ok(checkPayload({ ...payload, project: { ...payload.project, roles_needed: many(LIMITS.roles, payload.project.roles_needed[0]) } }));
+    assert.ok(checkPayload({ ...payload, student: { ...payload.student, skills: many(LIMITS.skills, payload.student.skills[0]) } }));
+    assert.ok(checkPayload({ ...payload, jury: { ...payload.jury, reasons: many(LIMITS.reasons, 'ok') } }));
   });
 });

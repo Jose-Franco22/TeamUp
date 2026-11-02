@@ -21,7 +21,8 @@
 //
 // Until it is deployed the app falls back to the jury's score, so nothing
 // breaks by not having it.
-import { buildPrompt, parseVerdict, RESPONSE_SCHEMA } from './prompt.js';
+import { createClient } from 'npm:@supabase/supabase-js@2';
+import { buildPrompt, checkPayload, LIMITS, parseVerdict, RESPONSE_SCHEMA } from './prompt.js';
 
 // Measured against the real prompt on 2026-10-14, three representative
 // students, same key:
@@ -54,9 +55,17 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
-  // Supabase verifies the caller's JWT before this runs, so reaching here
-  // means a signed-in user. Nothing here is per-user anyway: the payload is
-  // already anonymous and no row is read or written.
+  // Supabase's JWT check also passes the public anon key, so it doesn't mean
+  // a signed-in user. Ask Auth who the token belongs to, and refuse anyone
+  // who isn't someone — otherwise this is an open proxy to the Gemini quota.
+  const authorization = req.headers.get('Authorization') ?? '';
+  const auth = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    global: { headers: { Authorization: authorization } },
+    auth: { persistSession: false },
+  });
+  const { data, error: authError } = await auth.auth.getUser();
+  if (authError || !data?.user) return json({ error: 'signed_out' }, 401);
+
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) {
     // A deliberate, readable answer rather than a 500. The app treats it the
@@ -65,9 +74,21 @@ Deno.serve(async (req) => {
     return json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set' }, 503);
   }
 
-  const payload = await req.json().catch(() => null);
-  if (!payload?.project || !payload?.student || !payload?.jury) {
-    return json({ error: 'bad_request', message: 'project, student and jury are required' }, 400);
+  // Read as text first so an oversized body is refused before it's parsed.
+  const raw = await req.text().catch(() => '');
+  const tooLarge = new TextEncoder().encode(raw).length > LIMITS.bodyBytes;
+  let payload = null;
+  if (!tooLarge) {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      // checkPayload() refuses the null.
+    }
+  }
+  const problem = tooLarge ? 'body too large' : checkPayload(payload);
+  if (problem) {
+    console.error('fit-review: bad request:', problem);
+    return json({ error: 'bad_request' }, 400);
   }
 
   const model = Deno.env.get('GEMINI_MODEL') || DEFAULT_MODEL;
@@ -75,9 +96,11 @@ Deno.serve(async (req) => {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${ENDPOINT}/${model}:generateContent?key=${apiKey}`, {
+    // The key goes in a header, not the URL: fetch errors quote the URL they
+    // were requesting, and those must never be able to carry it.
+    const response = await fetch(`${ENDPOINT}/${model}:generateContent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       signal: controller.signal,
       body: JSON.stringify({
         contents: [{ parts: [{ text: buildPrompt(payload) }] }],
@@ -101,7 +124,8 @@ Deno.serve(async (req) => {
       // 429 is the free tier's rate limit and is the one worth naming, so the
       // caller can say "try again in a minute" rather than "something failed".
       const error = response.status === 429 ? 'rate_limited' : 'upstream_error';
-      return json({ error, status: response.status, message: detail.slice(0, 200) }, 502);
+      console.error(`fit-review: Gemini answered ${response.status}:`, detail.slice(0, 500));
+      return json({ error }, 502);
     }
 
     const body = await response.json();
@@ -113,11 +137,10 @@ Deno.serve(async (req) => {
 
     return json(verdict);
   } catch (error) {
+    // Only the code goes back to the caller; the details stay in the log.
     const aborted = error instanceof DOMException && error.name === 'AbortError';
-    return json(
-      { error: aborted ? 'timeout' : 'unreachable', message: String((error as Error)?.message ?? error) },
-      502,
-    );
+    console.error('fit-review:', aborted ? 'timed out' : error);
+    return json({ error: aborted ? 'timeout' : 'unreachable' }, 502);
   } finally {
     clearTimeout(timer);
   }

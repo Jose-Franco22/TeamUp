@@ -17,6 +17,8 @@
 //      limited, offline, slow, nonsense reply — the student still sees the
 //      deterministic score. The button is an addition, never a dependency.
 
+import { supabase } from '../supabaseClient';
+
 const FUNCTION_PATH = '/functions/v1/fit-review';
 
 // Longer than the function's own 20s budget, so its considered answer — a
@@ -37,6 +39,7 @@ const MESSAGES = {
   empty_reply: 'The AI review came back empty, so this is the point score.',
   upstream_error: 'The AI review is unavailable, so this is the point score.',
   bad_request: 'The AI review couldn’t read this project, so this is the point score.',
+  signed_out: 'Sign in again to get the AI review; this is the point score.',
 };
 
 export const judgeUnavailableMessage = (reason) => MESSAGES[reason] ?? MESSAGES.upstream_error;
@@ -94,10 +97,22 @@ export function buildPayload({ project, student, fit }) {
  *   { ok: true,  verdict: { points, band, verdict } }
  *   { ok: false, reason, message }
  */
-export async function requestVerdict({ project, student, fit }, { env = import.meta.env, fetchImpl } = {}) {
+// The signed-in user's access token. fit-review checks it with Auth, so the
+// public anon key alone isn't enough to spend the Gemini quota.
+async function sessionToken() {
+  const { data } = (await supabase?.auth.getSession()) ?? {};
+  return data?.session?.access_token ?? null;
+}
+
+export async function requestVerdict(
+  { project, student, fit },
+  { env = import.meta.env, fetchImpl, getAccessToken = sessionToken } = {}
+) {
   if (!judgeIsAvailable(env)) {
     return { ok: false, reason: 'not_configured', message: MESSAGES.not_configured };
   }
+  const token = await getAccessToken().catch(() => null);
+  if (!token) return { ok: false, reason: 'signed_out', message: MESSAGES.signed_out };
 
   const doFetch = fetchImpl ?? globalThis.fetch;
   const controller = new AbortController();
@@ -109,9 +124,9 @@ export async function requestVerdict({ project, student, fit }, { env = import.m
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
-        // The anon key is public by design; RLS is the real boundary, and
-        // this function reads no rows at all.
-        Authorization: `Bearer ${env.VITE_SUPABASE_ANON_KEY}`,
+        // The user's own token, which fit-review checks; the anon key only
+        // gets the request through Supabase's gateway.
+        Authorization: `Bearer ${token}`,
         apikey: env.VITE_SUPABASE_ANON_KEY,
       },
       body: JSON.stringify(buildPayload({ project, student, fit })),

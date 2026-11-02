@@ -120,7 +120,7 @@ export default function Team() {
       <>
         {removedSection}
         <Empty title="You are not on a team yet.">
-          <p>Join a project from Browse and your roster shows up here.</p>
+          <p>Once a project accepts your request, your roster shows up here.</p>
           {removedNotices.length > 0 && (
             <p>
               <Link to="/browse">Browse projects</Link>

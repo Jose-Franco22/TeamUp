@@ -104,6 +104,47 @@ export function buildPrompt({ project, student, jury }) {
   ].join('\n');
 }
 
+// How much a caller may send. Every field here reaches Gemini, so the limits
+// keep one request from spending the quota on a wall of text. They sit at or
+// above what the app itself allows: a project title is 100 characters and a
+// description 2000 (frontend/src/lib/validation.js).
+export const LIMITS = {
+  bodyBytes: 32 * 1024,
+  title: 100,
+  description: 2000,
+  text: 200,
+  roles: 20,
+  skills: 50,
+  reasons: 20,
+};
+
+const tooLong = (value, max) => value != null && String(value).length > max;
+
+/**
+ * Check a request body before any of it goes into a prompt.
+ *
+ * Returns null when it's usable, or a short reason for the log. The caller
+ * answers 400 either way, without echoing the reason back.
+ */
+export function checkPayload(payload) {
+  if (!payload?.project || !payload?.student || !payload?.jury) return 'project, student and jury are required';
+  const { project, student, jury } = payload;
+  const roles = project.roles_needed ?? [];
+  const skills = student.skills ?? [];
+  const reasons = jury.reasons ?? [];
+  if (!Array.isArray(roles) || !Array.isArray(skills) || !Array.isArray(reasons)) return 'lists must be arrays';
+  if (tooLong(project.title, LIMITS.title)) return 'title too long';
+  if (tooLong(project.description, LIMITS.description)) return 'description too long';
+  if (roles.length > LIMITS.roles) return 'too many roles';
+  if (skills.length > LIMITS.skills) return 'too many skills';
+  if (reasons.length > LIMITS.reasons) return 'too many reasons';
+  if (roles.some((r) => tooLong(r?.role_name, LIMITS.text) || tooLong(r?.skill_name, LIMITS.text))) return 'role text too long';
+  if (skills.some((s) => tooLong(s?.name, LIMITS.text))) return 'skill name too long';
+  if (reasons.some((r) => tooLong(r, LIMITS.text))) return 'reason too long';
+  if (Object.keys(jury.parts ?? {}).length > LIMITS.reasons) return 'too many parts';
+  return null;
+}
+
 /**
  * Check a reply before the app trusts it.
  *

@@ -1646,9 +1646,8 @@ export async function removeMember(userId) {
   if (error) throw error;
 }
 
-// The project's creator changes a teammate's (or their own) role.
-// Gives back the old role's seat and takes one of the new role's — see
-// supabase/31_set_member_role.sql.
+// The project's creator changes a teammate's (or their own) role. The number
+// of open seats never changes — see supabase/31_set_member_role.sql.
 export async function setMemberRole(userId, roleId) {
   if (USE_MOCKS) {
     await delay();
@@ -1663,10 +1662,14 @@ export async function setMemberRole(userId, roleId) {
 
     const need = (rid) =>
       projectRolesNeeded.find((n) => n.project_id === project.id && n.role_id === rid);
+    // Seat-neutral, like set_member_role(): swap the counts only when the old
+    // role is listed and the new one has a seat open, otherwise touch neither.
     const old = membership.role_id && need(membership.role_id);
-    if (old) old.quantity_needed += 1;
     const next = need(roleId);
-    if (next && next.quantity_needed > 0) next.quantity_needed -= 1;
+    if (old && next && next.quantity_needed > 0) {
+      old.quantity_needed += 1;
+      next.quantity_needed -= 1;
+    }
     membership.role_id = roleId;
     return membership;
   }
