@@ -17,6 +17,7 @@ export function NextStepManager() {
   const [saving, setSaving] = useState(false);
   const [moving, setMoving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState(null);
 
   async function load() {
@@ -92,15 +93,22 @@ export function NextStepManager() {
     }
   }
 
+  // `deleting` keeps a second click from deleting the same step again while
+  // the first is still on its way.
   async function handleDelete(s) {
-    setConfirmingDelete(null);
+    if (deleting) return;
+    setDeleting(true);
     try {
       await deleteNextStep(s.id);
+      setConfirmingDelete(null);
       if (form.id === s.id) setForm(BLANK);
       await load();
       setMessage(`Deleted “${s.title}”.`);
     } catch (err) {
+      setConfirmingDelete(null);
       setServerError(err.message);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -126,7 +134,7 @@ export function NextStepManager() {
                 <span className="acts">
                   {confirmingDelete === s.id ? (
                     <>
-                      <button type="button" className="btn danger" onClick={() => handleDelete(s)}>
+                      <button type="button" className="btn danger" onClick={() => handleDelete(s)} disabled={deleting}>
                         Delete “{s.title}”
                       </button>
                       <button type="button" className="btn quiet" onClick={() => setConfirmingDelete(null)}>
