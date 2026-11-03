@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { deleteNextStep, getNextSteps, reorderNextSteps, saveNextStep } from '../api/client';
 import { NEXT_STEP_TITLE_MAX, ValidationError, charCount, validateNextStep } from '../lib/validation';
 import { formatDue, toLocalInput } from './Milestones';
@@ -20,14 +20,32 @@ export function NextStepManager() {
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState(null);
 
-  async function load() {
+  // Every write to `list` takes a ticket, and a reply is dropped once a newer
+  // one has landed. Without this, a reorder reply computed before an insert
+  // can come back after the insert's refresh and put the pre-insert list
+  // back, so the new step disappears until the page is reloaded.
+  const writeSeq = useRef(0);
+
+  // `afterWrite` marks a refresh that follows a write which already
+  // succeeded. Those must not take the list away: the card would swap it for
+  // an error while the message underneath still reported success. The caller
+  // gets false and says the list is stale instead.
+  async function load({ afterWrite = false } = {}) {
+    const ticket = ++writeSeq.current;
     try {
-      setList(await getNextSteps());
+      const rows = await getNextSteps();
+      if (ticket !== writeSeq.current) return true;
+      setList(rows);
       setLoadError(null);
+      return true;
     } catch (err) {
+      if (afterWrite) return false;
       setLoadError(err);
+      return false;
     }
   }
+
+  const STALE = 'The list below couldn’t be refreshed — reload to see the change.';
 
   useEffect(() => {
     load();
@@ -64,8 +82,9 @@ export function NextStepManager() {
       const saved = await saveNextStep(form);
       setForm(BLANK);
       setShowErrors(false);
-      await load();
+      const fresh = await load({ afterWrite: true });
       setMessage(form.id ? `Saved “${saved.title}”.` : `Added “${saved.title}”.`);
+      if (!fresh) setServerError(STALE);
     } catch (err) {
       setServerError(err instanceof ValidationError ? Object.values(err.fieldErrors)[0] : err.message);
     } finally {
@@ -79,12 +98,15 @@ export function NextStepManager() {
     const next = list.slice();
     const [step] = next.splice(index, 1);
     next.splice(index + by, 0, step);
+    const ticket = ++writeSeq.current;
     setList(next);
     setMoving(true);
     setServerError(null);
     setMessage(null);
     try {
-      setList(await reorderNextSteps(next.map((s) => s.id)));
+      const rows = await reorderNextSteps(next.map((s) => s.id));
+      // Dropped if an add, edit or delete has refreshed the list since.
+      if (ticket === writeSeq.current) setList(rows);
     } catch (err) {
       setServerError(err.message);
       await load();
@@ -93,21 +115,31 @@ export function NextStepManager() {
     }
   }
 
-  // `deleting` keeps a second click from deleting the same step again while
-  // the first is still on its way.
+  // Keeps a second click from deleting the same step again while the first is
+  // still on its way. A ref rather than `deleting` alone: two clicks in the
+  // same tick both read the same render's state, so the state flag lets the
+  // second one through. `deleting` still drives the disabled button.
+  const deletingRef = useRef(false);
+
   async function handleDelete(s) {
-    if (deleting) return;
+    if (deletingRef.current) return;
+    deletingRef.current = true;
     setDeleting(true);
     try {
       await deleteNextStep(s.id);
       setConfirmingDelete(null);
-      if (form.id === s.id) setForm(BLANK);
-      await load();
+      // cancelEdit() rather than setForm(BLANK): it clears showErrors and
+      // serverError too, so a validation error from the step being edited
+      // can't carry over onto the blank Add form.
+      if (form.id === s.id) cancelEdit();
+      const fresh = await load({ afterWrite: true });
       setMessage(`Deleted “${s.title}”.`);
+      if (!fresh) setServerError(STALE);
     } catch (err) {
       setConfirmingDelete(null);
       setServerError(err.message);
     } finally {
+      deletingRef.current = false;
       setDeleting(false);
     }
   }

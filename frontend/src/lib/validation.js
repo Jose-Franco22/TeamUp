@@ -314,6 +314,12 @@ export function validateMilestone({ name, due_at, message }) {
 // Mirrored by the next_steps CHECK constraints and the raises in
 // save_next_step() (supabase/33_next_steps.sql). The text follows the
 // milestone name rules; the due date is optional.
+//
+// "Mirrored" is about the rules, not the wording: what each side rejects has
+// to agree, but the messages don't. These are what an admin reads while
+// typing, so they say what to do ("Write what teams need to do"); the server
+// states the rule it enforces ("A next step needs some text") for the cases
+// the form can't reach. Announcements and milestones read the same way.
 export const NEXT_STEP_TITLE_MAX = 120;
 
 export function validateNextStep({ title, due_at }) {

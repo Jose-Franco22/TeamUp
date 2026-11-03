@@ -2,7 +2,7 @@
 // relativeDue() (the Announcements schedule, #38) moved here from
 // Announcements.jsx so the two date formatters sit side by side.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { formatCountdown, isDueSoon, nextDeadline, relativeDue } from './deadlines';
+import { formatCountdown, isDueSoon, relativeDue } from './deadlines';
 
 const NOW = new Date('2026-10-21T12:00:00Z');
 const later = (ms) => new Date(NOW.getTime() + ms).toISOString();
@@ -35,27 +35,6 @@ describe('formatCountdown()', () => {
     expect(formatCountdown(later(0))).toBe('Closed');
     expect(formatCountdown(later(-1))).toBe('Closed');
     expect(formatCountdown('2020-01-01T00:00:00Z')).toBe('Closed');
-  });
-});
-
-describe('nextDeadline()', () => {
-  const past = { id: 'past', due_at: later(-DAY) };
-  const soon = { id: 'soon', due_at: later(2 * HOUR) };
-  const far = { id: 'far', due_at: later(10 * DAY) };
-
-  test('picks the soonest future milestone, whatever order the list is in', () => {
-    expect(nextDeadline([far, soon])).toBe(soon);
-    expect(nextDeadline([soon, far])).toBe(soon);
-  });
-
-  test('ignores milestones that have already passed', () => {
-    expect(nextDeadline([past, far])).toBe(far);
-    expect(nextDeadline([past])).toBeNull();
-  });
-
-  test('nothing scheduled means no next deadline', () => {
-    expect(nextDeadline([])).toBeNull();
-    expect(nextDeadline(null)).toBeNull();
   });
 });
 

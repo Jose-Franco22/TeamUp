@@ -485,7 +485,10 @@ export async function saveNextStep({ id = null, title, due_at = null }) {
     p_due_at: values.due_at,
   });
   if (error) throw error;
-  return data;
+  // The function returns the whole row, including created_at / updated_at.
+  // Narrowed to the same shape the mock returns so callers can't come to
+  // depend on a field that only exists on one of the two paths.
+  return nextStepRow(data);
 }
 
 export async function deleteNextStep(id) {
@@ -523,7 +526,7 @@ export async function reorderNextSteps(ids) {
   }
   const { data, error } = await supabase.rpc('reorder_next_steps', { p_ids: ids });
   if (error) throw error;
-  return data;
+  return data.map(nextStepRow);
 }
 
 // --- Announcements --------------------------------------------------------

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { deleteMilestone, getMilestones, saveMilestone } from '../api/client';
 import { MILESTONE_MESSAGE_MAX, ValidationError, charCount, validateMilestone } from '../lib/validation';
-import { formatCountdown, isDueSoon, nextDeadline } from '../lib/deadlines';
+import { formatCountdown, isDueSoon } from '../lib/deadlines';
 
 // The class schedule (issue #38). Admins keep it on the dashboard; students
 // see what's coming up in a banner on every page.
@@ -51,10 +51,14 @@ export function MilestoneBanner({ limit = 3 }) {
 
   if (!list || list.length === 0) return null;
 
-  const upcoming = list.filter((m) => new Date(m.due_at) > now).slice(0, limit);
+  // One rule for both: getMilestones() sorts by due_at, so the countdown
+  // always names the same milestone the list shows first. Deriving them
+  // separately let the two disagree if either ever changed.
+  const future = list.filter((m) => new Date(m.due_at) > now);
+  const upcoming = future.slice(0, limit);
   const deadline = list.find((m) => m.is_formation_deadline);
   const locked = deadline && new Date(deadline.due_at) <= now;
-  const next = nextDeadline(list, now);
+  const next = future[0] ?? null;
   if (!next && !locked) return null;
   const soon = next && isDueSoon(next.due_at, now);
 

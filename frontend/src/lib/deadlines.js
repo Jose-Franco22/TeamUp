@@ -22,23 +22,16 @@ const plural = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'}`;
 
 // "4 days", "1 day", "5 hours", "less than an hour", or "Closed". Rounds
 // down, so "1 day" always means at least a full day is left.
+//
+// The banner only ever passes a deadline that is still in the future, so it
+// never shows "Closed" — the locked message covers that case. Kept so the
+// function is total for any caller that does pass a past date.
 export function formatCountdown(iso, now = new Date()) {
   const left = new Date(iso) - now;
   if (left <= 0) return 'Closed';
   if (left < HOUR) return 'less than an hour';
   if (left < DAY) return plural(Math.floor(left / HOUR), 'hour');
   return plural(Math.floor(left / DAY), 'day');
-}
-
-// The soonest milestone that hasn't passed yet, or null. Doesn't rely on the
-// list being sorted.
-export function nextDeadline(milestones, now = new Date()) {
-  let next = null;
-  for (const m of milestones ?? []) {
-    const due = new Date(m.due_at);
-    if (due > now && (!next || due < new Date(next.due_at))) next = m;
-  }
-  return next;
 }
 
 // Still open, and DUE_SOON_MS or less to go.

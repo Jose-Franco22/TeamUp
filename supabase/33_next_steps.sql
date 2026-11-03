@@ -210,8 +210,14 @@ to authenticated;
 
 -- --- Progress on the dashboard -------------------------------------------
 -- { done, total } for one team. done counts only steps that still exist,
--- which the cascade guarantees. Same shape on the dashboard and the team
--- page, like the rest of private.admin_team_json() (19_admin_dashboard.sql).
+-- which the cascade guarantees. Same shape as the rest of
+-- private.admin_team_json() (19_admin_dashboard.sql).
+--
+-- admin_dashboard() calls this once per team, so the `total` count repeats
+-- for every row. Kept per-team on purpose: the whole dashboard is built from
+-- per-team functions, and one query that grouped completions by team_id
+-- would be the only one that isn't. A section has a handful of teams and
+-- next_steps has a handful of rows, so the repeat is a few index scans.
 create or replace function private.admin_team_next_steps(p_team_id uuid)
 returns jsonb language sql stable set search_path = ''
 as $$
@@ -259,6 +265,16 @@ begin
 end;
 $$;
 
+-- Same as 19_admin_dashboard.sql, with the team's progress merged in
+-- (marked NEW), so a team reports the same { done, total } whether it is read
+-- from the dashboard or on its own. No frontend reads this field yet — the
+-- progress column on the dashboard is fed by admin_dashboard() — but
+-- next_steps.test.sql pins the two to the same answer, so the team page can
+-- show progress without a migration.
+--
+-- This replaces the definition in 19_admin_dashboard.sql rather than adding
+-- to it, so a later change there has to be copied here or it is silently
+-- undone. Same hazard as the admin_dashboard() redefinition above.
 create or replace function public.admin_team_details(p_team_id uuid)
 returns jsonb language plpgsql stable security definer set search_path = ''
 as $$
