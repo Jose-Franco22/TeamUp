@@ -164,14 +164,23 @@ shows how many announcements and milestones are new or changed since they last o
 and messages follow the same rules as milestone messages: no blank or punctuation-only text, no
 control or invisible characters. Anything typed is shown as plain text.
 
+The students' deadline banner (#22) also counts down to the next milestone ("Team formation
+closes in 4 days", then hours inside the last day) and turns to a warning style within 48 hours.
+The countdown and date helpers are in `frontend/src/lib/deadlines.js`.
+
+## Next-steps checklist (#42)
+
+Apply `supabase/33_next_steps.sql` after `30`. Admins keep the checklist teams see once they're
+complete on the **Next steps** tab (`/admin/next-steps`): add, edit, reorder and delete steps, each
+with an optional due date. The **All teams** table on `/admin` shows each team's progress
+("2 of 5 done"). Teams check items off on their own page in #30.
+
 ## Next steps for complete teams (#30)
 
-Apply `supabase/34_next_steps.sql` after `32`. When a team's last seat fills, every member gets a
-"team complete" notification, and the team page shows a **Next steps** checklist. Admins keep the
-list on the **Milestones** tab (`/admin/milestones`) — it starts with confirm your roster, create
-the repo and add your adviser, schedule the first adviser meeting, and submit the proposal — and
-can give any item a due date. Any member can check an item off (or undo it); the team sees who did
-each one and when, and overdue items are highlighted.
+Apply `supabase/34_next_steps.sql` after `33`. When a team's last seat fills, every member gets a
+"team complete" notification, and the team page shows the **Next steps** checklist from #42, in the
+order the admin set. Any member can check an item off (or undo it); the team sees who did each one
+and when, overdue items are highlighted, and the progress shows up on `/admin`.
 
 ## Testing
 

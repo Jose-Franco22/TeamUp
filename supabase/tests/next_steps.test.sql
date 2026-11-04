@@ -1,240 +1,259 @@
--- Next steps once a team is complete (issue #30): 34_next_steps.sql.
+-- The next-steps checklist (issue #42): 33_next_steps.sql.
 begin;
-select plan(29);
+select plan(41);
 
-select set_config('tests.admin',    tests.sign_in_with_microsoft('nsadmin@utrgv.edu', 'Admin')::text, true);
-select set_config('tests.owner',    tests.sign_in_with_microsoft('nsowner@utrgv.edu', 'Owner Olivia')::text, true);
-select set_config('tests.m1',       tests.sign_in_with_microsoft('nsmember1@utrgv.edu', 'Member Marco')::text, true);
-select set_config('tests.m2',       tests.sign_in_with_microsoft('nsmember2@utrgv.edu', 'Member Mia')::text, true);
-select set_config('tests.outsider', tests.sign_in_with_microsoft('nsoutsider@utrgv.edu', 'Outsider Omar')::text, true);
-select set_config('tests.placed',   tests.sign_in_with_microsoft('nsplaced@utrgv.edu', 'Placed Pat')::text, true);
+select set_config('tests.admin',   tests.sign_in_with_microsoft('admin01@utrgv.edu', 'Admin')::text, true);
+select set_config('tests.student', tests.sign_in_with_microsoft('student01@utrgv.edu', 'Student')::text, true);
 update public.users set is_admin = true where id = current_setting('tests.admin')::uuid;
-select set_config('tests.role', (select id::text from public.roles where name = 'Backend Developer'), true);
 
--- A three-seat team: the owner, then two accepted requests.
-select tests.authenticate_as(current_setting('tests.owner')::uuid);
-select set_config('tests.project',
-  (public.create_project('Checklist project', 'Three seats, filled one at a time.', 3::smallint,
-     current_setting('tests.role')::uuid, '[]'::jsonb)).id::text, true);
-select tests.authenticate_as(current_setting('tests.m1')::uuid);
-select set_config('tests.r1', (public.create_join_request(current_setting('tests.project')::uuid)).id::text, true);
-select tests.authenticate_as(current_setting('tests.m2')::uuid);
-select set_config('tests.r2', (public.create_join_request(current_setting('tests.project')::uuid)).id::text, true);
-select tests.clear_authentication();
-select set_config('tests.team',
-  (select id::text from public.teams where project_id = current_setting('tests.project')::uuid), true);
+-- 34_next_steps.sql (#30) seeds a starting list. These tests count from an
+-- empty one; the rollback at the end puts the seed back.
+delete from public.next_steps;
 
--- --- When the last seat fills, every member is notified --------------------
-select tests.authenticate_as(current_setting('tests.owner')::uuid);
-select public.respond_to_join_request(current_setting('tests.r1')::uuid, 'accepted', current_setting('tests.role')::uuid);
-select tests.clear_authentication();
-
-select is(
-  (select count(*)::int from public.notifications
-    where kind = 'team_complete' and project_id = current_setting('tests.project')::uuid),
-  0,
-  'no "team complete" notification while a seat is still open');
-
-select tests.authenticate_as(current_setting('tests.owner')::uuid);
-select public.respond_to_join_request(current_setting('tests.r2')::uuid, 'accepted', current_setting('tests.role')::uuid);
-select tests.clear_authentication();
-
-select bag_eq(
-  $$ select user_id from public.notifications
-      where kind = 'team_complete' and project_id = current_setting('tests.project')::uuid $$,
-  $$ values (current_setting('tests.owner')::uuid), (current_setting('tests.m1')::uuid),
-            (current_setting('tests.m2')::uuid) $$,
-  'when the last seat fills, every member gets one "team complete" notification');
-
-select ok(
-  (select bool_and(actor_id = current_setting('tests.owner')::uuid and not by_admin and read_at is null)
-     from public.notifications
-    where kind = 'team_complete' and project_id = current_setting('tests.project')::uuid),
-  'it names the owner who filled the last seat, and starts unread');
-
-select tests.authenticate_as(current_setting('tests.m2')::uuid);
-select is(
-  (select count(*)::int from public.notifications where kind = 'team_complete'),
-  1,
-  'each member reads only their own copy');
-select tests.clear_authentication();
-
-select public.sync_project_fill_state(current_setting('tests.project')::uuid);
-select is(
-  (select count(*)::int from public.notifications
-    where kind = 'team_complete' and project_id = current_setting('tests.project')::uuid),
-  3,
-  'settling a team that is already full doesn''t notify again');
-
--- --- The checklist comes from the admin-managed next_steps table -----------
-select ok(
-  (select count(*) from public.next_steps where title = 'Confirm your roster') = 1
-  and (select count(*) from public.next_steps where title = 'Submit your project proposal') = 1,
-  'the starting list is seeded');
-
-select tests.authenticate_as(current_setting('tests.m1')::uuid);
-select is(
-  (select array_agg(e->>'id' order by e->>'id')
-     from jsonb_array_elements(public.team_checklist(current_setting('tests.team')::uuid)) e),
-  (select array_agg(id::text order by id::text) from public.next_steps),
-  'a member''s checklist is exactly the next_steps list');
-
+-- --- Only admins write the checklist --------------------------------------------
+select tests.authenticate_as(current_setting('tests.student')::uuid);
 select throws_ok(
-  $$ select public.save_next_step(null, 'Sneaky step') $$,
+  $$ select public.save_next_step(null, 'Confirm the roster') $$,
   '42501', 'Admin access required',
-  'a student can''t add a next step');
+  'a student can''t add a step');
 select throws_ok(
-  $$ insert into public.next_steps (title) values ('Sneaky step') $$,
+  $$ insert into public.next_steps (title, sort_order) values ('Sneaky', 1) $$,
   '42501', null,
-  'or write the table directly');
+  'a student can''t write the table directly either');
 select tests.clear_authentication();
+
+-- --- Adding ------------------------------------------------------------------------
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select set_config('tests.roster', (public.save_next_step(null, '  Confirm the roster  ')).id::text, true);
+select set_config('tests.repo',
+  (public.save_next_step(null, 'Create the repo and add the adviser', '2026-11-07 23:59+00')).id::text, true);
+select set_config('tests.meeting', (public.save_next_step(null, 'Schedule the first adviser meeting')).id::text, true);
+select tests.clear_authentication();
+
+select is(
+  (select array_agg(title order by sort_order) from public.next_steps),
+  array['Confirm the roster', 'Create the repo and add the adviser', 'Schedule the first adviser meeting'],
+  'an admin can add steps; each goes at the end, and the text is trimmed');
+select is(
+  (select array_agg(sort_order order by sort_order) from public.next_steps),
+  array[1, 2, 3],
+  'new steps are numbered 1..n');
+select is(
+  (select due_at from public.next_steps where id = current_setting('tests.repo')::uuid),
+  '2026-11-07 23:59+00'::timestamptz,
+  'a step can have a due date');
+select is(
+  (select due_at from public.next_steps where id = current_setting('tests.roster')::uuid),
+  null,
+  'the due date is optional');
+
+-- --- Editing -----------------------------------------------------------------------
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select lives_ok(
+  $$ select public.save_next_step(current_setting('tests.roster')::uuid, 'Confirm the roster with the instructor',
+       '2026-11-01 12:00+00') $$,
+  'an admin can edit a step');
+select tests.clear_authentication();
+
+select is(
+  (select (title, due_at, sort_order)::text from public.next_steps where id = current_setting('tests.roster')::uuid),
+  ('Confirm the roster with the instructor', '2026-11-01 12:00+00'::timestamptz, 1)::text,
+  'the edit is saved and the step keeps its place');
+
+select tests.authenticate_as(current_setting('tests.student')::uuid);
+select throws_ok(
+  $$ select public.save_next_step(current_setting('tests.roster')::uuid, 'Renamed') $$,
+  '42501', 'Admin access required',
+  'a student can''t edit a step');
+-- No UPDATE policy, so RLS filters every row out rather than raising.
+update public.next_steps set title = 'Renamed';
+select tests.clear_authentication();
+select is(
+  (select count(*)::int from public.next_steps where title = 'Renamed'), 0,
+  'and a direct UPDATE changes nothing');
 
 select tests.authenticate_as(current_setting('tests.admin')::uuid);
-select set_config('tests.demo',
-  (public.save_next_step(null, '  Book a demo slot  ', timestamptz '2098-05-01 17:00:00+00')).id::text, true);
+select throws_ok(
+  $$ select public.save_next_step(gen_random_uuid(), 'Nowhere') $$,
+  'P0001', 'Next step not found',
+  'editing a step that doesn''t exist is refused');
+select tests.clear_authentication();
+
+-- --- The text is required, and has to read like a step ----------------------------
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
 select throws_ok(
   $$ select public.save_next_step(null, '   ') $$,
-  'P0001', 'A next step needs a title',
-  'a blank title is refused');
+  'P0001', 'A next step needs some text',
+  'empty text is refused');
 select throws_ok(
-  $$ select public.save_next_step(null, 'Far future', timestamptz '2100-01-01 00:00:00+00') $$,
+  $$ select public.save_next_step(null, null) $$,
+  'P0001', 'A next step needs some text',
+  'so is no text at all');
+select throws_ok(
+  $$ select public.save_next_step(null, '!!! ???') $$,
+  'P0001', 'The step has to include letters or numbers',
+  'punctuation alone is refused');
+select throws_ok(
+  $$ select public.save_next_step(null, E'Two\nlines') $$,
+  'P0001', 'The step can''t contain line breaks, hidden or control characters',
+  'a line break is refused');
+select throws_ok(
+  $$ select public.save_next_step(null, 'Hidden' || chr(8203) || 'text') $$,
+  'P0001', 'The step can''t contain line breaks, hidden or control characters',
+  'a zero-width character is refused');
+select throws_ok(
+  $$ select public.save_next_step(null, repeat('x', 121)) $$,
+  'P0001', 'Keep the step to 120 characters or fewer',
+  'text over 120 characters is refused');
+select throws_ok(
+  $$ select public.save_next_step(null, 'Far future', '2100-01-01 00:00+00') $$,
   'P0001', 'Pick a due date between 2000 and 2099',
-  'a due date out of range is refused');
+  'a due date outside 2000-2099 is refused');
 select tests.clear_authentication();
 
-select tests.authenticate_as(current_setting('tests.m1')::uuid);
-select is(
-  (select e->>'due_at' from jsonb_array_elements(public.team_checklist(current_setting('tests.team')::uuid)) e
-    where e->>'id' = current_setting('tests.demo')),
-  (select to_jsonb(due_at) #>> '{}' from public.next_steps where id = current_setting('tests.demo')::uuid),
-  'an item an admin adds shows on the checklist, with its due date');
-select is(
-  (select e->>'title' from jsonb_array_elements(public.team_checklist(current_setting('tests.team')::uuid)) e
-    where e->>'id' = current_setting('tests.demo')),
-  'Book a demo slot',
-  'and its title trimmed');
-select is(
-  public.team_checklist(current_setting('tests.team')::uuid)->0->>'id',
-  current_setting('tests.demo'),
-  'dated items come before undated ones');
-select tests.clear_authentication();
-
--- --- Any member can check an item off; non-members can't ---------------------
-select tests.authenticate_as(current_setting('tests.m1')::uuid);
-select lives_ok(
-  $$ select public.set_next_step_done(current_setting('tests.team')::uuid, current_setting('tests.demo')::uuid, true) $$,
-  'a member who isn''t the owner can check an item off');
-select tests.clear_authentication();
-
--- --- Completing an item records who did it and when -------------------------
-select is(
-  (select completed_by from public.team_next_steps
-    where team_id = current_setting('tests.team')::uuid and next_step_id = current_setting('tests.demo')::uuid),
-  current_setting('tests.m1')::uuid,
-  'completing an item records who did it');
-select ok(
-  (select completed_at between now() - interval '1 minute' and now() + interval '1 minute'
-     from public.team_next_steps
-    where team_id = current_setting('tests.team')::uuid and next_step_id = current_setting('tests.demo')::uuid),
-  'and when');
-
-select tests.authenticate_as(current_setting('tests.m2')::uuid);
-select is(
-  (select e->>'completed_by_name'
-     from jsonb_array_elements(public.team_checklist(current_setting('tests.team')::uuid)) e
-    where e->>'id' = current_setting('tests.demo')),
-  'Member Marco',
-  'the rest of the team sees who completed it');
-select public.set_next_step_done(current_setting('tests.team')::uuid, current_setting('tests.demo')::uuid, true);
-select is(
-  (select completed_by from public.team_next_steps
-    where team_id = current_setting('tests.team')::uuid and next_step_id = current_setting('tests.demo')::uuid),
-  current_setting('tests.m1')::uuid,
-  'checking off an item that''s already done keeps the first record');
-select tests.clear_authentication();
-
-select tests.authenticate_as(current_setting('tests.outsider')::uuid);
 select throws_ok(
-  $$ select public.set_next_step_done(current_setting('tests.team')::uuid,
-       (select id from public.next_steps where title = 'Confirm your roster'), true) $$,
-  'P0001', 'Only members of this team can check off its next steps',
-  'a student on no team can''t check off another team''s item');
+  $$ insert into public.next_steps (title, sort_order) values ('', 99) $$,
+  '23514', null,
+  'the table itself refuses empty text, however the row is written');
+select is((select count(*)::int from public.next_steps), 3, 'nothing refused was saved');
+
+-- --- Reordering --------------------------------------------------------------------
+select tests.authenticate_as(current_setting('tests.student')::uuid);
 select throws_ok(
-  $$ insert into public.team_next_steps (team_id, next_step_id, completed_by)
-     values (current_setting('tests.team')::uuid,
-             (select id from public.next_steps where title = 'Confirm your roster'),
-             current_setting('tests.outsider')::uuid) $$,
+  format($$ select public.reorder_next_steps(array[%L, %L, %L]::uuid[]) $$,
+    current_setting('tests.meeting'), current_setting('tests.roster'), current_setting('tests.repo')),
+  '42501', 'Admin access required',
+  'a student can''t reorder the steps');
+select tests.clear_authentication();
+
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select is(
+  (select array_agg(title order by sort_order) from public.reorder_next_steps(array[
+     current_setting('tests.meeting'), current_setting('tests.roster'), current_setting('tests.repo')]::uuid[])),
+  array['Schedule the first adviser meeting', 'Confirm the roster with the instructor',
+        'Create the repo and add the adviser'],
+  'an admin can reorder the steps, and gets the new order back');
+select tests.clear_authentication();
+
+select is(
+  (select array_agg(id::text order by sort_order) from public.next_steps),
+  array[current_setting('tests.meeting'), current_setting('tests.roster'), current_setting('tests.repo')],
+  'the new order is saved');
+select is(
+  (select array_agg(sort_order order by sort_order) from public.next_steps),
+  array[1, 2, 3],
+  'and still numbered 1..n');
+
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select throws_ok(
+  format($$ select public.reorder_next_steps(array[%L, %L]::uuid[]) $$,
+    current_setting('tests.roster'), current_setting('tests.repo')),
+  'P0001', 'The list has changed since it was loaded — reload and try again',
+  'a reorder that leaves a step out is refused');
+select throws_ok(
+  format($$ select public.reorder_next_steps(array[%L, %L, %L]::uuid[]) $$,
+    current_setting('tests.roster'), current_setting('tests.roster'), current_setting('tests.repo')),
+  'P0001', 'The list has changed since it was loaded — reload and try again',
+  'one that lists a step twice is refused');
+select throws_ok(
+  format($$ select public.reorder_next_steps(array[%L, %L, gen_random_uuid()]::uuid[]) $$,
+    current_setting('tests.roster'), current_setting('tests.repo')),
+  'P0001', 'The list has changed since it was loaded — reload and try again',
+  'one with an id that isn''t a step is refused');
+select tests.clear_authentication();
+
+select is(
+  (select array_agg(id::text order by sort_order) from public.next_steps),
+  array[current_setting('tests.meeting'), current_setting('tests.roster'), current_setting('tests.repo')],
+  'a refused reorder changes nothing');
+
+-- --- Who can read what -------------------------------------------------------------
+select tests.authenticate_as(current_setting('tests.student')::uuid);
+select is((select count(*)::int from public.next_steps), 3, 'a signed-in student can read the checklist');
+select tests.clear_authentication();
+select set_config('role', 'anon', true);
+select is((select count(*)::int from public.next_steps), 0, 'a guest can''t');
+select tests.clear_authentication();
+
+-- --- Each team's progress on the dashboard -----------------------------------------
+select set_config('tests.ownerA',  tests.sign_in_with_microsoft('owner0a@utrgv.edu', 'Owner A')::text, true);
+select set_config('tests.memberA', tests.sign_in_with_microsoft('member0a@utrgv.edu', 'Member A')::text, true);
+select set_config('tests.ownerB',  tests.sign_in_with_microsoft('owner0b@utrgv.edu', 'Owner B')::text, true);
+select set_config('tests.memberB', tests.sign_in_with_microsoft('member0b@utrgv.edu', 'Member B')::text, true);
+-- Built first and looked up after: inside the WHERE below, create_full_team()
+-- would only run once per existing team row, and there are none yet.
+select set_config('tests.projectA',
+  tests.create_full_team(current_setting('tests.ownerA')::uuid, current_setting('tests.memberA')::uuid)::text, true);
+select set_config('tests.projectB',
+  tests.create_full_team(current_setting('tests.ownerB')::uuid, current_setting('tests.memberB')::uuid)::text, true);
+select set_config('tests.teamA',
+  (select id::text from public.teams where project_id = current_setting('tests.projectA')::uuid), true);
+select set_config('tests.teamB',
+  (select id::text from public.teams where project_id = current_setting('tests.projectB')::uuid), true);
+
+-- Checking items off is #30's function; the rows it will write are put in
+-- directly here.
+insert into public.next_step_completions (team_id, step_id, completed_by)
+values (current_setting('tests.teamA')::uuid, current_setting('tests.roster')::uuid, current_setting('tests.memberA')::uuid),
+       (current_setting('tests.teamA')::uuid, current_setting('tests.repo')::uuid, current_setting('tests.ownerA')::uuid),
+       (current_setting('tests.teamB')::uuid, current_setting('tests.meeting')::uuid, current_setting('tests.ownerB')::uuid);
+
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select set_config('tests.snapshot', public.admin_dashboard()::text, true);
+select is(
+  (select team->'next_steps' from jsonb_array_elements(current_setting('tests.snapshot')::jsonb->'teams') team
+    where team->>'id' = current_setting('tests.teamA')),
+  '{"done": 2, "total": 3}'::jsonb,
+  'the dashboard shows team A has done 2 of 3 steps');
+select is(
+  (select team->'next_steps' from jsonb_array_elements(current_setting('tests.snapshot')::jsonb->'teams') team
+    where team->>'id' = current_setting('tests.teamB')),
+  '{"done": 1, "total": 3}'::jsonb,
+  'and team B 1 of 3, counted separately');
+select is(
+  public.admin_team_details(current_setting('tests.teamA')::uuid)->'next_steps',
+  '{"done": 2, "total": 3}'::jsonb,
+  'the team page reports the same progress');
+select tests.clear_authentication();
+
+-- Members see their own team's completions; nobody else's.
+select tests.authenticate_as(current_setting('tests.memberA')::uuid);
+select is((select count(*)::int from public.next_step_completions), 2, 'a member sees only their own team''s completions');
+select throws_ok(
+  format($$ insert into public.next_step_completions (team_id, step_id) values (%L, %L) $$,
+    current_setting('tests.teamA'), current_setting('tests.meeting')),
   '42501', null,
-  'or write the table directly');
-select is(
-  (select count(*)::int from public.team_next_steps where team_id = current_setting('tests.team')::uuid),
-  0,
-  'and can''t read the team''s progress');
+  'and can''t write them directly (that''s #30''s function)');
+select tests.clear_authentication();
+select tests.authenticate_as(current_setting('tests.student')::uuid);
+select is((select count(*)::int from public.next_step_completions), 0, 'a student on no team sees none');
+select tests.clear_authentication();
+
+-- --- Deleting ----------------------------------------------------------------------
+select tests.authenticate_as(current_setting('tests.student')::uuid);
 select throws_ok(
-  $$ select public.team_checklist(current_setting('tests.team')::uuid) $$,
-  'P0001', 'Only members of this team can see its checklist',
-  'or its checklist');
+  format($$ select public.delete_next_step(%L) $$, current_setting('tests.roster')),
+  '42501', 'Admin access required',
+  'a student can''t delete a step');
 select tests.clear_authentication();
 
 select tests.authenticate_as(current_setting('tests.admin')::uuid);
-select throws_ok(
-  $$ select public.set_next_step_done(current_setting('tests.team')::uuid, current_setting('tests.demo')::uuid, false) $$,
-  'P0001', 'Only members of this team can check off its next steps',
-  'an admin can''t tick items for a team');
 select lives_ok(
-  $$ select public.team_checklist(current_setting('tests.team')::uuid) $$,
-  'but can see its checklist');
-select tests.clear_authentication();
-
-select tests.authenticate_as(current_setting('tests.owner')::uuid);
-select public.set_next_step_done(current_setting('tests.team')::uuid, current_setting('tests.demo')::uuid, false);
-select tests.clear_authentication();
+  format($$ select public.delete_next_step(%L) $$, current_setting('tests.roster')),
+  'an admin can delete a step');
 select is(
-  (select count(*)::int from public.team_next_steps where team_id = current_setting('tests.team')::uuid),
-  0,
-  'any member can undo a checked item');
-
--- A team still forming has no checklist yet.
-select tests.authenticate_as(current_setting('tests.outsider')::uuid);
-select set_config('tests.open_project',
-  (public.create_project('Still forming', 'One of two seats taken.', 2::smallint,
-     current_setting('tests.role')::uuid, '[]'::jsonb)).id::text, true);
-select tests.clear_authentication();
-select tests.authenticate_as(current_setting('tests.outsider')::uuid);
+  (select array_agg(sort_order order by sort_order) from public.next_steps),
+  array[1, 2],
+  'deleting closes the gap in the order');
+select is(
+  (select team->'next_steps' from jsonb_array_elements(public.admin_dashboard()->'teams') team
+    where team->>'id' = current_setting('tests.teamA')),
+  '{"done": 1, "total": 2}'::jsonb,
+  'a deleted step no longer counts toward a team''s progress');
 select throws_ok(
-  format($$ select public.set_next_step_done(%L::uuid, %L::uuid, true) $$,
-    (select id from public.teams where project_id = current_setting('tests.open_project')::uuid),
-    current_setting('tests.demo')),
-  'P0001', 'The checklist opens once the team is full',
-  'a team that isn''t full can''t check items off yet');
-select tests.clear_authentication();
-
--- --- Every way a team fills notifies -------------------------------------------
-select tests.authenticate_as(current_setting('tests.m2')::uuid);
-select public.leave_team();
-select tests.clear_authentication();
-select tests.authenticate_as(current_setting('tests.admin')::uuid);
-select public.admin_assign_student(current_setting('tests.placed')::uuid, current_setting('tests.team')::uuid,
-  current_setting('tests.role')::uuid);
-select tests.clear_authentication();
-
-select bag_eq(
-  $$ select user_id from public.notifications
-      where kind = 'team_complete' and project_id = current_setting('tests.project')::uuid and by_admin $$,
-  $$ values (current_setting('tests.owner')::uuid), (current_setting('tests.m1')::uuid),
-            (current_setting('tests.placed')::uuid) $$,
-  'an admin filling the last seat notifies the new roster, marked by_admin');
-
--- --- Deleting an item takes it off the checklist -----------------------------
-select tests.authenticate_as(current_setting('tests.admin')::uuid);
-select public.delete_next_step(current_setting('tests.demo')::uuid);
-select tests.clear_authentication();
-select tests.authenticate_as(current_setting('tests.m1')::uuid);
-select ok(
-  not exists (
-    select 1 from jsonb_array_elements(public.team_checklist(current_setting('tests.team')::uuid)) e
-     where e->>'id' = current_setting('tests.demo')),
-  'an item an admin deletes is gone from every checklist');
+  format($$ select public.delete_next_step(%L) $$, current_setting('tests.roster')),
+  'P0001', 'Next step not found',
+  'deleting a step twice is refused');
 select tests.clear_authentication();
 
 select * from finish();

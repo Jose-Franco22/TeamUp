@@ -17,12 +17,12 @@ import {
   skills,
   userSkills,
   milestones,
+  nextSteps,
+  nextStepCompletions,
   formationDeadline,
   adminActions,
   announcements,
   announcementsSeenAt,
-  nextSteps,
-  teamNextSteps,
   notifications,
   buildProject,
   skillsForUser,
@@ -145,6 +145,11 @@ function mockAdminTeam(team) {
         id: r.id, user_id: r.user_id,
         user_name: users.find((u) => u.id === r.user_id).name, created_at: r.created_at,
       })),
+    // private.admin_team_next_steps() in 33_next_steps.sql.
+    next_steps: {
+      done: nextStepCompletions.filter((c) => c.team_id === team.id).length,
+      total: nextSteps.length,
+    },
   };
 }
 
@@ -429,6 +434,101 @@ export async function deleteMilestone(id) {
   if (error) throw error;
 }
 
+// --- Next steps -----------------------------------------------------------
+// The checklist complete teams work through (issue #42; teams check items
+// off in #30). One list for everyone, in sort_order. Admins edit it through
+// the functions in supabase/33_next_steps.sql; there are no write policies.
+
+const nextStepRow = (s) => ({ id: s.id, title: s.title, due_at: s.due_at, sort_order: s.sort_order });
+
+export async function getNextSteps() {
+  if (USE_MOCKS) {
+    await delay();
+    requireSessionUserId();
+    return nextSteps.slice().sort((a, b) => a.sort_order - b.sort_order).map(nextStepRow);
+  }
+  const { data, error } = await supabase
+    .from('next_steps')
+    .select('id, title, due_at, sort_order')
+    .order('sort_order', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+// Adds a step at the end of the list when `id` is missing, edits it in
+// place otherwise. `due_at` is optional.
+export async function saveNextStep({ id = null, title, due_at = null }) {
+  const { values, errors, isValid } = validateNextStep({ title, due_at });
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    if (id) {
+      const row = nextSteps.find((s) => s.id === id);
+      if (!row) throw new Error('Next step not found');
+      Object.assign(row, { title: values.title, due_at: values.due_at });
+      return nextStepRow(row);
+    }
+    const row = {
+      id: `ns-${Date.now()}-${nextSteps.length}`,
+      title: values.title,
+      due_at: values.due_at,
+      sort_order: Math.max(0, ...nextSteps.map((s) => s.sort_order)) + 1,
+    };
+    nextSteps.push(row);
+    return nextStepRow(row);
+  }
+  const { data, error } = await supabase.rpc('save_next_step', {
+    p_id: id,
+    p_title: values.title,
+    p_due_at: values.due_at,
+  });
+  if (error) throw error;
+  // The function returns the whole row, including created_at / updated_at.
+  // Narrowed to the same shape the mock returns so callers can't come to
+  // depend on a field that only exists on one of the two paths.
+  return nextStepRow(data);
+}
+
+export async function deleteNextStep(id) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const index = nextSteps.findIndex((s) => s.id === id);
+    if (index === -1) throw new Error('Next step not found');
+    nextSteps.splice(index, 1);
+    for (let i = nextStepCompletions.length - 1; i >= 0; i -= 1) {
+      if (nextStepCompletions[i].step_id === id) nextStepCompletions.splice(i, 1);
+    }
+    nextSteps
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .forEach((s, i) => { s.sort_order = i + 1; });
+    return;
+  }
+  const { error } = await supabase.rpc('delete_next_step', { p_id: id });
+  if (error) throw error;
+}
+
+// `ids` is every step's id in the new order. The server refuses a list that
+// doesn't match what's stored (a step added or removed meanwhile) rather
+// than guess. Resolves to the list in its new order.
+export async function reorderNextSteps(ids) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const known = new Set(nextSteps.map((s) => s.id));
+    if (ids.length !== known.size || new Set(ids).size !== ids.length || !ids.every((id) => known.has(id))) {
+      throw new Error('The list has changed since it was loaded — reload and try again');
+    }
+    ids.forEach((id, i) => { nextSteps.find((s) => s.id === id).sort_order = i + 1; });
+    return nextSteps.slice().sort((a, b) => a.sort_order - b.sort_order).map(nextStepRow);
+  }
+  const { data, error } = await supabase.rpc('reorder_next_steps', { p_ids: ids });
+  if (error) throw error;
+  return data.map(nextStepRow);
+}
+
 // --- Announcements --------------------------------------------------------
 // Admins and advisers post them; everyone signed in reads them on
 // /announcements beside the milestones. The tab's badge counts what's new
@@ -522,75 +622,10 @@ export async function markAnnouncementsSeen() {
   if (error) throw error;
 }
 
-// --- Next steps (#30) -----------------------------------------------------
-// What a team does once it's full. Admins keep one list for the class
-// (save_next_step()/delete_next_step()); each team checks the items off on
-// its own (set_next_step_done()). See supabase/34_next_steps.sql.
-
-// Due-date order, undated last, then the order they were added — the same
-// order team_checklist() returns.
-function nextStepOrder(a, b) {
-  if (a.due_at && b.due_at && a.due_at !== b.due_at) return new Date(a.due_at) - new Date(b.due_at);
-  if (Boolean(a.due_at) !== Boolean(b.due_at)) return a.due_at ? -1 : 1;
-  return new Date(a.created_at) - new Date(b.created_at);
-}
-
-// The admin's list.
-export async function getNextSteps() {
-  if (USE_MOCKS) {
-    await delay();
-    requireSessionUserId();
-    return nextSteps.slice().sort(nextStepOrder).map((s) => ({ ...s }));
-  }
-  const { data, error } = await supabase
-    .from('next_steps')
-    .select('id, title, due_at, created_at')
-    .order('due_at', { ascending: true, nullsFirst: false })
-    .order('created_at', { ascending: true });
-  if (error) throw error;
-  return data;
-}
-
-// Adds an item when `id` is missing, edits it otherwise. An empty due_at
-// means no due date.
-export async function saveNextStep({ id = null, title, due_at = null }) {
-  const { values, errors, isValid } = validateNextStep({ title, due_at });
-  if (!isValid) throw new ValidationError(errors);
-
-  if (USE_MOCKS) {
-    await delay();
-    requireAdminSessionUserId();
-    const existing = id ? nextSteps.find((s) => s.id === id) : null;
-    if (id && !existing) throw new Error('Next step not found');
-    const row = existing ?? { id: `ns-${Date.now()}-${nextSteps.length}`, created_at: new Date().toISOString() };
-    Object.assign(row, { title: values.title, due_at: values.due_at });
-    if (!existing) nextSteps.push(row);
-    return { ...row };
-  }
-  const { data, error } = await supabase.rpc('save_next_step', {
-    p_id: id,
-    p_title: values.title,
-    p_due_at: values.due_at,
-  });
-  if (error) throw error;
-  return data;
-}
-
-export async function deleteNextStep(id) {
-  if (USE_MOCKS) {
-    await delay();
-    requireAdminSessionUserId();
-    const index = nextSteps.findIndex((s) => s.id === id);
-    if (index === -1) throw new Error('Next step not found');
-    nextSteps.splice(index, 1);
-    for (let i = teamNextSteps.length - 1; i >= 0; i -= 1) {
-      if (teamNextSteps[i].next_step_id === id) teamNextSteps.splice(i, 1);
-    }
-    return;
-  }
-  const { error } = await supabase.rpc('delete_next_step', { p_id: id });
-  if (error) throw error;
-}
+// --- Team checklist (#30) -------------------------------------------------
+// What a team does once it's full: the admin's next-steps list from #42
+// (above), in its sort_order, with each team checking items off on its own
+// (set_next_step_done()). See supabase/34_next_steps.sql.
 
 function mockAssertOnTeam(teamId, viewerId, message) {
   if (!teamMembers.some((tm) => tm.team_id === teamId && tm.user_id === viewerId)) throw new Error(message);
@@ -599,13 +634,14 @@ function mockAssertOnTeam(teamId, viewerId, message) {
 function mockChecklist(teamId) {
   return nextSteps
     .slice()
-    .sort(nextStepOrder)
+    .sort((a, b) => a.sort_order - b.sort_order)
     .map((s) => {
-      const done = teamNextSteps.find((d) => d.team_id === teamId && d.next_step_id === s.id);
+      const done = nextStepCompletions.find((c) => c.team_id === teamId && c.step_id === s.id);
       return {
         id: s.id,
         title: s.title,
         due_at: s.due_at,
+        sort_order: s.sort_order,
         completed_at: done?.completed_at ?? null,
         completed_by: done?.completed_by ?? null,
         completed_by_name: done ? users.find((u) => u.id === done.completed_by)?.name ?? null : null,
@@ -632,7 +668,7 @@ export async function getTeamChecklist(teamId) {
 // Checks an item off (done = true) or undoes it, and returns the updated
 // checklist. Any member of a full team can; checking off an item someone
 // already did keeps their name on it.
-export async function setNextStepDone(teamId, nextStepId, done) {
+export async function setNextStepDone(teamId, stepId, done) {
   if (USE_MOCKS) {
     await delay();
     const id = requireSessionUserId();
@@ -641,23 +677,23 @@ export async function setNextStepDone(teamId, nextStepId, done) {
     if (projects.find((p) => p.id === team.project_id)?.status !== 'full') {
       throw new Error('The checklist opens once the team is full');
     }
-    if (!nextSteps.some((s) => s.id === nextStepId)) throw new Error('Next step not found');
-    const index = teamNextSteps.findIndex((d) => d.team_id === teamId && d.next_step_id === nextStepId);
+    if (!nextSteps.some((s) => s.id === stepId)) throw new Error('Next step not found');
+    const index = nextStepCompletions.findIndex((c) => c.team_id === teamId && c.step_id === stepId);
     if (done && index === -1) {
-      teamNextSteps.push({
+      nextStepCompletions.push({
         team_id: teamId,
-        next_step_id: nextStepId,
+        step_id: stepId,
         completed_by: id,
         completed_at: new Date().toISOString(),
       });
     } else if (!done && index !== -1) {
-      teamNextSteps.splice(index, 1);
+      nextStepCompletions.splice(index, 1);
     }
     return mockChecklist(teamId);
   }
   const { data, error } = await supabase.rpc('set_next_step_done', {
     p_team_id: teamId,
-    p_next_step_id: nextStepId,
+    p_step_id: stepId,
     p_done: Boolean(done),
   });
   if (error) throw error;

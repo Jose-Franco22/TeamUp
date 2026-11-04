@@ -1,8 +1,6 @@
 import { MilestoneManager } from '../components/Milestones';
-import { NextStepManager } from '../components/NextSteps';
 
-// The class schedule (issue #38), on its own admin tab, with the checklist
-// teams get once they're full (issue #30).
+// The class schedule (issue #38), on its own admin tab.
 export default function AdminMilestones() {
   return (
     <>
@@ -13,14 +11,6 @@ export default function AdminMilestones() {
         </div>
       </div>
       <MilestoneManager />
-
-      <div className="head">
-        <div>
-          <h2>Next steps for complete teams</h2>
-          <p>Every team sees this checklist once its roster is full. Any member can check items off.</p>
-        </div>
-      </div>
-      <NextStepManager />
     </>
   );
 }

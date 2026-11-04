@@ -331,6 +331,20 @@ export const notifications = [];
 
 export const adminActions = [];
 
+// --- NEXT STEPS --------------------------------------------------------
+// See supabase/33_next_steps.sql. nextSteps: id, title, due_at (or null),
+// sort_order (1..n, the order teams see), seeded with the same starting
+// list as 34_next_steps.sql. nextStepCompletions: team_id, step_id,
+// completed_by, completed_at — one per step a team has checked off
+// (set_next_step_done(), #30).
+export const nextSteps = [
+  { id: 'ns-roster', title: 'Confirm your roster', due_at: null, sort_order: 1 },
+  { id: 'ns-repo', title: 'Create the repo and add your adviser', due_at: null, sort_order: 2 },
+  { id: 'ns-meeting', title: 'Schedule your first adviser meeting', due_at: null, sort_order: 3 },
+  { id: 'ns-proposal', title: 'Submit your project proposal', due_at: null, sort_order: 4 },
+];
+export const nextStepCompletions = [];
+
 // --- ANNOUNCEMENTS -----------------------------------------------------
 // See supabase/29_announcements.sql. announcements: id, title, body,
 // author_id, created_at, updated_at. announcementsSeenAt stands in for
@@ -338,19 +352,6 @@ export const adminActions = [];
 // /announcements (missing means never, so everything is new).
 export const announcements = [];
 export const announcementsSeenAt = {};
-
-// --- NEXT STEPS ----------------------------------------------------------
-// See supabase/34_next_steps.sql. nextSteps: id, title, due_at (null for no
-// due date), created_at — the admin-managed list, seeded the same way.
-// teamNextSteps: team_id, next_step_id, completed_by, completed_at — one row
-// per item a team has checked off.
-export const nextSteps = [
-  { id: 'ns-roster', title: 'Confirm your roster', due_at: null, created_at: '2026-08-01T00:00:00.001Z' },
-  { id: 'ns-repo', title: 'Create the repo and add your adviser', due_at: null, created_at: '2026-08-01T00:00:00.002Z' },
-  { id: 'ns-meeting', title: 'Schedule your first adviser meeting', due_at: null, created_at: '2026-08-01T00:00:00.003Z' },
-  { id: 'ns-proposal', title: 'Submit your project proposal', due_at: null, created_at: '2026-08-01T00:00:00.004Z' },
-];
-export const teamNextSteps = [];
 
 // --- Composition helpers ----------------------------------------------
 // These stand in for the joins the backend will do. Keeping them here

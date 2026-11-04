@@ -1,172 +1,136 @@
-// Issue #30: the checklist a complete team sees, and the admin's list of
-// steps, against the mock API.
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+// Issue #42: the admin's next-steps checklist, against the mock API.
+import { afterEach, beforeEach, expect, test } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { NextStepManager, TeamChecklist, isOverdue } from './NextSteps';
-import { formatDue } from './Milestones';
-import { adminAssignStudent, setSessionUserId } from '../api/client';
-import { nextSteps, notifications, projects, teamMembers, teamNextSteps, teams } from '../api/mockData';
-
-// t-lab is the fixtures' full team: Omar (owner) and Priya.
-const TEAM = 't-lab';
-const seeded = nextSteps.map((s) => ({ ...s }));
+import { NextStepManager } from './NextSteps';
+import { reorderNextSteps, saveNextStep, setSessionUserId } from '../api/client';
+import { nextStepCompletions, nextSteps } from '../api/mockData';
 
 beforeEach(() => {
-  nextSteps.splice(0, nextSteps.length, ...seeded.map((s) => ({ ...s })));
-  teamNextSteps.length = 0;
-  setSessionUserId('u-priya');
+  nextSteps.length = 0;
+  nextStepCompletions.length = 0;
+  setSessionUserId('u-instructor');
 });
 afterEach(() => setSessionUserId(null));
 
-const item = (title) => screen.getByText(title).closest('li');
+const seed = (...titles) =>
+  titles.forEach((title, i) => nextSteps.push({ id: `ns-${i + 1}`, title, due_at: null, sort_order: i + 1 }));
 
-describe('the team checklist', () => {
-  test('lists every item from the admin-managed list', async () => {
-    render(<TeamChecklist teamId={TEAM} />);
-    await screen.findByText('Confirm your roster');
-    for (const s of seeded) expect(screen.getByText(s.title)).toBeInTheDocument();
-    expect(screen.getByText(/0 of 4 done/)).toBeInTheDocument();
-  });
+const shownOrder = () =>
+  within(screen.getByRole('list', { name: 'Next steps' }))
+    .getAllByRole('listitem')
+    .map((li) => li.querySelector('b').textContent);
 
-  test('checking an item shows the completer’s name, to the whole team', async () => {
-    const user = userEvent.setup();
-    const { unmount } = render(<TeamChecklist teamId={TEAM} />);
-    await screen.findByText('Confirm your roster');
+test('empty item text is rejected, and nothing is saved', async () => {
+  const user = userEvent.setup();
+  render(<NextStepManager />);
+  await screen.findByText(/No next steps yet/);
 
-    await user.click(within(item('Confirm your roster')).getByRole('checkbox'));
+  await user.click(screen.getByRole('button', { name: 'Add step' }));
+  expect(screen.getByText('Write what teams need to do')).toBeInTheDocument();
+  expect(screen.getByLabelText('Step')).toHaveAttribute('aria-invalid', 'true');
 
-    expect(await within(item('Confirm your roster')).findByText(/Done by Priya Vale/)).toBeInTheDocument();
-    expect(within(item('Confirm your roster')).getByRole('checkbox')).toBeChecked();
-    expect(screen.getByText(/1 of 4 done/)).toBeInTheDocument();
-    unmount();
-
-    // The owner, opening the page afterwards, sees who did it.
-    setSessionUserId('u-omar');
-    render(<TeamChecklist teamId={TEAM} />);
-    expect(await screen.findByText(/Done by Priya Vale/)).toBeInTheDocument();
-  });
-
-  test('any member can undo a checked item', async () => {
-    const user = userEvent.setup();
-    teamNextSteps.push({
-      team_id: TEAM, next_step_id: 'ns-repo', completed_by: 'u-priya', completed_at: new Date().toISOString(),
-    });
-    setSessionUserId('u-omar');
-    render(<TeamChecklist teamId={TEAM} />);
-    await screen.findByText(/Done by Priya Vale/);
-
-    await user.click(within(item('Create the repo and add your adviser')).getByRole('checkbox'));
-
-    expect(await screen.findByText(/0 of 4 done/)).toBeInTheDocument();
-    expect(screen.queryByText(/Done by/)).not.toBeInTheDocument();
-  });
-
-  test('items with a due date show it, and overdue items are highlighted', async () => {
-    const past = '2026-01-15T17:00:00.000Z';
-    const future = '2098-05-01T17:00:00.000Z';
-    nextSteps.find((s) => s.id === 'ns-proposal').due_at = past;
-    nextSteps.find((s) => s.id === 'ns-meeting').due_at = future;
-    render(<TeamChecklist teamId={TEAM} />);
-    await screen.findByText('Confirm your roster');
-
-    const proposal = item('Submit your project proposal');
-    expect(within(proposal).getByText(new RegExp(`Due ${formatDue(past)}`))).toBeInTheDocument();
-    expect(proposal).toHaveClass('overdue');
-    expect(within(proposal).getByText('Overdue')).toBeInTheDocument();
-
-    const meeting = item('Schedule your first adviser meeting');
-    expect(within(meeting).getByText(new RegExp(`Due ${formatDue(future)}`))).toBeInTheDocument();
-    expect(meeting).not.toHaveClass('overdue');
-    expect(within(meeting).queryByText('Overdue')).not.toBeInTheDocument();
-
-    // Undated items show no due date.
-    expect(within(item('Confirm your roster')).queryByText(/Due/)).not.toBeInTheDocument();
-  });
-
-  test('an overdue item stops being highlighted once it’s done', async () => {
-    const user = userEvent.setup();
-    nextSteps.find((s) => s.id === 'ns-proposal').due_at = '2026-01-15T17:00:00.000Z';
-    render(<TeamChecklist teamId={TEAM} />);
-    await screen.findByText('Confirm your roster');
-
-    await user.click(within(item('Submit your project proposal')).getByRole('checkbox'));
-
-    await within(item('Submit your project proposal')).findByText(/Done by Priya Vale/);
-    expect(item('Submit your project proposal')).not.toHaveClass('overdue');
-  });
-
-  test('someone not on the team can’t see it', async () => {
-    setSessionUserId('u-adan');
-    render(<TeamChecklist teamId={TEAM} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Only members of this team can see its checklist');
-  });
+  await user.type(screen.getByLabelText('Step'), '    ');
+  await user.click(screen.getByRole('button', { name: 'Add step' }));
+  expect(screen.getByText('Write what teams need to do')).toBeInTheDocument();
+  expect(nextSteps).toHaveLength(0);
 });
 
-test('isOverdue: past due and not done', () => {
-  const now = new Date('2026-06-01T00:00:00Z');
-  expect(isOverdue({ due_at: '2026-05-31T00:00:00Z', completed_at: null }, now)).toBe(true);
-  expect(isOverdue({ due_at: '2026-06-02T00:00:00Z', completed_at: null }, now)).toBe(false);
-  expect(isOverdue({ due_at: '2026-05-31T00:00:00Z', completed_at: '2026-05-30T00:00:00Z' }, now)).toBe(false);
-  expect(isOverdue({ due_at: null, completed_at: null }, now)).toBe(false);
+test('an admin adds steps, with or without a due date, and they show in order', async () => {
+  const user = userEvent.setup();
+  render(<NextStepManager />);
+  await screen.findByText(/No next steps yet/);
+
+  await user.type(screen.getByLabelText('Step'), '  Confirm the roster  ');
+  await user.click(screen.getByRole('button', { name: 'Add step' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('Added “Confirm the roster”.');
+
+  await user.type(screen.getByLabelText('Step'), 'Submit the proposal');
+  await user.type(screen.getByLabelText(/Due/), '2098-11-07T23:59');
+  await user.click(screen.getByRole('button', { name: 'Add step' }));
+  await screen.findByText('Submit the proposal', { selector: 'b' });
+
+  expect(shownOrder()).toEqual(['Confirm the roster', 'Submit the proposal']);
+  const [first, second] = within(screen.getByRole('list', { name: 'Next steps' })).getAllByRole('listitem');
+  expect(first).toHaveTextContent('No due date');
+  expect(second).toHaveTextContent(/Due .*2098/);
+  expect(nextSteps.map((s) => s.sort_order)).toEqual([1, 2]);
 });
 
-// The mock stands in for the trigger in 34_next_steps.sql.
-test('when the last seat fills, every member gets a "team complete" notification', async () => {
-  const snapshot = {
-    projects: projects.map((p) => ({ ...p })),
-    teams: teams.map((t) => ({ ...t })),
-    teamMembers: teamMembers.map((tm) => ({ ...tm })),
-    notifications: notifications.length,
-  };
-  try {
-    // Omar's team has room for one more once its target goes up to 3.
-    const project = projects.find((p) => p.id === 'p-lab');
-    project.team_size_target = 3;
-    project.status = 'open';
-    setSessionUserId('u-instructor');
-    await adminAssignStudent('u-sofia', TEAM, 'r-frontend');
+test('reordering updates the order shown, and the order is saved', async () => {
+  seed('Confirm the roster', 'Create the repo', 'Schedule the first adviser meeting');
+  const user = userEvent.setup();
+  render(<NextStepManager />);
+  await screen.findByRole('list', { name: 'Next steps' });
 
-    const sent = notifications.slice(snapshot.notifications).filter((n) => n.kind === 'team_complete');
-    expect(sent.map((n) => n.user_id).sort()).toEqual(['u-omar', 'u-priya', 'u-sofia']);
-    expect(sent.every((n) => n.project_id === 'p-lab' && n.by_admin)).toBe(true);
-  } finally {
-    projects.splice(0, projects.length, ...snapshot.projects);
-    teams.splice(0, teams.length, ...snapshot.teams);
-    teamMembers.splice(0, teamMembers.length, ...snapshot.teamMembers);
-    notifications.length = snapshot.notifications;
-  }
+  expect(screen.getByRole('button', { name: 'Move Confirm the roster up' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Move Schedule the first adviser meeting down' })).toBeDisabled();
+
+  await user.click(screen.getByRole('button', { name: 'Move Schedule the first adviser meeting up' }));
+  expect(shownOrder()).toEqual(['Confirm the roster', 'Schedule the first adviser meeting', 'Create the repo']);
+
+  // Every move button is disabled while a move is saving.
+  const down = screen.getByRole('button', { name: 'Move Confirm the roster down' });
+  await waitFor(() => expect(down).toBeEnabled());
+  await user.click(down);
+  expect(shownOrder()).toEqual(['Schedule the first adviser meeting', 'Confirm the roster', 'Create the repo']);
+
+  // Once the server answers, the stored order matches what's shown.
+  await expect.poll(() =>
+    nextSteps.slice().sort((a, b) => a.sort_order - b.sort_order).map((s) => s.title)
+  ).toEqual(['Schedule the first adviser meeting', 'Confirm the roster', 'Create the repo']);
 });
 
-describe('the admin’s list', () => {
-  beforeEach(() => setSessionUserId('u-instructor'));
+test('a reorder from a stale list is refused, and the list reloads', async () => {
+  seed('Confirm the roster', 'Create the repo');
+  const user = userEvent.setup();
+  render(<NextStepManager />);
+  await screen.findByRole('list', { name: 'Next steps' });
 
-  test('an added step with a due date shows on a team’s checklist', async () => {
-    const user = userEvent.setup();
-    const { unmount } = render(<NextStepManager />);
-    await screen.findByText('Confirm your roster');
+  // Another admin adds a step after this list loaded.
+  nextSteps.push({ id: 'ns-late', title: 'Submit the proposal', due_at: null, sort_order: 3 });
+  await user.click(screen.getByRole('button', { name: 'Move Create the repo up' }));
 
-    await user.type(screen.getByLabelText('Step'), 'Book a demo slot');
-    await user.type(screen.getByLabelText(/Due/), '2098-05-01T12:00');
-    await user.click(screen.getByRole('button', { name: 'Add step' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('The list has changed since it was loaded');
+  await screen.findByText('Submit the proposal', { selector: 'b' });
+  expect(shownOrder()).toEqual(['Confirm the roster', 'Create the repo', 'Submit the proposal']);
+});
 
-    expect(await screen.findByText('Added “Book a demo slot”.')).toBeInTheDocument();
-    unmount();
+test('editing and deleting a step', async () => {
+  seed('Demo day prep', 'Submit the proposal');
+  nextStepCompletions.push({ team_id: 't-lab', step_id: 'ns-1', completed_by: 'u-adan', completed_at: '2026-10-20T00:00:00Z' });
+  const user = userEvent.setup();
+  render(<NextStepManager />);
 
-    setSessionUserId('u-priya');
-    render(<TeamChecklist teamId={TEAM} />);
-    const added = (await screen.findByText('Book a demo slot')).closest('li');
-    expect(within(added).getByText(/^Due /)).toBeInTheDocument();
-  });
+  await user.click(await screen.findByRole('button', { name: 'Edit Demo day prep' }));
+  const title = screen.getByLabelText('Step');
+  await user.clear(title);
+  await user.type(title, 'Prepare for demo day');
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(await screen.findByText('Saved “Prepare for demo day”.')).toBeInTheDocument();
 
-  test('a step needs a title', async () => {
-    const user = userEvent.setup();
-    render(<NextStepManager />);
-    await screen.findByText('Confirm your roster');
+  await user.click(await screen.findByRole('button', { name: 'Delete Prepare for demo day' }));
+  await user.click(screen.getByRole('button', { name: 'Delete “Prepare for demo day”' }));
+  expect(await screen.findByText('Deleted “Prepare for demo day”.')).toBeInTheDocument();
+  expect(shownOrder()).toEqual(['Submit the proposal']);
+  expect(nextSteps.map((s) => s.sort_order)).toEqual([1]);
+  expect(nextStepCompletions).toHaveLength(0);
+});
 
-    await user.click(screen.getByRole('button', { name: 'Add step' }));
+test('HTML typed into a step is shown as plain text, never run', async () => {
+  const payload = `<img src=x onerror="window.__pwned=1">`;
+  seed(payload);
+  render(<NextStepManager />);
+  const list = await screen.findByRole('list', { name: 'Next steps' });
+  expect(within(list).getByText(payload)).toBeInTheDocument();
+  expect(document.querySelector('img, script')).toBeNull();
+  expect(window.__pwned).toBeUndefined();
+});
 
-    expect(screen.getByText('Give the step a title')).toBeInTheDocument();
-    expect(nextSteps).toHaveLength(seeded.length);
-  });
+test('students can\'t change the checklist', async () => {
+  seed('Confirm the roster', 'Create the repo');
+  setSessionUserId('u-adan');
+  await expect(saveNextStep({ title: 'Sneaky' })).rejects.toThrow('Admin access required');
+  await expect(reorderNextSteps(['ns-2', 'ns-1'])).rejects.toThrow('Admin access required');
+  expect(nextSteps.map((s) => s.title)).toEqual(['Confirm the roster', 'Create the repo']);
 });

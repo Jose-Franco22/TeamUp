@@ -1,24 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   deleteNextStep,
   getNextSteps,
   getTeamChecklist,
+  reorderNextSteps,
   saveNextStep,
   setNextStepDone,
 } from '../api/client';
-import { ValidationError, validateNextStep } from '../lib/validation';
-import { formatDue } from './Milestones';
+import { NEXT_STEP_TITLE_MAX, ValidationError, charCount, validateNextStep } from '../lib/validation';
+import { formatDue, toLocalInput } from './Milestones';
 
-// What a team does once it's full (issue #30). Admins keep one list for the
-// class; each team checks the items off on its own, and sees who did each.
-
-// A datetime-local input wants local "YYYY-MM-DDTHH:mm", not ISO.
-function toLocalInput(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+// The next-steps checklist. Admins keep one list for the semester
+// (NextStepManager, issue #42); every complete team works through it on
+// their team page and sees who did each item (TeamChecklist, issue #30).
 
 export function isOverdue(step, now = new Date()) {
   return Boolean(step.due_at && !step.completed_at && new Date(step.due_at) < now);
@@ -29,7 +23,7 @@ export function isOverdue(step, now = new Date()) {
 export function TeamChecklist({ teamId }) {
   const [list, setList] = useState(null);
   const [loadError, setLoadError] = useState(null);
-  // next_step_id while its checkbox is saving.
+  // The step id while its checkbox is saving.
   const [saving, setSaving] = useState(null);
   const [saveError, setSaveError] = useState(null);
 
@@ -73,7 +67,7 @@ export function TeamChecklist({ teamId }) {
             Your team is complete. Anyone on the team can check these off — {doneCount} of{' '}
             {list.length} done.
           </p>
-          <ul className="next-step-list">
+          <ul className="team-checklist">
             {list.map((s) => {
               const overdue = isOverdue(s, now);
               return (
@@ -123,17 +117,37 @@ export function NextStepManager() {
   const [showErrors, setShowErrors] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState(null);
 
-  async function load() {
+  // Every write to `list` takes a ticket, and a reply is dropped once a newer
+  // one has landed. Without this, a reorder reply computed before an insert
+  // can come back after the insert's refresh and put the pre-insert list
+  // back, so the new step disappears until the page is reloaded.
+  const writeSeq = useRef(0);
+
+  // `afterWrite` marks a refresh that follows a write which already
+  // succeeded. Those must not take the list away: the card would swap it for
+  // an error while the message underneath still reported success. The caller
+  // gets false and says the list is stale instead.
+  async function load({ afterWrite = false } = {}) {
+    const ticket = ++writeSeq.current;
     try {
-      setList(await getNextSteps());
+      const rows = await getNextSteps();
+      if (ticket !== writeSeq.current) return true;
+      setList(rows);
       setLoadError(null);
+      return true;
     } catch (err) {
+      if (afterWrite) return false;
       setLoadError(err);
+      return false;
     }
   }
+
+  const STALE = 'The list below couldn’t be refreshed — reload to see the change.';
 
   useEffect(() => {
     load();
@@ -168,10 +182,11 @@ export function NextStepManager() {
     setSaving(true);
     try {
       const saved = await saveNextStep(form);
-      setMessage(form.id ? `Saved “${saved.title}”.` : `Added “${saved.title}”.`);
       setForm(BLANK);
       setShowErrors(false);
-      await load();
+      const fresh = await load({ afterWrite: true });
+      setMessage(form.id ? `Saved “${saved.title}”.` : `Added “${saved.title}”.`);
+      if (!fresh) setServerError(STALE);
     } catch (err) {
       setServerError(err instanceof ValidationError ? Object.values(err.fieldErrors)[0] : err.message);
     } finally {
@@ -179,30 +194,72 @@ export function NextStepManager() {
     }
   }
 
-  async function handleDelete(s) {
-    setConfirmingDelete(null);
+  // The new order shows straight away; the server's answer replaces it, and
+  // if the move is refused the list reloads to what's really stored.
+  async function move(index, by) {
+    const next = list.slice();
+    const [step] = next.splice(index, 1);
+    next.splice(index + by, 0, step);
+    const ticket = ++writeSeq.current;
+    setList(next);
+    setMoving(true);
+    setServerError(null);
+    setMessage(null);
     try {
-      await deleteNextStep(s.id);
-      if (form.id === s.id) setForm(BLANK);
-      setMessage(`Deleted “${s.title}”.`);
-      await load();
+      const rows = await reorderNextSteps(next.map((s) => s.id));
+      // Dropped if an add, edit or delete has refreshed the list since.
+      if (ticket === writeSeq.current) setList(rows);
     } catch (err) {
       setServerError(err.message);
+      await load();
+    } finally {
+      setMoving(false);
     }
   }
 
+  // Keeps a second click from deleting the same step again while the first is
+  // still on its way. A ref rather than `deleting` alone: two clicks in the
+  // same tick both read the same render's state, so the state flag lets the
+  // second one through. `deleting` still drives the disabled button.
+  const deletingRef = useRef(false);
+
+  async function handleDelete(s) {
+    if (deletingRef.current) return;
+    deletingRef.current = true;
+    setDeleting(true);
+    try {
+      await deleteNextStep(s.id);
+      setConfirmingDelete(null);
+      // cancelEdit() rather than setForm(BLANK): it clears showErrors and
+      // serverError too, so a validation error from the step being edited
+      // can't carry over onto the blank Add form.
+      if (form.id === s.id) cancelEdit();
+      const fresh = await load({ afterWrite: true });
+      setMessage(`Deleted “${s.title}”.`);
+      if (!fresh) setServerError(STALE);
+    } catch (err) {
+      setConfirmingDelete(null);
+      setServerError(err.message);
+    } finally {
+      deletingRef.current = false;
+      setDeleting(false);
+    }
+  }
+
+  const titleLength = charCount(form.title.trim());
+
   return (
-    <section aria-label="Next steps checklist">
+    <section aria-label="Next steps">
       <div className="card">
         {loadError ? (
           <p className="inline-error" role="alert">{loadError.message}</p>
         ) : !list ? (
           <p className="desc" role="status">Loading next steps…</p>
         ) : list.length === 0 ? (
-          <p className="desc">No next steps yet.</p>
+          <p className="desc">No next steps yet. Teams see this checklist once they're complete.</p>
         ) : (
-          <ul className="admin-list milestone-admin-list" aria-label="Next steps">
-            {list.map((s) => (
+          <ol className="admin-list next-step-list" aria-label="Next steps">
+            {list.map((s, i) => (
               <li key={s.id}>
                 <div>
                   <b>{s.title}</b>
@@ -211,7 +268,7 @@ export function NextStepManager() {
                 <span className="acts">
                   {confirmingDelete === s.id ? (
                     <>
-                      <button type="button" className="btn danger" onClick={() => handleDelete(s)}>
+                      <button type="button" className="btn danger" onClick={() => handleDelete(s)} disabled={deleting}>
                         Delete “{s.title}”
                       </button>
                       <button type="button" className="btn quiet" onClick={() => setConfirmingDelete(null)}>
@@ -220,6 +277,24 @@ export function NextStepManager() {
                     </>
                   ) : (
                     <>
+                      <button
+                        type="button"
+                        className="btn quiet"
+                        onClick={() => move(i, -1)}
+                        disabled={moving || i === 0}
+                        aria-label={`Move ${s.title} up`}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="btn quiet"
+                        onClick={() => move(i, 1)}
+                        disabled={moving || i === list.length - 1}
+                        aria-label={`Move ${s.title} down`}
+                      >
+                        ↓
+                      </button>
                       <button type="button" className="btn ghost" onClick={() => startEdit(s)} aria-label={`Edit ${s.title}`}>
                         Edit
                       </button>
@@ -231,11 +306,11 @@ export function NextStepManager() {
                 </span>
               </li>
             ))}
-          </ul>
+          </ol>
         )}
 
-        <form className="milestone-form" onSubmit={handleSubmit} noValidate aria-label={form.id ? 'Edit next step' : 'Add a next step'}>
-          <h3>{form.id ? 'Edit next step' : 'Add a next step'}</h3>
+        <form className="milestone-form" onSubmit={handleSubmit} noValidate aria-label={form.id ? 'Edit step' : 'Add a step'}>
+          <h3>{form.id ? 'Edit step' : 'Add a step'}</h3>
           <div className="field">
             <label htmlFor="next-step-title">Step</label>
             <input
@@ -245,6 +320,9 @@ export function NextStepManager() {
               aria-invalid={errorFor('title') ? 'true' : undefined}
               aria-describedby={errorFor('title') ? 'next-step-title-error' : undefined}
             />
+            <p className={titleLength > NEXT_STEP_TITLE_MAX ? 'counter over' : 'counter'}>
+              {titleLength}/{NEXT_STEP_TITLE_MAX}
+            </p>
             {errorFor('title') && (
               <p className="inline-error" id="next-step-title-error" role="alert">{errorFor('title')}</p>
             )}
