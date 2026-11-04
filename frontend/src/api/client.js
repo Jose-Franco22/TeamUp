@@ -1354,7 +1354,7 @@ export async function updateCurrentUser(patch) {
 
 const REQUEST_SELECT = `
   id, project_id, user_id, status, message, created_at,
-  requester:users!user_id ( name, availability_hours, user_skills ( skills ( name ) ) ),
+  requester:users!user_id ( name, availability_hours, github_url, user_skills ( skills ( name ) ) ),
   project:projects!project_id (
     title, creator_id, team_size_target,
     creator:users!creator_id ( name ),
@@ -1362,6 +1362,8 @@ const REQUEST_SELECT = `
     teams ( team_members ( user_id ) )
   )
 `;
+
+const byOldest = (a, b) => new Date(a.created_at) - new Date(b.created_at);
 
 export async function getRequests() {
   if (USE_MOCKS) {
@@ -1378,11 +1380,14 @@ export async function getRequests() {
           ...r,
           user_name: u.name,
           availability_hours: u.availability_hours,
+          github_url: u.github_url,
           skills: skillsForUser(r.user_id).map((s) => s.name),
           project_title: project.title,
           roles_needed: buildProject(project).roles_needed,
         };
-      });
+      })
+      // Oldest first, so whoever has waited longest is at the top.
+      .sort(byOldest);
 
     const outgoing = joinRequests
       .filter((r) => r.user_id === id)
@@ -1404,7 +1409,11 @@ export async function getRequests() {
   // (join_requests_select_own_or_incoming) already limits what comes back
   // to exactly "my outgoing requests, plus incoming ones on my projects."
   const viewerId = requireViewerId(await getViewerId());
-  const { data: rows, error } = await supabase.from('join_requests').select(REQUEST_SELECT);
+  // Oldest first, so whoever has waited longest is at the top.
+  const { data: rows, error } = await supabase
+    .from('join_requests')
+    .select(REQUEST_SELECT)
+    .order('created_at', { ascending: true });
   if (error) throw error;
 
   const incoming = rows
@@ -1418,6 +1427,7 @@ export async function getRequests() {
       created_at: r.created_at,
       user_name: r.requester.name,
       availability_hours: r.requester.availability_hours,
+      github_url: r.requester.github_url ?? '',
       skills: (r.requester.user_skills || []).map((us) => us.skills.name),
       project_title: r.project.title,
       roles_needed: (r.project.project_roles_needed || []).map((pr) => ({

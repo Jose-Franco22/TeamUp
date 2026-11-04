@@ -189,6 +189,12 @@ Apply `supabase/34_next_steps.sql` after `33`. When a team's last seat fills, ev
 order the admin set. Any member can check an item off (or undo it); the team sees who did each one
 and when, overdue items are highlighted, and the progress shows up on `/admin`.
 
+## Reviewing a requester (#27)
+
+Each incoming request on the Requests page shows the student's skills, availability and GitHub
+link, oldest request first. The student's message, when they wrote one, comes with #32
+(`35_join_request_message.sql`).
+
 ## Testing
 
 Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.
