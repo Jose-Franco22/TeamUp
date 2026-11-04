@@ -2,11 +2,18 @@ import { Link, useParams } from 'react-router-dom';
 import { getAdminStudent } from '../api/client';
 import useAsync from '../components/useAsync';
 import { ErrorState, Loading } from '../components/States';
+import PlacementPanel from '../components/PlacementPanel';
 import { PendingProjectLinks } from './Admin';
 
 export default function AdminStudent() {
   const { studentId } = useParams();
-  const { data, loading, error, reload } = useAsync(() => getAdminStudent(studentId), [studentId]);
+  const { data, loading, error, reload, setData } = useAsync(() => getAdminStudent(studentId), [studentId]);
+
+  // Refetch in place after a placement change, so the page doesn't flash
+  // back to its loading state and lose the confirmation message.
+  async function refresh() {
+    setData(await getAdminStudent(studentId));
+  }
 
   return (
     <>
@@ -37,6 +44,7 @@ export default function AdminStudent() {
                 <span className="admin-secondary">{data.membership.role_name || 'Role not set'}</span>
               </p>
             ) : <p className="desc">Not on a team.</p>}
+            <PlacementPanel student={data} onChanged={refresh} />
           </section>
 
           <section className="card">

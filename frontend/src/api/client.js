@@ -16,7 +16,13 @@ import {
   roles as allRoles,
   skills,
   userSkills,
-  appSettings,
+  milestones,
+  nextSteps,
+  nextStepCompletions,
+  formationDeadline,
+  adminActions,
+  announcements,
+  announcementsSeenAt,
   notifications,
   buildProject,
   skillsForUser,
@@ -28,6 +34,9 @@ import { isOpenProject } from '../lib/browseFilters';
 import {
   ValidationError,
   fieldErrorsFromDbError,
+  validateAnnouncement,
+  validateMilestone,
+  validateNextStep,
   validateProfile,
   validateProject,
 } from '../lib/validation';
@@ -69,6 +78,28 @@ function requireAdminSessionUserId() {
   const id = requireSessionUserId();
   if (!users.find((u) => u.id === id)?.is_admin) throw new Error('Admin access required');
   return id;
+}
+
+// The trigger in supabase/26_milestones.sql: once the formation deadline
+// has passed, students can't post projects or send requests.
+function assertBeforeFormationDeadline(what) {
+  const deadline = formationDeadline();
+  if (!deadline || new Date(deadline) > new Date()) return;
+  throw new Error(
+    what === 'project'
+      ? "The team formation deadline has passed, so new projects can't be posted"
+      : 'The team formation deadline has passed, so new join requests are closed'
+  );
+}
+
+function mockNotify(n) {
+  notifications.push({
+    id: `n-${Date.now()}-${notifications.length}`,
+    by_admin: false,
+    created_at: new Date().toISOString(),
+    read_at: null,
+    ...n,
+  });
 }
 
 // The database checks the caller's own role, never a browser-supplied user id.
@@ -114,6 +145,11 @@ function mockAdminTeam(team) {
         id: r.id, user_id: r.user_id,
         user_name: users.find((u) => u.id === r.user_id).name, created_at: r.created_at,
       })),
+    // private.admin_team_next_steps() in 33_next_steps.sql.
+    next_steps: {
+      done: nextStepCompletions.filter((c) => c.team_id === team.id).length,
+      total: nextSteps.length,
+    },
   };
 }
 
@@ -186,6 +222,506 @@ export async function getAdminStudent(studentId) {
   const { data, error } = await supabase.rpc('admin_student_details', { p_student_id: studentId });
   if (error) throw error;
   return data;
+}
+
+// --- Admin placement (#39) -----------------------------------------------
+// An admin puts an unplaced student on a team, moves one between teams, or
+// removes one (removeMember below). These work after the formation
+// deadline, notify the student and the owners affected, and are recorded in
+// admin_actions — see supabase/27_admin_placement.sql.
+function recordAdminAction(action) {
+  adminActions.push({
+    id: `aa-${Date.now()}-${adminActions.length}`,
+    created_at: new Date().toISOString(),
+    from_project_title: null,
+    to_project_title: null,
+    role_id: null,
+    ...action,
+  });
+}
+
+// Checks shared by assign and move, in the same order as the SQL.
+function mockPlacementTarget(userId, teamId, roleId) {
+  if (!roleId || !allRoles.some((r) => r.id === roleId)) throw new Error('Pick a role');
+  if (!users.some((u) => u.id === userId && !u.is_admin)) throw new Error('Student not found');
+  const team = teams.find((t) => t.id === teamId);
+  if (!team) throw new Error('Team not found');
+  return { team, project: projects.find((p) => p.id === team.project_id) };
+}
+
+function mockAssertOpenSeat(team, project) {
+  if (teamMembers.filter((tm) => tm.team_id === team.id).length >= project.team_size_target) {
+    throw new Error('This team is already full');
+  }
+}
+
+// private.seat(): the membership, the role's seat taken, fill state, and
+// every request the student still has out declined.
+function mockSeat(userId, team, project, roleId) {
+  const membership = { team_id: team.id, user_id: userId, role_id: roleId };
+  teamMembers.push(membership);
+  const need = projectRolesNeeded.find((n) => n.project_id === project.id && n.role_id === roleId);
+  if (need && need.quantity_needed > 0) need.quantity_needed -= 1;
+  syncProjectFillState(project, team);
+  joinRequests
+    .filter((jr) => jr.user_id === userId && jr.status === 'pending')
+    .forEach((jr) => {
+      jr.status = 'declined';
+    });
+  return membership;
+}
+
+export async function adminAssignStudent(userId, teamId, roleId) {
+  if (USE_MOCKS) {
+    await delay();
+    const adminId = requireAdminSessionUserId();
+    const { team, project } = mockPlacementTarget(userId, teamId, roleId);
+    mockAssertOpenSeat(team, project);
+    if (teamMembers.some((tm) => tm.user_id === userId)) {
+      throw new Error('That student is already on a team — move them instead');
+    }
+    const membership = mockSeat(userId, team, project, roleId);
+    mockNotify({ user_id: userId, kind: 'member_assigned', project_id: project.id, actor_id: adminId, by_admin: true });
+    mockNotify({ user_id: project.creator_id, kind: 'member_added', project_id: project.id, actor_id: userId, by_admin: true });
+    recordAdminAction({
+      admin_id: adminId, action: 'assign', student_id: userId,
+      to_project_title: project.title, role_id: roleId,
+    });
+    return membership;
+  }
+  const { data, error } = await supabase.rpc('admin_assign_student', {
+    p_user_id: userId,
+    p_team_id: teamId,
+    p_role_id: roleId,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function adminMoveStudent(userId, teamId, roleId) {
+  if (USE_MOCKS) {
+    await delay();
+    const adminId = requireAdminSessionUserId();
+    if (!roleId || !allRoles.some((r) => r.id === roleId)) throw new Error('Pick a role');
+    if (!users.some((u) => u.id === userId && !u.is_admin)) throw new Error('Student not found');
+    const current = teamMembers.find((tm) => tm.user_id === userId);
+    if (!current) throw new Error('That student is not on a team — assign them instead');
+    if (current.team_id === teamId) throw new Error('That student is already on this team');
+    const fromTeam = teams.find((t) => t.id === current.team_id);
+    const fromProject = projects.find((p) => p.id === fromTeam.project_id);
+    if (fromProject.creator_id === userId) {
+      throw new Error("A project's creator can't be moved off their own project");
+    }
+    const { team, project } = mockPlacementTarget(userId, teamId, roleId);
+    mockAssertOpenSeat(team, project);
+
+    teamMembers.splice(teamMembers.indexOf(current), 1);
+    const old = projectRolesNeeded.find((n) => n.project_id === fromProject.id && n.role_id === current.role_id);
+    if (old) old.quantity_needed += 1;
+    syncProjectFillState(fromProject, fromTeam);
+    const membership = mockSeat(userId, team, project, roleId);
+
+    mockNotify({ user_id: fromProject.creator_id, kind: 'member_left', project_id: fromProject.id, actor_id: userId, by_admin: true });
+    mockNotify({ user_id: userId, kind: 'member_assigned', project_id: project.id, actor_id: adminId, by_admin: true });
+    mockNotify({ user_id: project.creator_id, kind: 'member_added', project_id: project.id, actor_id: userId, by_admin: true });
+    recordAdminAction({
+      admin_id: adminId, action: 'move', student_id: userId,
+      from_project_title: fromProject.title, to_project_title: project.title, role_id: roleId,
+    });
+    return membership;
+  }
+  const { data, error } = await supabase.rpc('admin_move_student', {
+    p_user_id: userId,
+    p_team_id: teamId,
+    p_role_id: roleId,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// The latest admin changes, newest first, with names filled in.
+export async function getAdminActions(limit = 20) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const nameOf = (id) => users.find((u) => u.id === id)?.name ?? null;
+    return adminActions
+      .slice()
+      .reverse()
+      .slice(0, limit)
+      .map((a) => ({
+        id: a.id, action: a.action, created_at: a.created_at,
+        admin_id: a.admin_id, admin_name: nameOf(a.admin_id),
+        student_id: a.student_id, student_name: nameOf(a.student_id),
+        from_project_title: a.from_project_title, to_project_title: a.to_project_title,
+        role_name: allRoles.find((r) => r.id === a.role_id)?.name ?? null,
+      }));
+  }
+  const { data, error } = await supabase.rpc('admin_recent_actions', { p_limit: limit });
+  if (error) throw error;
+  return data;
+}
+
+// --- Milestones (#38) -----------------------------------------------------
+// The class schedule. Everyone can read it; only admins change it, through
+// save_milestone()/delete_milestone() (supabase/26_milestones.sql). The one
+// flagged is_formation_deadline is when rosters lock.
+export async function getMilestones() {
+  if (USE_MOCKS) {
+    await delay();
+    return milestones
+      .slice()
+      .sort((a, b) => new Date(a.due_at) - new Date(b.due_at))
+      .map((m) => ({ ...m }));
+  }
+  const { data, error } = await supabase
+    .from('milestones')
+    .select('id, name, due_at, is_formation_deadline, message')
+    .order('due_at', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+// Creates a milestone when `id` is missing, edits it otherwise. Flagging
+// one as the formation deadline takes the flag off any other. `message` is
+// the optional note telling students what's expected
+// (28_milestone_messages.sql).
+export async function saveMilestone({ id = null, name, due_at, is_formation_deadline = false, message = '' }) {
+  const { values, errors, isValid } = validateMilestone({ name, due_at, message });
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const existing = id ? milestones.find((m) => m.id === id) : null;
+    if (id && !existing) throw new Error('Milestone not found');
+    if (is_formation_deadline) {
+      for (const m of milestones) if (m.id !== id) m.is_formation_deadline = false;
+    }
+    const row = existing ?? { id: `ms-${Date.now()}-${milestones.length}` };
+    Object.assign(row, {
+      name: values.name,
+      due_at: values.due_at,
+      is_formation_deadline: Boolean(is_formation_deadline),
+      message: values.message,
+      // A new or changed milestone counts as news on the Announcements tab.
+      updated_at: new Date().toISOString(),
+    });
+    if (!existing) milestones.push(row);
+    return { ...row };
+  }
+  const { data, error } = await supabase.rpc('save_milestone', {
+    p_id: id,
+    p_name: values.name,
+    p_due_at: values.due_at,
+    p_is_formation_deadline: Boolean(is_formation_deadline),
+    p_message: values.message,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteMilestone(id) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const index = milestones.findIndex((m) => m.id === id);
+    if (index === -1) throw new Error('Milestone not found');
+    milestones.splice(index, 1);
+    return;
+  }
+  const { error } = await supabase.rpc('delete_milestone', { p_id: id });
+  if (error) throw error;
+}
+
+// --- Next steps -----------------------------------------------------------
+// The checklist complete teams work through (issue #42; teams check items
+// off in #30). One list for everyone, in sort_order. Admins edit it through
+// the functions in supabase/33_next_steps.sql; there are no write policies.
+
+const nextStepRow = (s) => ({ id: s.id, title: s.title, due_at: s.due_at, sort_order: s.sort_order });
+
+export async function getNextSteps() {
+  if (USE_MOCKS) {
+    await delay();
+    requireSessionUserId();
+    return nextSteps.slice().sort((a, b) => a.sort_order - b.sort_order).map(nextStepRow);
+  }
+  const { data, error } = await supabase
+    .from('next_steps')
+    .select('id, title, due_at, sort_order')
+    .order('sort_order', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+// Adds a step at the end of the list when `id` is missing, edits it in
+// place otherwise. `due_at` is optional.
+export async function saveNextStep({ id = null, title, due_at = null }) {
+  const { values, errors, isValid } = validateNextStep({ title, due_at });
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    if (id) {
+      const row = nextSteps.find((s) => s.id === id);
+      if (!row) throw new Error('Next step not found');
+      Object.assign(row, { title: values.title, due_at: values.due_at });
+      return nextStepRow(row);
+    }
+    const row = {
+      id: `ns-${Date.now()}-${nextSteps.length}`,
+      title: values.title,
+      due_at: values.due_at,
+      sort_order: Math.max(0, ...nextSteps.map((s) => s.sort_order)) + 1,
+    };
+    nextSteps.push(row);
+    return nextStepRow(row);
+  }
+  const { data, error } = await supabase.rpc('save_next_step', {
+    p_id: id,
+    p_title: values.title,
+    p_due_at: values.due_at,
+  });
+  if (error) throw error;
+  // The function returns the whole row, including created_at / updated_at.
+  // Narrowed to the same shape the mock returns so callers can't come to
+  // depend on a field that only exists on one of the two paths.
+  return nextStepRow(data);
+}
+
+export async function deleteNextStep(id) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const index = nextSteps.findIndex((s) => s.id === id);
+    if (index === -1) throw new Error('Next step not found');
+    nextSteps.splice(index, 1);
+    for (let i = nextStepCompletions.length - 1; i >= 0; i -= 1) {
+      if (nextStepCompletions[i].step_id === id) nextStepCompletions.splice(i, 1);
+    }
+    nextSteps
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .forEach((s, i) => { s.sort_order = i + 1; });
+    return;
+  }
+  const { error } = await supabase.rpc('delete_next_step', { p_id: id });
+  if (error) throw error;
+}
+
+// `ids` is every step's id in the new order. The server refuses a list that
+// doesn't match what's stored (a step added or removed meanwhile) rather
+// than guess. Resolves to the list in its new order.
+export async function reorderNextSteps(ids) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const known = new Set(nextSteps.map((s) => s.id));
+    if (ids.length !== known.size || new Set(ids).size !== ids.length || !ids.every((id) => known.has(id))) {
+      throw new Error('The list has changed since it was loaded — reload and try again');
+    }
+    ids.forEach((id, i) => { nextSteps.find((s) => s.id === id).sort_order = i + 1; });
+    return nextSteps.slice().sort((a, b) => a.sort_order - b.sort_order).map(nextStepRow);
+  }
+  const { data, error } = await supabase.rpc('reorder_next_steps', { p_ids: ids });
+  if (error) throw error;
+  return data.map(nextStepRow);
+}
+
+// --- Announcements --------------------------------------------------------
+// Admins and advisers post them; everyone signed in reads them on
+// /announcements beside the milestones. The tab's badge counts what's new
+// since the viewer last opened that page — see supabase/29_announcements.sql.
+
+export async function getAnnouncementFeed() {
+  if (USE_MOCKS) {
+    await delay();
+    requireSessionUserId();
+    return announcements
+      .slice()
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map((a) => ({ ...a, author_name: users.find((u) => u.id === a.author_id)?.name ?? null }));
+  }
+  const { data, error } = await supabase.rpc('announcement_feed');
+  if (error) throw error;
+  return data;
+}
+
+// Posts an announcement when `id` is missing, edits it otherwise.
+export async function saveAnnouncement({ id = null, title, body }) {
+  const { values, errors, isValid } = validateAnnouncement({ title, body });
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    const adminId = requireAdminSessionUserId();
+    const now = new Date().toISOString();
+    if (id) {
+      const row = announcements.find((a) => a.id === id);
+      if (!row) throw new Error('Announcement not found');
+      Object.assign(row, { title: values.title, body: values.body, updated_at: now });
+      return { ...row };
+    }
+    const row = {
+      id: `an-${Date.now()}-${announcements.length}`,
+      title: values.title,
+      body: values.body,
+      author_id: adminId,
+      created_at: now,
+      updated_at: now,
+    };
+    announcements.push(row);
+    return { ...row };
+  }
+  const { data, error } = await supabase.rpc('save_announcement', {
+    p_id: id,
+    p_title: values.title,
+    p_body: values.body,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteAnnouncement(id) {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const index = announcements.findIndex((a) => a.id === id);
+    if (index === -1) throw new Error('Announcement not found');
+    announcements.splice(index, 1);
+    return;
+  }
+  const { error } = await supabase.rpc('delete_announcement', { p_id: id });
+  if (error) throw error;
+}
+
+// Announcements and milestones new or changed since the viewer last opened
+// /announcements. Always 0 for admins, who write them.
+export async function getUnseenAnnouncementCount() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (users.find((u) => u.id === id)?.is_admin) return 0;
+    const seen = announcementsSeenAt[id] ? new Date(announcementsSeenAt[id]) : null;
+    const isNew = (row) => !seen || new Date(row.updated_at ?? row.created_at ?? 0) > seen;
+    return announcements.filter(isNew).length + milestones.filter(isNew).length;
+  }
+  const { data, error } = await supabase.rpc('unseen_announcement_count');
+  if (error) throw error;
+  return data ?? 0;
+}
+
+export async function markAnnouncementsSeen() {
+  if (USE_MOCKS) {
+    await delay();
+    announcementsSeenAt[requireSessionUserId()] = new Date().toISOString();
+    return;
+  }
+  const { error } = await supabase.rpc('mark_announcements_seen');
+  if (error) throw error;
+}
+
+// --- Team checklist (#30) -------------------------------------------------
+// What a team does once it's full: the admin's next-steps list from #42
+// (above), in its sort_order, with each team checking items off on its own
+// (set_next_step_done()). See supabase/34_next_steps.sql.
+
+function mockAssertOnTeam(teamId, viewerId, message) {
+  if (!teamMembers.some((tm) => tm.team_id === teamId && tm.user_id === viewerId)) throw new Error(message);
+}
+
+function mockChecklist(teamId) {
+  return nextSteps
+    .slice()
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((s) => {
+      const done = nextStepCompletions.find((c) => c.team_id === teamId && c.step_id === s.id);
+      return {
+        id: s.id,
+        title: s.title,
+        due_at: s.due_at,
+        sort_order: s.sort_order,
+        completed_at: done?.completed_at ?? null,
+        completed_by: done?.completed_by ?? null,
+        completed_by_name: done ? users.find((u) => u.id === done.completed_by)?.name ?? null : null,
+      };
+    });
+}
+
+// One team's checklist: every item, whether the team has done it, and who
+// did. Members of the team (and admins) only.
+export async function getTeamChecklist(teamId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!users.find((u) => u.id === id)?.is_admin) {
+      mockAssertOnTeam(teamId, id, 'Only members of this team can see its checklist');
+    }
+    return mockChecklist(teamId);
+  }
+  const { data, error } = await supabase.rpc('team_checklist', { p_team_id: teamId });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Checks an item off (done = true) or undoes it, and returns the updated
+// checklist. Any member of a full team can; checking off an item someone
+// already did keeps their name on it.
+export async function setNextStepDone(teamId, stepId, done) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    mockAssertOnTeam(teamId, id, 'Only members of this team can check off its next steps');
+    const team = teams.find((t) => t.id === teamId);
+    if (projects.find((p) => p.id === team.project_id)?.status !== 'full') {
+      throw new Error('The checklist opens once the team is full');
+    }
+    if (!nextSteps.some((s) => s.id === stepId)) throw new Error('Next step not found');
+    const index = nextStepCompletions.findIndex((c) => c.team_id === teamId && c.step_id === stepId);
+    if (done && index === -1) {
+      nextStepCompletions.push({
+        team_id: teamId,
+        step_id: stepId,
+        completed_by: id,
+        completed_at: new Date().toISOString(),
+      });
+    } else if (!done && index !== -1) {
+      nextStepCompletions.splice(index, 1);
+    }
+    return mockChecklist(teamId);
+  }
+  const { data, error } = await supabase.rpc('set_next_step_done', {
+    p_team_id: teamId,
+    p_step_id: stepId,
+    p_done: Boolean(done),
+  });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// The trigger in 34_next_steps.sql: when a project goes from open to full,
+// every member gets a 'team_complete' notification. Called after each mock
+// write that can fill a team, with the status from before it.
+function mockNotifyIfTeamCompleted(previousStatus, project, team) {
+  if (previousStatus === 'full' || project.status !== 'full') return;
+  const actorId = sessionUserId;
+  const byAdmin = Boolean(users.find((u) => u.id === actorId)?.is_admin);
+  const now = new Date().toISOString();
+  teamMembers
+    .filter((tm) => tm.team_id === team.id)
+    .forEach((tm, i) =>
+      addMockNotification({
+        id: `n-${Date.now()}-${notifications.length}-${i}`,
+        user_id: tm.user_id,
+        kind: 'team_complete',
+        project_id: project.id,
+        actor_id: actorId,
+        by_admin: byAdmin,
+        created_at: now,
+        read_at: null,
+      })
+    );
 }
 
 async function getViewerId() {
@@ -428,6 +964,7 @@ export async function createProject({
     // A student can only be on one team — same rule as createJoinRequest.
     const onAnyTeam = teamMembers.some((tm) => tm.user_id === id);
     if (onAnyTeam) throw new Error('You are already on a team and cannot create another project');
+    assertBeforeFormationDeadline('project');
 
     const projectId = `p-${Date.now()}`;
     const project = {
@@ -550,6 +1087,7 @@ export async function updateProject(
       );
     }
 
+    const previousStatus = project.status;
     Object.assign(project, {
       // The validated, trimmed values — update_project() btrims server-side.
       title: values.title,
@@ -558,6 +1096,7 @@ export async function updateProject(
       status: roster.length >= team_size_target ? 'full' : 'open',
     });
     team.formed_at = roster.length >= team_size_target ? team.formed_at || new Date().toISOString() : null;
+    mockNotifyIfTeamCompleted(previousStatus, project, team);
 
     const mine = roster.find((tm) => tm.user_id === id);
     mine.role_id = own_role_id;
@@ -959,6 +1498,7 @@ export async function createJoinRequest(projectId) {
       (r) => r.project_id === projectId && r.user_id === id && r.status === 'pending'
     );
     if (existing) throw new Error('You already have a pending request for this project');
+    assertBeforeFormationDeadline('request');
     const row = {
       id: `jr-${Date.now()}`,
       project_id: projectId,
@@ -984,6 +1524,41 @@ export async function createJoinRequest(projectId) {
   // notification in one transaction server-side — see
   // supabase/23_join_request_notifications.sql.
   const { data, error } = await supabase.rpc('create_join_request', { p_project_id: projectId });
+  if (error) throw error;
+  return data;
+}
+
+// The requester takes back a request that's still pending. The row stays,
+// as 'withdrawn', so it drops out of the owner's list but still shows on
+// the requester's, and they can ask for the same project again later.
+export async function withdrawJoinRequest(requestId) {
+  if (USE_MOCKS) {
+    await delay();
+    const me = requireSessionUserId();
+    const r = joinRequests.find((x) => x.id === requestId);
+    // Same checks, in the same order, as withdraw_join_request().
+    if (!r || r.user_id !== me) throw new Error('Only the student who sent this request can withdraw it');
+    if (r.status !== 'pending') throw new Error('Only a pending request can be withdrawn');
+    r.status = 'withdrawn';
+    // The creator's "asked to join" alert no longer needs them.
+    const creatorId = projects.find((p) => p.id === r.project_id)?.creator_id;
+    const now = new Date().toISOString();
+    notifications
+      .filter(
+        (n) =>
+          n.user_id === creatorId &&
+          n.kind === 'join_request' &&
+          n.project_id === r.project_id &&
+          n.actor_id === me &&
+          !n.read_at
+      )
+      .forEach((n) => {
+        n.read_at = now;
+      });
+    return r;
+  }
+  // See supabase/24_withdraw_join_request.sql.
+  const { data, error } = await supabase.rpc('withdraw_join_request', { p_request_id: requestId });
   if (error) throw error;
   return data;
 }
@@ -1029,8 +1604,10 @@ export async function respondToRequest(requestId, status, roleId) {
       teamMembers.push({ team_id: team.id, user_id: r.user_id, role_id: roleId });
       const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
       if (count >= project.team_size_target) {
+        const previousStatus = project.status;
         project.status = 'full';
         team.formed_at = new Date().toISOString();
+        mockNotifyIfTeamCompleted(previousStatus, project, team);
       }
 
       // A student can only be on one team, so accepting this request
@@ -1080,7 +1657,7 @@ export async function getMyTeam() {
     const project = buildProject(projects.find((p) => p.id === team.project_id), id);
     return {
       ...project,
-      formation_deadline: appSettings.formation_deadline,
+      formation_deadline: formationDeadline(),
       members: project.members.map((m) => {
         const u = users.find((x) => x.id === m.user_id);
         return {
@@ -1175,6 +1752,19 @@ export async function deleteTeam(teamId) {
       throw new Error('Remove everyone else from the team before deleting it');
     }
 
+    // Everyone still waiting is told before their request disappears with
+    // the project (issue #25). project_id is left out on purpose: in the
+    // database it would cascade the notification away with the project, so
+    // the title is carried instead. See supabase/32_notify_on_project_delete.sql.
+    for (const request of joinRequests.filter((r) => r.project_id === project.id && r.status === 'pending')) {
+      mockNotify({
+        user_id: request.user_id,
+        kind: 'project_removed',
+        project_title: project.title,
+        actor_id: id,
+      });
+    }
+
     // Mirrors the ON DELETE CASCADE chain hanging off projects.
     const drop = (arr, pred) => {
       for (let i = arr.length - 1; i >= 0; i -= 1) if (pred(arr[i])) arr.splice(i, 1);
@@ -1212,7 +1802,7 @@ export async function leaveTeam() {
     if (project.creator_id === id) {
       throw new Error('You created this project, so you cannot leave it — delete the team instead');
     }
-    const deadline = appSettings.formation_deadline;
+    const deadline = formationDeadline();
     if (deadline && new Date(deadline) <= new Date()) {
       throw new Error('The team formation deadline has passed — ask an admin if you need to leave');
     }
@@ -1257,13 +1847,19 @@ export async function removeMember(userId) {
     if (userId === project.creator_id) {
       throw new Error('The project creator cannot be removed — delete the team instead');
     }
-    const deadline = appSettings.formation_deadline;
+    const deadline = formationDeadline();
     if (!isAdmin && deadline && new Date(deadline) <= new Date()) {
       throw new Error('The team formation deadline has passed — ask an admin to remove them');
     }
 
     teamMembers.splice(teamMembers.indexOf(membership), 1);
     syncProjectFillState(project, team);
+    if (isAdmin) {
+      recordAdminAction({
+        admin_id: id, action: 'remove', student_id: userId,
+        from_project_title: project.title, role_id: membership.role_id,
+      });
+    }
     const notify = (n) =>
       addMockNotification({
         id: `n-${Date.now()}-${notifications.length}`,
@@ -1280,6 +1876,42 @@ export async function removeMember(userId) {
 
   const { error } = await supabase.rpc('remove_member', { p_user_id: userId });
   if (error) throw error;
+}
+
+// The project's creator changes a teammate's (or their own) role. The number
+// of open seats never changes — see supabase/31_set_member_role.sql.
+export async function setMemberRole(userId, roleId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!roleId || !allRoles.some((r) => r.id === roleId)) throw new Error('Pick a role');
+    const membership = teamMembers.find((tm) => tm.user_id === userId);
+    if (!membership) throw new Error('That student is not on a team');
+    const team = teams.find((t) => t.id === membership.team_id);
+    const project = projects.find((p) => p.id === team.project_id);
+    if (project.creator_id !== id) throw new Error('Only the project creator can change roles');
+    if (membership.role_id === roleId) return membership;
+
+    const need = (rid) =>
+      projectRolesNeeded.find((n) => n.project_id === project.id && n.role_id === rid);
+    // Seat-neutral, like set_member_role(): swap the counts only when the old
+    // role is listed and the new one has a seat open, otherwise touch neither.
+    const old = membership.role_id && need(membership.role_id);
+    const next = need(roleId);
+    if (old && next && next.quantity_needed > 0) {
+      old.quantity_needed += 1;
+      next.quantity_needed -= 1;
+    }
+    membership.role_id = roleId;
+    return membership;
+  }
+
+  const { data, error } = await supabase.rpc('set_member_role', {
+    p_user_id: userId,
+    p_role_id: roleId,
+  });
+  if (error) throw error;
+  return data;
 }
 
 // --- Notifications -------------------------------------------------------
@@ -1375,7 +2007,7 @@ export async function markAllNotificationsRead() {
 // Calls onNew(notification) — shaped like getNotifications() rows — each
 // time one is written for the viewer, until the returned function is
 // called. Real mode listens on Supabase Realtime, which only sends rows the
-// select policy lets the viewer read (24_notification_bell.sql); the insert
+// select policy lets the viewer read (30_notification_bell.sql); the insert
 // carries no names, so each one is read back once with them.
 export function subscribeToNotifications(onNew) {
   if (USE_MOCKS) {
@@ -1417,14 +2049,18 @@ export function subscribeToNotifications(onNew) {
   };
 }
 
-const NOTIFICATION_COLUMNS =
-  'id, kind, project_id, actor_id, by_admin, created_at, read_at, actor:users!actor_id ( name ), project:projects ( title )';
+// `*` rather than a column list, so project_title (32_notify_on_project_delete.sql)
+// is read once it exists, and the feed still loads on a database without it.
+const NOTIFICATION_COLUMNS = '*, actor:users!actor_id ( name ), project:projects ( title )';
 
 function nameNotification({ actor, project, ...n }) {
   return {
     ...n,
     actor_name: actor?.name ?? 'Someone',
-    project_title: project?.title ?? 'a project',
+    // The stored title wins: a 'project_removed' notification deliberately
+    // has no project_id to join on, because the project is gone. Everything
+    // else leaves project_title null and reads it through the join.
+    project_title: n.project_title || project?.title || 'a project',
   };
 }
 
@@ -1432,7 +2068,8 @@ function nameMockNotification(n) {
   return {
     ...n,
     actor_name: users.find((u) => u.id === n.actor_id)?.name ?? 'Someone',
-    project_title: projects.find((p) => p.id === n.project_id)?.title ?? 'a project',
+    project_title:
+      n.project_title || projects.find((p) => p.id === n.project_id)?.title || 'a project',
   };
 }
 
@@ -1455,6 +2092,8 @@ export function addMockNotification(n) {
 function syncProjectFillState(project, team) {
   const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
   const full = count >= project.team_size_target;
+  const previousStatus = project.status;
   project.status = full ? 'full' : 'open';
   team.formed_at = full ? team.formed_at || new Date().toISOString() : null;
+  mockNotifyIfTeamCompleted(previousStatus, project, team);
 }

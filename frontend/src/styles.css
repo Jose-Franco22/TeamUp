@@ -190,8 +190,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 /* ---------- layout ---------- */
 .shell { max-width: 1080px; margin: 0 auto; padding: 28px; }
 
-.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-.head h1 { margin: 0 0 3px; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.head > div { min-width: 0; }
+.head h1 { overflow-wrap: anywhere; margin: 0 0 3px; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
 .head p { margin: 0; font-size: 14px; color: var(--slate); }
 
 .section { font-size: 15px; font-weight: 600; margin: 26px 0 10px; }
@@ -238,6 +239,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .grid2 .card { margin-bottom: 0; display: flex; flex-direction: column; }
 
 .idrow { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.idrow > div { min-width: 0; overflow-wrap: anywhere; }
 .idrow h2 { margin: 0; }
 .idrow .desc { margin-top: 2px; }
 
@@ -409,6 +411,24 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: var(--ink);
 }
 .role-row .btn { padding: 9px 12px; white-space: nowrap; }
+/* The searchable skill picker sits in the row like the role <select>. */
+.role-row .skill-select { flex: 1; min-width: 0; }
+.skill-select-trigger {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.skill-select-trigger:disabled { color: var(--mute); cursor: not-allowed; }
 
 .hint.seats { margin: 8px 0 0; }
 .hint.seats.over { color: var(--danger); }
@@ -416,7 +436,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 /* Role + skill + quantity + remove is too much for a phone-width row. */
 @media (max-width: 620px) {
   .role-row { flex-wrap: wrap; }
-  .role-row select { flex: 1 1 100%; }
+  .role-row select,
+  .role-row .skill-select { flex: 1 1 100%; }
 }
 
 /* ---------- roster ---------- */
@@ -454,16 +475,18 @@ button:disabled { opacity: 0.45; cursor: default; }
   padding: 15px 20px;
   border-bottom: 1px solid var(--line);
 }
+.row > * { min-width: 0; }
 .row:last-child { border-bottom: 0; }
 .row.hd { background: var(--canvas); font-size: 12.5px; color: var(--mute); padding: 10px 20px; }
-.row .nm { font-size: 14px; font-weight: 500; }
-.row .sub { font-size: 12.5px; color: var(--slate); margin-top: 2px; }
+.row .nm { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.row .sub { font-size: 12.5px; color: var(--slate); margin-top: 2px; overflow-wrap: anywhere; }
 .row .sub a { color: inherit; }
 .decision { display: flex; flex-direction: column; gap: 6px; }
-.acts { display: flex; gap: 7px; }
+.acts { display: flex; flex-wrap: wrap; gap: 7px; }
 .acts button { padding: 6px 12px; font-size: 13px; border-radius: 6px; }
 
 .role-select {
+  max-width: 100%;
   font-family: inherit;
   font-size: 12.5px;
   padding: 5px 8px;
@@ -638,6 +661,9 @@ button:disabled { opacity: 0.45; cursor: default; }
   .tour-progress-label { display: none; }
   .hero h1 { font-size: 26px; }
   .row { grid-template-columns: 44px 1fr; row-gap: 8px; }
+  /* Everything after the avatar stacks in the content column; otherwise the
+     role and remove cells drop into the 44px avatar column and overlap. */
+  .row > :nth-child(n+3) { grid-column: 2; }
   .row.hd { display: none; }
   .shell { padding: 20px 16px; }
   .bar { padding: 0 16px; gap: 20px; }
@@ -653,7 +679,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   background: var(--canvas);
 }
 .import-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.import-head .lbl { margin: 0; }
+.import-head .lbl { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .import .desc { margin: 4px 0 10px; font-size: 13.5px; color: var(--slate); }
 .import .foot { border-top: 1px solid var(--line); }
 
@@ -757,6 +783,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .tour-foot {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 22px;
@@ -777,11 +804,12 @@ button:disabled { opacity: 0.45; cursor: default; }
   border: 1px solid var(--line);
   border-radius: 10px;
 }
-.filters .filter { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.filters .filter { display: flex; flex-direction: column; gap: 5px; font-size: 13px; min-width: 0; max-width: 100%; }
 .filters .filter.grow { flex: 1 1 220px; }
 .filters .filter > span { font-size: 11.5px; color: var(--mute); }
 .filters .filter input,
 .filters .filter select {
+  max-width: 100%;
   font-family: inherit;
   font-size: 14px;
   color: var(--ink);
@@ -832,3 +860,150 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .fit-strong .fit-band { color: var(--open); }
 .fit-partial .fit-score strong { border-color: var(--mute); }
+
+/* ---------- milestones (issue #38) ---------- */
+.milestone-banner { padding: 14px 18px; }
+.milestone-countdown { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+/* Inside 48 hours of the next deadline (issue #22). */
+.milestone-banner.warn { background: var(--warn-bg); border-color: var(--warn); }
+.milestone-banner.warn .milestone-countdown { color: var(--warn); }
+.milestone-locked { margin: 0 0 8px; font-size: 13.5px; color: var(--warn); }
+.milestone-locked:last-child { margin-bottom: 0; }
+.milestone-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 28px; }
+.milestone-list li { display: flex; flex-direction: column; min-width: 0; }
+.milestone-name { font-size: 13.5px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
+.milestone-due { font-size: 12.5px; color: var(--slate); }
+.milestone-admin-list li,
+.next-step-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.milestone-admin-list li > div,
+.next-step-list li > div { min-width: 0; overflow-wrap: anywhere; }
+.milestone-form,
+.placement-form { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.milestone-form h3,
+.placement-form h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
+.milestone-form .switch { align-items: flex-start; margin-bottom: 4px; }
+.milestone-form .switch input { margin-top: 3px; flex: none; }
+
+/* ---------- next steps (issue #42) ---------- */
+.next-step-progress { white-space: nowrap; }
+.next-step-progress.done { color: var(--open); }
+
+/* ---------- admin placement (issue #39) ---------- */
+.placement { margin-top: 14px; }
+.placement > .hint { margin: 0; }
+.placement-ok { margin: 10px 0 0; color: var(--open); }
+.milestone-message {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--slate);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.milestone-list li { flex: 1 1 220px; }
+
+/* ---------- announcements ---------- */
+.milestone-more { margin: 10px 0 0; font-size: 12.5px; }
+.deadline-list,
+.post-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.deadline-list .card,
+.post-list .card { margin-bottom: 0; }
+.deadline { display: flex; gap: 18px; align-items: flex-start; }
+.deadline-when { flex: none; width: 150px; display: flex; flex-direction: column; gap: 2px; }
+.deadline-when b { font-size: 14px; font-weight: 600; color: var(--open); }
+.deadline-when span { font-size: 12.5px; color: var(--slate); }
+.deadline-what { flex: 1; min-width: 0; }
+.deadline-what h3,
+.post h3,
+.post-form h3 { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.deadline-what .pill { margin-left: 8px; }
+.post-meta { margin: 3px 0 0; font-size: 12.5px; color: var(--mute); }
+.post-body {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.post-form { margin-bottom: 10px; }
+.post-form h3 { margin-bottom: 12px; }
+.post-status { margin: 0 0 10px; color: var(--open); }
+.past-list { padding-block: 14px; }
+@media (max-width: 620px) {
+  .deadline { flex-direction: column; gap: 8px; }
+  .deadline-when { width: auto; flex-direction: row; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+}
+/* Each section's heading is its first-of-type, which zeroes its top margin
+   (.section:first-of-type above); put the gap back between sections. */
+.page-section + .page-section { margin-top: 26px; }
+
+/* Next steps once a team is complete (issue #30). */
+.head h2 { margin: 0 0 3px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.card + .head, section + .head { margin-top: 28px; }
+.pill.danger { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.next-steps .desc { margin-bottom: 10px; }
+.team-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.next-step {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+}
+.next-step label { display: flex; align-items: baseline; gap: 10px; min-width: 0; cursor: pointer; }
+.next-step input { flex: none; margin: 0; transform: translateY(2px); }
+.next-step-title { font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+.next-step input:checked + .next-step-title { color: var(--mute); text-decoration: line-through; }
+.next-step-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--slate); }
+.next-step.overdue { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.next-step.overdue .next-step-due { color: var(--danger); }
+
+/* ---------- fit ring (the LLM verdict, and the point score) ---------- */
+.fit-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.fit-head-text { min-width: 0; }
+.fit-head-text .fit-band { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.fit-source { margin: 1px 0 0; font-size: 11.5px; color: var(--mute); }
+
+.fit-ring { position: relative; width: 56px; height: 56px; flex: none; }
+.fit-ring svg { display: block; }
+.fit-ring .ring-track { stroke: var(--line); }
+.fit-ring .ring-value { stroke: var(--mute); transition: stroke-dasharray 0.45s ease, stroke 0.2s ease; }
+.fit-ring .ring-number {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.fit-ring-strong .ring-value { stroke: var(--open); }
+.fit-ring-strong .ring-number { color: var(--open); }
+.fit-ring-partial .ring-value { stroke: var(--warn); }
+.fit-ring-long-shot .ring-value { stroke: var(--mute); }
+
+.fit-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.btn.small { padding: 5px 10px; font-size: 12.5px; }
+.fit-note { font-size: 12px; color: var(--mute); }
+
+/* Walkthrough's last step: join a team or start one. */
+.tour-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.tour-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 16px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.tour-choice:hover,
+.tour-choice:focus-visible { border-color: var(--open-line); background: var(--open-bg); }
+.tour-choice b { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.tour-choice span { font-size: 13px; line-height: 1.5; color: var(--slate); overflow-wrap: anywhere; }
+@media (max-width: 620px) {
+  .tour-choices { grid-template-columns: 1fr; }
+}

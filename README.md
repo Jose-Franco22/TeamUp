@@ -136,6 +136,52 @@ project, its creator gets an in-app notice naming them, with a link to `/request
 Requests tab shows how many requests are waiting. Email copies need a one-time Edge Function and
 webhook setup — see [Email notifications in TODO-backend.md](TODO-backend.md#email-notifications).
 
+## Withdrawing a join request (#33)
+
+Apply `supabase/24_withdraw_join_request.sql` after `23`. Each pending request under **Sent by
+you** on the Requests page has a Withdraw button. A withdrawn request shows as withdrawn to the
+student, drops out of the creator's list (and their unread alert for it is cleared), and the
+student can ask to join the same project again later.
+
+## Deadlines, milestones and admin placement (#38, #39)
+
+Apply `supabase/26_milestones.sql`, `supabase/27_admin_placement.sql`,
+`supabase/28_milestone_messages.sql`, then `supabase/29_announcements.sql`, after `24`. Each milestone can carry an optional message
+explaining what's expected. Admins add
+milestones on the **Milestones** tab (`/admin/milestones`), and can mark one as the team formation deadline. After it, students can't
+post projects, send requests, leave or remove members. Students see what's coming up in a banner at
+the top of every page. On a student's admin page, an admin can assign them to a team with an open
+seat, move them to another team, or remove them, even after the deadline. Each change notifies the
+people affected and is listed under **Recent admin changes** on `/admin`. TODO-backend.md has the
+details, next to the leaving and removing rules.
+
+## Announcements
+
+Everyone signed in has an **Announcements** tab (`/announcements`): upcoming deadlines with their
+messages, announcements from admins and advisers (newest first, with who posted them), and past
+deadlines. Admins and advisers post, edit and delete announcements on the same page. Students' tab
+shows how many announcements and milestones are new or changed since they last opened it. Titles
+and messages follow the same rules as milestone messages: no blank or punctuation-only text, no
+control or invisible characters. Anything typed is shown as plain text.
+
+The students' deadline banner (#22) also counts down to the next milestone ("Team formation
+closes in 4 days", then hours inside the last day) and turns to a warning style within 48 hours.
+The countdown and date helpers are in `frontend/src/lib/deadlines.js`.
+
+## Next-steps checklist (#42)
+
+Apply `supabase/33_next_steps.sql` after `30`. Admins keep the checklist teams see once they're
+complete on the **Next steps** tab (`/admin/next-steps`): add, edit, reorder and delete steps, each
+with an optional due date. The **All teams** table on `/admin` shows each team's progress
+("2 of 5 done"). Teams check items off on their own page in #30.
+
+## Next steps for complete teams (#30)
+
+Apply `supabase/34_next_steps.sql` after `33`. When a team's last seat fills, every member gets a
+"team complete" notification, and the team page shows the **Next steps** checklist from #42, in the
+order the admin set. Any member can check an item off (or undo it); the team sees who did each one
+and when, overdue items are highlighted, and the progress shows up on `/admin`.
+
 ## Reviewing a requester (#27)
 
 Each incoming request on the Requests page shows the student's skills, availability and GitHub

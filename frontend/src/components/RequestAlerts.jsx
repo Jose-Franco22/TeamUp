@@ -66,16 +66,17 @@ export function useRequestAlerts(enabled) {
   return { pending, notices, dismiss };
 }
 
-// The number on the Requests tab. Renders nothing when nothing is waiting.
-// Screen readers hear the tab as "Requests (2 pending)".
-export function PendingBadge({ count }) {
+// The number on a tab. Renders nothing when nothing is waiting. Screen
+// readers hear the tab as "Requests (2 pending)", or with `label`, e.g.
+// "Announcements (2 new)".
+export function PendingBadge({ count, label = 'pending' }) {
   if (!count) return null;
   return (
     <>
       <span className="count-badge" aria-hidden="true">
         {count}
       </span>
-      <span className="sr-only"> ({count} pending)</span>
+      <span className="sr-only"> ({count} {label})</span>
     </>
   );
 }

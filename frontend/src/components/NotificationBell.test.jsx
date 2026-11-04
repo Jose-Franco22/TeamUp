@@ -79,6 +79,22 @@ describe('NotificationBell', () => {
     expect(screen.getByText('Rita Cano asked to join “Campus parking tracker”')).toBeInTheDocument();
   });
 
+  // Realtime can send the same row again on reconnect; the list already
+  // ignored the repeat, and the count has to as well.
+  test('the same notification delivered twice only counts once', async () => {
+    const seeded = note();
+    renderBell([seeded]);
+    expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
+
+    act(() => addMockNotification(seeded));
+    expect(screen.getByTestId('bell-badge')).toHaveTextContent('1');
+
+    const fresh = note({ actor_id: 'u-rita' });
+    act(() => addMockNotification(fresh));
+    act(() => addMockNotification(fresh));
+    expect(screen.getByTestId('bell-badge')).toHaveTextContent('2');
+  });
+
   test('a notification for someone else doesn’t change the count', async () => {
     renderBell([note()]);
     expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
@@ -139,5 +155,59 @@ describe('NotificationBell', () => {
     renderBell();
     await userEvent.click(bell());
     expect(await screen.findByText('Nothing yet.')).toBeInTheDocument();
+  });
+});
+
+// --- a project that no longer exists (issue #25) --------------------------
+//
+// The only kind whose project is gone by the time the notification is read.
+// It carries the title instead of a project_id, because a project_id would
+// have cascaded the row away with the project — see
+// supabase/32_notify_on_project_delete.sql.
+
+describe('a deleted project', () => {
+  const removed = () =>
+    note({
+      kind: 'project_removed',
+      project_id: null,
+      project_title: 'Campus parking tracker',
+      actor_id: 'u-sofia',
+    });
+
+  test('says the project went and the request went with it', async () => {
+    renderBell([removed()]);
+    await screen.findByTestId('bell-badge');
+    await userEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
+    expect(
+      screen.getByText(
+        '“Campus parking tracker” was removed, so your request to join it is cancelled'
+      )
+    ).toBeInTheDocument();
+  });
+
+  test('names the project from the stored title, with no project to join on', async () => {
+    renderBell([removed()]);
+    await screen.findByTestId('bell-badge');
+    await userEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
+    // The fallback is "a project"; seeing the real name proves the stored
+    // title is used rather than the join, which has no project_id to follow.
+    expect(screen.getByText(/Campus parking tracker/)).toBeInTheDocument();
+    expect(screen.queryByText(/“a project”/)).not.toBeInTheDocument();
+  });
+
+  test('falls back gracefully if even the title is missing', async () => {
+    renderBell([note({ kind: 'project_removed', project_id: null, project_title: null })]);
+    await screen.findByTestId('bell-badge');
+    await userEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
+    expect(screen.getByText(/“a project” was removed/)).toBeInTheDocument();
+  });
+
+  test('opens Browse, since the project it was about is gone', async () => {
+    const user = userEvent.setup();
+    renderBell([removed()]);
+    await screen.findByTestId('bell-badge');
+    await user.click(screen.getByRole('button', { name: /^Notifications/ }));
+    await user.click(await screen.findByText(/was removed, so your request/));
+    await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/browse'));
   });
 });

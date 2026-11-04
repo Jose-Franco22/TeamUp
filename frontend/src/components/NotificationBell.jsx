@@ -15,8 +15,12 @@ const LINKS = {
   join_request: '/requests',
   member_left: '/team',
   member_removed: '/browse',
+  // The project is gone, so there is nothing of it left to open. Browse is
+  // where they'd go next anyway, to find something else to ask to join.
+  project_removed: '/browse',
   request_accepted: '/team',
   request_declined: '/browse',
+  team_complete: '/team',
 };
 
 export function notificationLink(n) {
@@ -36,6 +40,13 @@ export function notificationText(n) {
       return `You were accepted onto ${project}`;
     case 'request_declined':
       return `Your request to join ${project} was declined`;
+    case 'team_complete':
+      return `${project} is complete — see your team's next steps`;
+    // Says what happened to their request as well as to the project: the
+    // request went with it, and nobody left waiting should have to work that
+    // out from the project simply being missing.
+    case 'project_removed':
+      return `${project} was removed, so your request to join it is cancelled`;
     default:
       return `Something changed on ${project}`;
   }
@@ -52,6 +63,9 @@ export default function NotificationBell() {
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const root = useRef(null);
+  // Ids already on the list or already counted. Realtime can deliver the same
+  // row twice (on reconnect, say), and the count must only go up once.
+  const seen = useRef(new Set());
 
   useEffect(() => {
     let live = true;
@@ -60,6 +74,7 @@ export default function NotificationBell() {
     getNotificationFeed()
       .then((feed) => {
         if (!live) return;
+        seen.current = new Set(feed.items.map((n) => n.id));
         setItems(feed.items);
         setUnread(feed.unread);
       })
@@ -72,9 +87,9 @@ export default function NotificationBell() {
   useEffect(
     () =>
       subscribeToNotifications((n) => {
-        setItems((list) =>
-          list.some((m) => m.id === n.id) ? list : [n, ...list].slice(0, NOTIFICATION_FEED_SIZE)
-        );
+        if (seen.current.has(n.id)) return;
+        seen.current.add(n.id);
+        setItems((list) => [n, ...list].slice(0, NOTIFICATION_FEED_SIZE));
         if (!n.read_at) setUnread((count) => count + 1);
       }),
     []
