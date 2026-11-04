@@ -600,6 +600,14 @@ write path yet: #30 adds the function that checks an item off, and the "team com
 notification. `admin_dashboard()` and `admin_team_details()` add `next_steps: { done, total }` to
 each team.
 
+**Next steps (#30).** `34_next_steps.sql` builds on #42's tables: it adds the write path for
+`next_step_completions`, `set_next_step_done(team, step, done)` (members of a full team only;
+re-checking a done item keeps the first completer), and `team_checklist(team)`, which returns every
+step in `sort_order` with the team's progress and the completer's name. A trigger on
+`projects.status` sends every member a `'team_complete'` notification when a project goes from open
+to full, so accepting a request, an admin placing a student, and an owner lowering the target are
+all covered.
+
 ## Deleting a team — `delete_team()`
 
 > This section assumes the function approach. A single DELETE policy on `projects` would also

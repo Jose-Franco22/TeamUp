@@ -15,6 +15,7 @@ import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
 import StatusPill from '../components/StatusPill';
+import { TeamChecklist } from '../components/NextSteps';
 
 export default function Team() {
   const { data, loading, error, reload, setData } = useAsync(getMyTeam, []);
@@ -224,6 +225,10 @@ export default function Team() {
           </div>
         </div>
       </section>
+
+      {/* The checklist is for complete teams (issue #30); set_next_step_done()
+          refuses a team that's still forming. */}
+      {data.status === 'full' && <TeamChecklist teamId={data.team_id} />}
 
       <div className="rows">
         <div className="row hd">

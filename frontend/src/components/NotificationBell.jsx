@@ -20,6 +20,7 @@ const LINKS = {
   project_removed: '/browse',
   request_accepted: '/team',
   request_declined: '/browse',
+  team_complete: '/team',
 };
 
 export function notificationLink(n) {
@@ -39,6 +40,8 @@ export function notificationText(n) {
       return `You were accepted onto ${project}`;
     case 'request_declined':
       return `Your request to join ${project} was declined`;
+    case 'team_complete':
+      return `${project} is complete — see your team's next steps`;
     // Says what happened to their request as well as to the project: the
     // request went with it, and nobody left waiting should have to work that
     // out from the project simply being missing.

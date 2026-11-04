@@ -333,10 +333,16 @@ export const adminActions = [];
 
 // --- NEXT STEPS --------------------------------------------------------
 // See supabase/33_next_steps.sql. nextSteps: id, title, due_at (or null),
-// sort_order (1..n, the order teams see). nextStepCompletions: team_id,
-// step_id, completed_by, completed_at — one per step a team has checked
-// off (written by #30).
-export const nextSteps = [];
+// sort_order (1..n, the order teams see), seeded with the same starting
+// list as 34_next_steps.sql. nextStepCompletions: team_id, step_id,
+// completed_by, completed_at — one per step a team has checked off
+// (set_next_step_done(), #30).
+export const nextSteps = [
+  { id: 'ns-roster', title: 'Confirm your roster', due_at: null, sort_order: 1 },
+  { id: 'ns-repo', title: 'Create the repo and add your adviser', due_at: null, sort_order: 2 },
+  { id: 'ns-meeting', title: 'Schedule your first adviser meeting', due_at: null, sort_order: 3 },
+  { id: 'ns-proposal', title: 'Submit your project proposal', due_at: null, sort_order: 4 },
+];
 export const nextStepCompletions = [];
 
 // --- ANNOUNCEMENTS -----------------------------------------------------

@@ -622,6 +622,108 @@ export async function markAnnouncementsSeen() {
   if (error) throw error;
 }
 
+// --- Team checklist (#30) -------------------------------------------------
+// What a team does once it's full: the admin's next-steps list from #42
+// (above), in its sort_order, with each team checking items off on its own
+// (set_next_step_done()). See supabase/34_next_steps.sql.
+
+function mockAssertOnTeam(teamId, viewerId, message) {
+  if (!teamMembers.some((tm) => tm.team_id === teamId && tm.user_id === viewerId)) throw new Error(message);
+}
+
+function mockChecklist(teamId) {
+  return nextSteps
+    .slice()
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((s) => {
+      const done = nextStepCompletions.find((c) => c.team_id === teamId && c.step_id === s.id);
+      return {
+        id: s.id,
+        title: s.title,
+        due_at: s.due_at,
+        sort_order: s.sort_order,
+        completed_at: done?.completed_at ?? null,
+        completed_by: done?.completed_by ?? null,
+        completed_by_name: done ? users.find((u) => u.id === done.completed_by)?.name ?? null : null,
+      };
+    });
+}
+
+// One team's checklist: every item, whether the team has done it, and who
+// did. Members of the team (and admins) only.
+export async function getTeamChecklist(teamId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!users.find((u) => u.id === id)?.is_admin) {
+      mockAssertOnTeam(teamId, id, 'Only members of this team can see its checklist');
+    }
+    return mockChecklist(teamId);
+  }
+  const { data, error } = await supabase.rpc('team_checklist', { p_team_id: teamId });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Checks an item off (done = true) or undoes it, and returns the updated
+// checklist. Any member of a full team can; checking off an item someone
+// already did keeps their name on it.
+export async function setNextStepDone(teamId, stepId, done) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    mockAssertOnTeam(teamId, id, 'Only members of this team can check off its next steps');
+    const team = teams.find((t) => t.id === teamId);
+    if (projects.find((p) => p.id === team.project_id)?.status !== 'full') {
+      throw new Error('The checklist opens once the team is full');
+    }
+    if (!nextSteps.some((s) => s.id === stepId)) throw new Error('Next step not found');
+    const index = nextStepCompletions.findIndex((c) => c.team_id === teamId && c.step_id === stepId);
+    if (done && index === -1) {
+      nextStepCompletions.push({
+        team_id: teamId,
+        step_id: stepId,
+        completed_by: id,
+        completed_at: new Date().toISOString(),
+      });
+    } else if (!done && index !== -1) {
+      nextStepCompletions.splice(index, 1);
+    }
+    return mockChecklist(teamId);
+  }
+  const { data, error } = await supabase.rpc('set_next_step_done', {
+    p_team_id: teamId,
+    p_step_id: stepId,
+    p_done: Boolean(done),
+  });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// The trigger in 34_next_steps.sql: when a project goes from open to full,
+// every member gets a 'team_complete' notification. Called after each mock
+// write that can fill a team, with the status from before it.
+function mockNotifyIfTeamCompleted(previousStatus, project, team) {
+  if (previousStatus === 'full' || project.status !== 'full') return;
+  const actorId = sessionUserId;
+  const byAdmin = Boolean(users.find((u) => u.id === actorId)?.is_admin);
+  const now = new Date().toISOString();
+  teamMembers
+    .filter((tm) => tm.team_id === team.id)
+    .forEach((tm, i) =>
+      addMockNotification({
+        id: `n-${Date.now()}-${notifications.length}-${i}`,
+        user_id: tm.user_id,
+        kind: 'team_complete',
+        project_id: project.id,
+        actor_id: actorId,
+        by_admin: byAdmin,
+        created_at: now,
+        read_at: null,
+      })
+    );
+}
+
 async function getViewerId() {
   const {
     data: { session },
@@ -985,6 +1087,7 @@ export async function updateProject(
       );
     }
 
+    const previousStatus = project.status;
     Object.assign(project, {
       // The validated, trimmed values — update_project() btrims server-side.
       title: values.title,
@@ -993,6 +1096,7 @@ export async function updateProject(
       status: roster.length >= team_size_target ? 'full' : 'open',
     });
     team.formed_at = roster.length >= team_size_target ? team.formed_at || new Date().toISOString() : null;
+    mockNotifyIfTeamCompleted(previousStatus, project, team);
 
     const mine = roster.find((tm) => tm.user_id === id);
     mine.role_id = own_role_id;
@@ -1490,8 +1594,10 @@ export async function respondToRequest(requestId, status, roleId) {
       teamMembers.push({ team_id: team.id, user_id: r.user_id, role_id: roleId });
       const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
       if (count >= project.team_size_target) {
+        const previousStatus = project.status;
         project.status = 'full';
         team.formed_at = new Date().toISOString();
+        mockNotifyIfTeamCompleted(previousStatus, project, team);
       }
 
       // A student can only be on one team, so accepting this request
@@ -1976,6 +2082,8 @@ export function addMockNotification(n) {
 function syncProjectFillState(project, team) {
   const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
   const full = count >= project.team_size_target;
+  const previousStatus = project.status;
   project.status = full ? 'full' : 'open';
   team.formed_at = full ? team.formed_at || new Date().toISOString() : null;
+  mockNotifyIfTeamCompleted(previousStatus, project, team);
 }

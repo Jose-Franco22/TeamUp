@@ -131,8 +131,10 @@ select is(
 
 -- --- Notifications -------------------------------------------------------
 select tests.clear_authentication();
+-- Ana's accept also filled the team, so she has a 'team_complete' too
+-- (34_next_steps.sql). That's next_steps.test.sql's to check, not this file's.
 select results_eq(
-  format($q$select kind from public.notifications where user_id = %L$q$, current_setting('tests.ana')),
+  format($q$select kind from public.notifications where user_id = %L and kind <> 'team_complete'$q$, current_setting('tests.ana')),
   $$values ('request_accepted')$$,
   'an accepted requester gets exactly one notification (none for the auto-declined request)');
 
@@ -148,7 +150,9 @@ select results_eq(
 
 select tests.authenticate_as(current_setting('tests.ben')::uuid);
 select results_eq(
-  'select n.user_id from public.notifications n',
+  -- distinct: Ben can have more than one of his own (e.g. 'team_complete');
+  -- what matters is that no one else's id shows up.
+  'select distinct n.user_id from public.notifications n',
   format($q$values (%L::uuid)$q$, current_setting('tests.ben')),
   'a student can only read their own notifications');
 

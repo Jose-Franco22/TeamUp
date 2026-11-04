@@ -6,6 +6,10 @@ select set_config('tests.admin',   tests.sign_in_with_microsoft('admin01@utrgv.e
 select set_config('tests.student', tests.sign_in_with_microsoft('student01@utrgv.edu', 'Student')::text, true);
 update public.users set is_admin = true where id = current_setting('tests.admin')::uuid;
 
+-- 34_next_steps.sql (#30) seeds a starting list. These tests count from an
+-- empty one; the rollback at the end puts the seed back.
+delete from public.next_steps;
+
 -- --- Only admins write the checklist --------------------------------------------
 select tests.authenticate_as(current_setting('tests.student')::uuid);
 select throws_ok(

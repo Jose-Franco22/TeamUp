@@ -1,10 +1,112 @@
 import { useEffect, useRef, useState } from 'react';
-import { deleteNextStep, getNextSteps, reorderNextSteps, saveNextStep } from '../api/client';
+import {
+  deleteNextStep,
+  getNextSteps,
+  getTeamChecklist,
+  reorderNextSteps,
+  saveNextStep,
+  setNextStepDone,
+} from '../api/client';
 import { NEXT_STEP_TITLE_MAX, ValidationError, charCount, validateNextStep } from '../lib/validation';
 import { formatDue, toLocalInput } from './Milestones';
 
-// The next-steps checklist (issue #42). Admins keep one list for the
-// semester; every complete team works through it on their team page (#30).
+// The next-steps checklist. Admins keep one list for the semester
+// (NextStepManager, issue #42); every complete team works through it on
+// their team page and sees who did each item (TeamChecklist, issue #30).
+
+export function isOverdue(step, now = new Date()) {
+  return Boolean(step.due_at && !step.completed_at && new Date(step.due_at) < now);
+}
+
+// --- The team's checklist ----------------------------------------------------
+
+export function TeamChecklist({ teamId }) {
+  const [list, setList] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  // The step id while its checkbox is saving.
+  const [saving, setSaving] = useState(null);
+  const [saveError, setSaveError] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    getTeamChecklist(teamId)
+      .then((rows) => live && setList(rows))
+      .catch((err) => live && setLoadError(err));
+    return () => {
+      live = false;
+    };
+  }, [teamId]);
+
+  async function toggle(step) {
+    setSaving(step.id);
+    setSaveError(null);
+    try {
+      setList(await setNextStepDone(teamId, step.id, !step.completed_at));
+    } catch (err) {
+      setSaveError(err.message);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const now = new Date();
+  const doneCount = (list || []).filter((s) => s.completed_at).length;
+
+  return (
+    <section className="card next-steps" aria-label="Next steps">
+      <h2>Next steps</h2>
+      {loadError ? (
+        <p className="inline-error" role="alert">{loadError.message}</p>
+      ) : !list ? (
+        <p className="desc" role="status">Loading next steps…</p>
+      ) : list.length === 0 ? (
+        <p className="desc">Your team is complete. There's nothing on the checklist yet.</p>
+      ) : (
+        <>
+          <p className="desc">
+            Your team is complete. Anyone on the team can check these off — {doneCount} of{' '}
+            {list.length} done.
+          </p>
+          <ul className="team-checklist">
+            {list.map((s) => {
+              const overdue = isOverdue(s, now);
+              return (
+                <li key={s.id} className={overdue ? 'next-step overdue' : 'next-step'} data-overdue={overdue || undefined}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(s.completed_at)}
+                      disabled={saving === s.id}
+                      onChange={() => toggle(s)}
+                    />
+                    <span className="next-step-title">{s.title}</span>
+                  </label>
+                  <div className="next-step-meta">
+                    {s.due_at && (
+                      <span className="next-step-due">
+                        Due {formatDue(s.due_at)}
+                        {overdue && <span className="pill danger">Overdue</span>}
+                      </span>
+                    )}
+                    {s.completed_at && (
+                      <span className="next-step-done">
+                        Done by {s.completed_by_name ?? 'a former member'} on{' '}
+                        {new Date(s.completed_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {saveError && <p className="inline-error" role="alert">{saveError}</p>}
+    </section>
+  );
+}
+
+// --- Admin manager -----------------------------------------------------------
 
 const BLANK = { id: null, title: '', due_at: '' };
 

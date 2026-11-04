@@ -175,6 +175,13 @@ complete on the **Next steps** tab (`/admin/next-steps`): add, edit, reorder and
 with an optional due date. The **All teams** table on `/admin` shows each team's progress
 ("2 of 5 done"). Teams check items off on their own page in #30.
 
+## Next steps for complete teams (#30)
+
+Apply `supabase/34_next_steps.sql` after `33`. When a team's last seat fills, every member gets a
+"team complete" notification, and the team page shows the **Next steps** checklist from #42, in the
+order the admin set. Any member can check an item off (or undo it); the team sees who did each one
+and when, overdue items are highlighted, and the progress shows up on `/admin`.
+
 ## Testing
 
 Every user story issue (label `user story`) lists the tests it needs under **Testing criteria**.
