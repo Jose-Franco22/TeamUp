@@ -111,6 +111,7 @@ export default function Requests() {
                       'No GitHub linked'
                     )}
                   </div>
+                  {r.message && <p className="request-note">“{r.message}”</p>}
                 </div>
                 <div className="sub">{r.availability_hours} hrs/wk</div>
                 <div className="decision">
