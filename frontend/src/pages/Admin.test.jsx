@@ -88,3 +88,31 @@ test('refresh reloads the counts and lists', async () => {
   expect(await screen.findByText('No teams yet.')).toBeInTheDocument();
   expect(screen.getByText('Teams formed').nextElementSibling).toHaveTextContent('0');
 });
+
+test('shows each team\'s progress through the next-steps checklist (#42)', async () => {
+  getAdminDashboard.mockReset().mockResolvedValue({
+    ...DASHBOARD,
+    teams: DASHBOARD.teams.map((t) => ({
+      ...t,
+      next_steps: t.status === 'full' ? { done: 2, total: 5 } : { done: 0, total: 5 },
+    })),
+  });
+  renderAdmin();
+  const teams = await screen.findByRole('table', { name: 'All teams' });
+  expect(within(teams).getByRole('columnheader', { name: 'Next steps' })).toBeInTheDocument();
+  const fullRow = within(teams).getByRole('link', { name: 'Lab equipment sign-out' }).closest('tr');
+  expect(within(fullRow).getByText('2 of 5 done')).toBeInTheDocument();
+  const openRow = within(teams).getByRole('link', { name: 'Campus parking tracker' }).closest('tr');
+  expect(within(openRow).getByText('Not complete yet')).toBeInTheDocument();
+});
+
+test('a team that has finished the checklist is marked done, and an empty checklist says so', async () => {
+  const [first] = DASHBOARD.teams.filter((t) => t.status === 'full');
+  getAdminDashboard.mockReset().mockResolvedValue({ ...DASHBOARD, teams: [{ ...first, next_steps: { done: 3, total: 3 } }] });
+  renderAdmin();
+  expect(await screen.findByText('3 of 3 done')).toHaveClass('done');
+
+  getAdminDashboard.mockReset().mockResolvedValue({ ...DASHBOARD, teams: [{ ...first, next_steps: { done: 0, total: 0 } }] });
+  render(<MemoryRouter><Admin /></MemoryRouter>);
+  expect(await screen.findByText('No checklist yet')).toBeInTheDocument();
+});

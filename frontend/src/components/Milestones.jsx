@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { deleteMilestone, getMilestones, saveMilestone } from '../api/client';
 import { MILESTONE_MESSAGE_MAX, ValidationError, charCount, validateMilestone } from '../lib/validation';
+import { formatCountdown, isDueSoon } from '../lib/deadlines';
 
 // The class schedule (issue #38). Admins keep it on the dashboard; students
 // see what's coming up in a banner on every page.
@@ -11,7 +12,7 @@ export function formatDue(iso) {
 }
 
 // A datetime-local input wants local "YYYY-MM-DDTHH:mm", not ISO.
-function toLocalInput(iso) {
+export function toLocalInput(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   const pad = (n) => String(n).padStart(2, '0');
@@ -20,16 +21,25 @@ function toLocalInput(iso) {
 
 // --- Student banner --------------------------------------------------------
 
-// The next few milestones, and whether rosters have locked. Renders nothing
-// when there's nothing scheduled. A failed load keeps whatever was shown
-// last: it's an extra on top of whatever page is open. Refreshed on every
-// page change, like the request alerts, so an admin's edit shows up
-// without a reload; the old list stays up meanwhile, so nothing flashes.
+// A countdown to the next deadline (#22), the next few milestones, and
+// whether rosters have locked. Renders nothing when there's nothing
+// scheduled. A failed load keeps whatever was shown last: it's an extra on
+// top of whatever page is open. Refreshed on every page change, like the
+// request alerts, so an admin's edit shows up without a reload; the old list
+// stays up meanwhile, so nothing flashes. The clock ticks once a minute so
+// the countdown, the warning style and "closed" keep up on a page left open.
 export function MilestoneBanner({ limit = 3 }) {
   const { pathname } = useLocation();
   const [list, setList] = useState(null);
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    setNow(new Date());
     let live = true;
     getMilestones()
       .then((rows) => live && setList(rows))
@@ -41,14 +51,26 @@ export function MilestoneBanner({ limit = 3 }) {
 
   if (!list || list.length === 0) return null;
 
-  const now = new Date();
-  const upcoming = list.filter((m) => new Date(m.due_at) > now).slice(0, limit);
+  // One rule for both: getMilestones() sorts by due_at, so the countdown
+  // always names the same milestone the list shows first. Deriving them
+  // separately let the two disagree if either ever changed.
+  const future = list.filter((m) => new Date(m.due_at) > now);
+  const upcoming = future.slice(0, limit);
   const deadline = list.find((m) => m.is_formation_deadline);
   const locked = deadline && new Date(deadline.due_at) <= now;
-  if (upcoming.length === 0 && !locked) return null;
+  const next = future[0] ?? null;
+  if (!next && !locked) return null;
+  const soon = next && isDueSoon(next.due_at, now);
 
   return (
-    <section className="card milestone-banner" aria-label="Upcoming deadlines">
+    <section className={soon ? 'card milestone-banner warn' : 'card milestone-banner'} aria-label="Upcoming deadlines">
+      {next && (
+        <p className="milestone-countdown">
+          {next.is_formation_deadline
+            ? `Team formation closes in ${formatCountdown(next.due_at, now)}`
+            : `${next.name} in ${formatCountdown(next.due_at, now)}`}
+        </p>
+      )}
       {locked && (
         <p className="milestone-locked">
           Team formation closed {formatDue(deadline.due_at)}. Rosters are locked — ask an admin if

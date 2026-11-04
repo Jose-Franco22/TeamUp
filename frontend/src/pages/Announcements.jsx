@@ -11,6 +11,7 @@ import { useSession } from '../auth/SessionContext';
 import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
 import { formatDue } from '../components/Milestones';
+import { relativeDue } from '../lib/deadlines';
 import {
   ANNOUNCEMENT_BODY_MAX,
   ValidationError,
@@ -20,25 +21,6 @@ import {
 
 // Fired once this page has recorded the visit, so the tab's badge clears.
 export const ANNOUNCEMENTS_SEEN = 'teamup:announcements-seen';
-
-const DAY = 24 * 60 * 60 * 1000;
-
-// "today", "tomorrow", "in 5 days", "in 3 weeks", "in 4 months", "3 days
-// ago" — next to the full date, so the exact one is always there too.
-export function relativeDue(iso, now = new Date()) {
-  const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((startOf(new Date(iso)) - startOf(now)) / DAY);
-  if (days === 0) return 'today';
-  if (days === 1) return 'tomorrow';
-  if (days === -1) return 'yesterday';
-  const n = Math.abs(days);
-  const span =
-    n < 14 ? `${n} days`
-    : n < 60 ? `${Math.round(n / 7)} weeks`
-    : n < 365 ? `${Math.round(n / 30)} months`
-    : `${Math.round(n / 365)} year${Math.round(n / 365) === 1 ? '' : 's'}`;
-  return days > 0 ? `in ${span}` : `${span} ago`;
-}
 
 // Everything students need to know from the people running the class:
 // upcoming deadlines (the milestones from #38), announcements, and the

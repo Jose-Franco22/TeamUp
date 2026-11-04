@@ -310,6 +310,44 @@ export function validateMilestone({ name, due_at, message }) {
   return { values, errors, isValid: Object.keys(errors).length === 0 };
 }
 
+// --- Next steps -----------------------------------------------------------
+// Mirrored by the next_steps CHECK constraints and the raises in
+// save_next_step() (supabase/33_next_steps.sql). The text follows the
+// milestone name rules; the due date is optional.
+//
+// "Mirrored" is about the rules, not the wording: what each side rejects has
+// to agree, but the messages don't. These are what an admin reads while
+// typing, so they say what to do ("Write what teams need to do"); the server
+// states the rule it enforces ("A next step needs some text") for the cases
+// the form can't reach. Announcements and milestones read the same way.
+export const NEXT_STEP_TITLE_MAX = 120;
+
+export function validateNextStep({ title, due_at }) {
+  const errors = {};
+  const values = {};
+
+  const trimmed = String(title ?? '').trim();
+  if (trimmed === '') errors.title = 'Write what teams need to do';
+  else if (charCount(trimmed) > NEXT_STEP_TITLE_MAX) {
+    errors.title = `Keep the step to ${NEXT_STEP_TITLE_MAX} characters or fewer`;
+  } else if (/[\x00-\x1F\x7F]/.test(trimmed) || INVISIBLE.test(trimmed)) {
+    errors.title = "The step can't contain line breaks, hidden or control characters";
+  } else if (!HAS_WORDS.test(trimmed)) {
+    errors.title = 'The step has to include letters or numbers';
+  } else values.title = trimmed;
+
+  if (!due_at) values.due_at = null;
+  else {
+    const when = new Date(due_at);
+    if (Number.isNaN(when.getTime())) errors.due_at = 'Pick a valid date and time, or leave it blank';
+    else if (when < MILESTONE_DUE_MIN || when >= MILESTONE_DUE_MAX) {
+      errors.due_at = 'Pick a due date between 2000 and 2099';
+    } else values.due_at = when.toISOString();
+  }
+
+  return { values, errors, isValid: Object.keys(errors).length === 0 };
+}
+
 // --- Announcements --------------------------------------------------------
 // Mirrored by announcements_title_text / announcements_body_text and the
 // raises in save_announcement() (supabase/29_announcements.sql). Same

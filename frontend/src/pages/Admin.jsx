@@ -49,6 +49,23 @@ export function RecentChanges() {
   );
 }
 
+// How far a team is through the next-steps checklist (issue #42). Teams
+// only see the checklist once they're complete (#30), so an open team has
+// nothing to show yet.
+export function NextStepProgress({ team }) {
+  const progress = team.next_steps;
+  if (!progress) return null;
+  if (progress.total === 0) {
+    return <span className="desc">No checklist yet</span>;
+  }
+  if (team.status !== 'full' && progress.done === 0) return <span className="desc">Not complete yet</span>;
+  return (
+    <span className={progress.done === progress.total ? 'next-step-progress done' : 'next-step-progress'}>
+      {progress.done} of {progress.total} done
+    </span>
+  );
+}
+
 export default function Admin() {
   const { data, loading, error, reload } = useAsync(getAdminDashboard, []);
 
@@ -78,7 +95,7 @@ export default function Admin() {
         ) : (
           <div className="admin-table-wrap">
             <table className="admin-table" aria-labelledby="all-teams-heading">
-              <thead><tr><th scope="col">Team</th><th scope="col">Members and roles</th><th scope="col">Seats filled</th><th scope="col">Status</th></tr></thead>
+              <thead><tr><th scope="col">Team</th><th scope="col">Members and roles</th><th scope="col">Seats filled</th><th scope="col">Status</th><th scope="col">Next steps</th></tr></thead>
               <tbody>
                 {data.teams.map((t) => (
                   <tr key={t.id}>
@@ -97,6 +114,7 @@ export default function Admin() {
                     </td>
                     <td>{t.member_count} of {t.team_size_target}</td>
                     <td><StatusPill status={t.status} /></td>
+                    <td><NextStepProgress team={t} /></td>
                   </tr>
                 ))}
               </tbody>
