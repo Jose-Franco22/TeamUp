@@ -159,9 +159,9 @@ describe('withdrawJoinRequest (mock API)', () => {
   });
 
   test("marks the owner's alert for that request as read", async () => {
-    await client.createJoinRequest('p-lab');
+    await client.createJoinRequest('p-scam');
     const alert = notifications.find((n) => n.kind === 'join_request' && n.actor_id === SEEKER);
-    const request = joinRequests.find((r) => r.project_id === 'p-lab' && r.status === 'pending');
+    const request = joinRequests.find((r) => r.project_id === 'p-scam' && r.status === 'pending');
 
     await client.withdrawJoinRequest(request.id);
 

@@ -27,6 +27,7 @@ vi.mock('../api/client', () => ({
   getCurrentUser: vi.fn(),
   getRoles: vi.fn(),
   createJoinRequest: vi.fn(),
+  getFormationDeadline: vi.fn(),
 }));
 
 // --- fixtures ------------------------------------------------------------
@@ -105,6 +106,7 @@ beforeEach(() => {
   client.getCurrentUser.mockResolvedValue(ME);
   client.getRoles.mockResolvedValue(ROLES);
   client.createJoinRequest.mockResolvedValue({});
+  client.getFormationDeadline.mockResolvedValue(null);
 });
 
 async function renderBrowse() {
@@ -427,7 +429,8 @@ describe('requesting to join', () => {
     await renderBrowse();
     const card = screen.getByText('Campus parking tracker').closest('article');
     await user.click(within(card).getByRole('button', { name: /request to join/i }));
-    await waitFor(() => expect(client.createJoinRequest).toHaveBeenCalledWith('p-parking'));
+    await user.click(within(card).getByRole('button', { name: /send request/i }));
+    await waitFor(() => expect(client.createJoinRequest).toHaveBeenCalledWith('p-parking', ''));
     expect(within(card).getByRole('button', { name: /request pending/i })).toBeDisabled();
   });
 
@@ -437,6 +440,7 @@ describe('requesting to join', () => {
     await renderBrowse();
     const card = screen.getByText('Campus parking tracker').closest('article');
     await user.click(within(card).getByRole('button', { name: /request to join/i }));
+    await user.click(within(card).getByRole('button', { name: /send request/i }));
 
     expect(await within(card).findByRole('alert')).toHaveTextContent(
       'You already have a pending request'
