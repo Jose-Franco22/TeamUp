@@ -1646,6 +1646,42 @@ export async function removeMember(userId) {
   if (error) throw error;
 }
 
+// The project's creator changes a teammate's (or their own) role. The number
+// of open seats never changes — see supabase/31_set_member_role.sql.
+export async function setMemberRole(userId, roleId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!roleId || !allRoles.some((r) => r.id === roleId)) throw new Error('Pick a role');
+    const membership = teamMembers.find((tm) => tm.user_id === userId);
+    if (!membership) throw new Error('That student is not on a team');
+    const team = teams.find((t) => t.id === membership.team_id);
+    const project = projects.find((p) => p.id === team.project_id);
+    if (project.creator_id !== id) throw new Error('Only the project creator can change roles');
+    if (membership.role_id === roleId) return membership;
+
+    const need = (rid) =>
+      projectRolesNeeded.find((n) => n.project_id === project.id && n.role_id === rid);
+    // Seat-neutral, like set_member_role(): swap the counts only when the old
+    // role is listed and the new one has a seat open, otherwise touch neither.
+    const old = membership.role_id && need(membership.role_id);
+    const next = need(roleId);
+    if (old && next && next.quantity_needed > 0) {
+      old.quantity_needed += 1;
+      next.quantity_needed -= 1;
+    }
+    membership.role_id = roleId;
+    return membership;
+  }
+
+  const { data, error } = await supabase.rpc('set_member_role', {
+    p_user_id: userId,
+    p_role_id: roleId,
+  });
+  if (error) throw error;
+  return data;
+}
+
 // --- Notifications -------------------------------------------------------
 
 // The viewer's unread notifications, newest first. Kinds: 'join_request'
