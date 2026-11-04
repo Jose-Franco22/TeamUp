@@ -15,6 +15,9 @@ const LINKS = {
   join_request: '/requests',
   member_left: '/team',
   member_removed: '/browse',
+  // The project is gone, so there is nothing of it left to open. Browse is
+  // where they'd go next anyway, to find something else to ask to join.
+  project_removed: '/browse',
   request_accepted: '/team',
   request_declined: '/browse',
   team_complete: '/team',
@@ -39,6 +42,11 @@ export function notificationText(n) {
       return `Your request to join ${project} was declined`;
     case 'team_complete':
       return `${project} is complete — see your team's next steps`;
+    // Says what happened to their request as well as to the project: the
+    // request went with it, and nobody left waiting should have to work that
+    // out from the project simply being missing.
+    case 'project_removed':
+      return `${project} was removed, so your request to join it is cancelled`;
     default:
       return `Something changed on ${project}`;
   }

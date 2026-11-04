@@ -7,6 +7,7 @@ import {
   charCount,
   validateProject,
 } from '../lib/validation';
+import SkillSelect from './SkillSelect';
 
 // The project fields, shared by CreateProject and EditProject. Both screens
 // enforce the same rules — team size 2-4, no duplicate roles, and roles that
@@ -54,13 +55,6 @@ export default function ProjectForm({
 
   const touch = (...fields) => setTouched((t) => new Set([...t, ...fields]));
 
-  // Skills are grouped by category in the dropdown — the taxonomy has four
-  // categories and a flat list of twelve reads as an undifferentiated blob.
-  const skillsByCategory = allSkills.reduce((acc, s) => {
-    (acc[s.category] = acc[s.category] || []).push(s);
-    return acc;
-  }, {});
-
   // A role declares which skill categories belong to it (roles.skill_categories),
   // so the skill dropdown only offers skills that actually fit the chosen role.
   // create_project/update_project enforce the same pairing server-side.
@@ -73,9 +67,9 @@ export default function ProjectForm({
     return !!skill && categoriesFor(roleId).includes(skill.category);
   }
 
-  function skillGroupsFor(roleId) {
+  function skillsFor(roleId) {
     const allowed = categoriesFor(roleId);
-    return Object.entries(skillsByCategory).filter(([category]) => allowed.includes(category));
+    return allSkills.filter((s) => allowed.includes(s.category));
   }
 
   // Changing the role can strand the skill that was picked under the old one
@@ -352,23 +346,14 @@ export default function ProjectForm({
                   </option>
                 ))}
               </select>
-              <select
-                aria-label="Skill"
+              <SkillSelect
+                label="Skill"
                 value={r.skill_id}
+                skills={skillsFor(r.role_id)}
+                placeholder={r.role_id ? 'Any skill' : 'Pick a role first'}
                 disabled={!r.role_id}
-                onChange={(e) => updateRow(i, { skill_id: e.target.value })}
-              >
-                <option value="">{r.role_id ? 'Any skill' : 'Pick a role first'}</option>
-                {skillGroupsFor(r.role_id).map(([category, list]) => (
-                  <optgroup key={category} label={category}>
-                    {list.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+                onChange={(skillId) => updateRow(i, { skill_id: skillId })}
+              />
               <span className="qty-field">
                 <input
                   aria-label="How many people needed for this role"

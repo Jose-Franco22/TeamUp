@@ -1742,6 +1742,19 @@ export async function deleteTeam(teamId) {
       throw new Error('Remove everyone else from the team before deleting it');
     }
 
+    // Everyone still waiting is told before their request disappears with
+    // the project (issue #25). project_id is left out on purpose: in the
+    // database it would cascade the notification away with the project, so
+    // the title is carried instead. See supabase/32_notify_on_project_delete.sql.
+    for (const request of joinRequests.filter((r) => r.project_id === project.id && r.status === 'pending')) {
+      mockNotify({
+        user_id: request.user_id,
+        kind: 'project_removed',
+        project_title: project.title,
+        actor_id: id,
+      });
+    }
+
     // Mirrors the ON DELETE CASCADE chain hanging off projects.
     const drop = (arr, pred) => {
       for (let i = arr.length - 1; i >= 0; i -= 1) if (pred(arr[i])) arr.splice(i, 1);
@@ -1853,6 +1866,42 @@ export async function removeMember(userId) {
 
   const { error } = await supabase.rpc('remove_member', { p_user_id: userId });
   if (error) throw error;
+}
+
+// The project's creator changes a teammate's (or their own) role. The number
+// of open seats never changes — see supabase/31_set_member_role.sql.
+export async function setMemberRole(userId, roleId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!roleId || !allRoles.some((r) => r.id === roleId)) throw new Error('Pick a role');
+    const membership = teamMembers.find((tm) => tm.user_id === userId);
+    if (!membership) throw new Error('That student is not on a team');
+    const team = teams.find((t) => t.id === membership.team_id);
+    const project = projects.find((p) => p.id === team.project_id);
+    if (project.creator_id !== id) throw new Error('Only the project creator can change roles');
+    if (membership.role_id === roleId) return membership;
+
+    const need = (rid) =>
+      projectRolesNeeded.find((n) => n.project_id === project.id && n.role_id === rid);
+    // Seat-neutral, like set_member_role(): swap the counts only when the old
+    // role is listed and the new one has a seat open, otherwise touch neither.
+    const old = membership.role_id && need(membership.role_id);
+    const next = need(roleId);
+    if (old && next && next.quantity_needed > 0) {
+      old.quantity_needed += 1;
+      next.quantity_needed -= 1;
+    }
+    membership.role_id = roleId;
+    return membership;
+  }
+
+  const { data, error } = await supabase.rpc('set_member_role', {
+    p_user_id: userId,
+    p_role_id: roleId,
+  });
+  if (error) throw error;
+  return data;
 }
 
 // --- Notifications -------------------------------------------------------
@@ -1990,14 +2039,18 @@ export function subscribeToNotifications(onNew) {
   };
 }
 
-const NOTIFICATION_COLUMNS =
-  'id, kind, project_id, actor_id, by_admin, created_at, read_at, actor:users!actor_id ( name ), project:projects ( title )';
+// `*` rather than a column list, so project_title (32_notify_on_project_delete.sql)
+// is read once it exists, and the feed still loads on a database without it.
+const NOTIFICATION_COLUMNS = '*, actor:users!actor_id ( name ), project:projects ( title )';
 
 function nameNotification({ actor, project, ...n }) {
   return {
     ...n,
     actor_name: actor?.name ?? 'Someone',
-    project_title: project?.title ?? 'a project',
+    // The stored title wins: a 'project_removed' notification deliberately
+    // has no project_id to join on, because the project is gone. Everything
+    // else leaves project_title null and reads it through the join.
+    project_title: n.project_title || project?.title || 'a project',
   };
 }
 
@@ -2005,7 +2058,8 @@ function nameMockNotification(n) {
   return {
     ...n,
     actor_name: users.find((u) => u.id === n.actor_id)?.name ?? 'Someone',
-    project_title: projects.find((p) => p.id === n.project_id)?.title ?? 'a project',
+    project_title:
+      n.project_title || projects.find((p) => p.id === n.project_id)?.title || 'a project',
   };
 }
 
