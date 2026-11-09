@@ -394,11 +394,25 @@ formation deadline (`formation_deadline()`) has passed. The sentences it raises 
 
 ### Email notifications
 
-Email goes out from the `notify-email` Edge Function (`supabase/functions/notify-email/`), which a
-database webhook calls for every new `notifications` row. It only emails kinds that
-`email.js`'s `composeEmail()` knows (today just `'join_request'`) and skips the rest, so a later
-story adds its kind there. It reads the notification back by id with the service role, so nothing
-in the email comes from the request body. Until this is set up, everything in-app still works.
+Email goes out from the `notify-email` Edge Function (`supabase/functions/notify-email/`, issues
+#26 and #21). Two database webhooks call it:
+
+- **every new `notifications` row** — it emails that one recipient if `email.js` knows the kind:
+  `join_request`, `request_accepted`, `request_declined`, `team_complete` (the "team full" email),
+  and `deadline_reminder`, which #43's reminder job will write. Every other kind stays in-app only.
+- **every new `announcements` row** — it emails everyone except the admin who posted it, one email
+  per person, in Resend batches of 100. Edits are not re-sent.
+
+Students can turn off the non-essential ones on their profile (`users.email_notifications`, from
+`36_email_preferences.sql`). Deadline reminders and announcements ignore that flag
+(`ESSENTIAL_KINDS` in `email.js`). Each email links to the same page the bell opens.
+
+The function only takes the row id from the webhook and reads everything else back with the
+service role. Webhooks fire after the row is committed, so a Resend failure can't undo a
+notification. A 429, a 5xx or a network error is retried up to three times (0.5 s, then 1 s), and
+every failure is logged (`send.js`). Each request carries an `Idempotency-Key`
+(`notification-<id>`, or `announcement-<id>-<batch>`), so neither a retry nor a repeated webhook
+emails anyone twice. Until this is set up, everything in-app still works.
 
 One-time setup, with the Supabase CLI linked to the project:
 
@@ -413,8 +427,9 @@ One-time setup, with the Supabase CLI linked to the project:
 4. Dashboard → **Database → Webhooks → Create a new hook**: table `public.notifications`, event
    **Insert**, type **Supabase Edge Functions**, function `notify-email`, method POST. Keep the
    `Authorization` header it adds and add `x-webhook-secret: <the same random string>`.
-5. Check: request to join a project from a second account; the owner gets the email. Failures show
-   under **Edge Functions → notify-email → Logs**.
+5. Create a second hook the same way for table `public.announcements`, event **Insert**.
+6. Check: request to join a project from a second account and the owner gets the email; post an
+   announcement and a student gets it. Failures show under **Edge Functions → notify-email → Logs**.
 
 ## Accepting a join request — one transaction, `respond_to_join_request()`
 

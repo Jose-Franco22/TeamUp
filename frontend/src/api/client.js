@@ -1287,7 +1287,7 @@ export async function removeSkill(skillId) {
 // test in client.test.js that reads 07_profile_evidence.sql and asserts this
 // nesting, so the two cannot drift again.
 export const USER_SELECT =
-  'id, email, name, bio, availability_hours, github_url, is_admin, ' +
+  'id, email, name, bio, availability_hours, github_url, is_admin, email_notifications, ' +
   'user_skills ( source, skills ( id, name, category ), profile_evidence ( months, projects ) )';
 
 // PostgREST returns an embedded child as an object when it can tell the
@@ -1348,6 +1348,24 @@ export async function updateCurrentUser(patch) {
     throw fieldErrors ? new ValidationError(fieldErrors) : error;
   }
   return getCurrentUser();
+}
+
+// Turns the non-essential emails (join requests, request answers, team
+// complete) on or off for the signed-in user (issue #21). Deadline reminders
+// and announcements are emailed either way; notify-email decides that.
+// Saved on its own, apart from the profile form's Save button.
+export async function setEmailNotifications(enabled) {
+  const value = Boolean(enabled);
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    users.find((x) => x.id === id).email_notifications = value;
+    return value;
+  }
+  const viewerId = requireViewerId(await getViewerId());
+  const { error } = await supabase.from('users').update({ email_notifications: value }).eq('id', viewerId);
+  if (error) throw error;
+  return value;
 }
 
 // --- Join requests -----------------------------------------------------

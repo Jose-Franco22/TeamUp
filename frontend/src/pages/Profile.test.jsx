@@ -12,7 +12,11 @@ import { ValidationError } from '../lib/validation';
 // implementation, so individual tests can force a server error.
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, updateCurrentUser: vi.fn(actual.updateCurrentUser) };
+  return {
+    ...actual,
+    updateCurrentUser: vi.fn(actual.updateCurrentUser),
+    setEmailNotifications: vi.fn(actual.setEmailNotifications),
+  };
 });
 
 const ME = 'u-jose';
@@ -23,6 +27,7 @@ beforeEach(() => {
     users.find((u) => u.id === ME),
     { bio: 'Data and computer vision.', availability_hours: 12, github_url: 'https://github.com/Jose-Franco22' }
   );
+  delete users.find((u) => u.id === ME).email_notifications;
 });
 
 async function renderProfile() {
@@ -158,5 +163,60 @@ describe('client.updateCurrentUser', () => {
     await expect(client.updateCurrentUser({ availability_hours: 41 })).rejects.toBeInstanceOf(ValidationError);
     await expect(client.updateCurrentUser({ github_url: 'javascript:alert(1)' })).rejects.toThrow(/GitHub/);
     expect(users.find((u) => u.id === ME)).toMatchObject(before);
+  });
+});
+
+// Issue #21 — the email preference.
+describe('email preference', () => {
+  const EMAIL_LABEL = /Email me about join requests/;
+
+  test('is on by default and says which emails always go out', async () => {
+    await renderProfile();
+    expect(screen.getByRole('checkbox', { name: EMAIL_LABEL })).toBeChecked();
+    expect(screen.getByText(/Deadline reminders and announcements .* are always emailed/)).toBeInTheDocument();
+  });
+
+  test('turning it off saves right away, without the Save button', async () => {
+    const user = userEvent.setup();
+    const { save } = await renderProfile();
+    const box = screen.getByRole('checkbox', { name: EMAIL_LABEL });
+    await user.click(box);
+    expect(client.setEmailNotifications).toHaveBeenLastCalledWith(false);
+    await waitFor(() => expect(box).not.toBeChecked());
+    expect(users.find((u) => u.id === ME).email_notifications).toBe(false);
+    expect(save).toBeDisabled();
+  });
+
+  test('turning it back on saves true', async () => {
+    users.find((u) => u.id === ME).email_notifications = false;
+    const user = userEvent.setup();
+    await renderProfile();
+    const box = screen.getByRole('checkbox', { name: EMAIL_LABEL });
+    expect(box).not.toBeChecked();
+    await user.click(box);
+    await waitFor(() => expect(box).toBeChecked());
+    expect(client.setEmailNotifications).toHaveBeenLastCalledWith(true);
+    expect(users.find((u) => u.id === ME).email_notifications).toBe(true);
+  });
+
+  test('admins do not see it', async () => {
+    client.setSessionUserId('u-instructor');
+    render(
+      <MemoryRouter>
+        <Profile />
+      </MemoryRouter>
+    );
+    await screen.findByRole('heading', { name: 'Your profile' });
+    expect(screen.queryByRole('checkbox', { name: EMAIL_LABEL })).not.toBeInTheDocument();
+  });
+
+  test('a failed save shows an error and leaves the box as it was', async () => {
+    client.setEmailNotifications.mockRejectedValueOnce(new Error('Network down'));
+    const user = userEvent.setup();
+    await renderProfile();
+    const box = screen.getByRole('checkbox', { name: EMAIL_LABEL });
+    await user.click(box);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Network down');
+    expect(box).toBeChecked();
   });
 });
