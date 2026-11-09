@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getCurrentUser, removeSkill, updateCurrentUser } from '../api/client';
+import { getCurrentUser, removeSkill, setEmailNotifications, updateCurrentUser } from '../api/client';
 import {
   AVAILABILITY_MAX,
   AVAILABILITY_MIN,
@@ -188,6 +188,13 @@ export default function Profile() {
         </div>
       </section>
 
+      {!data.is_admin && (
+        <EmailPreference
+          enabled={data.email_notifications !== false}
+          onSaved={(on) => setData({ ...data, email_notifications: on })}
+        />
+      )}
+
       {!data.is_admin && <section className="card">
         <h2>Skills</h2>
         <p className="desc">
@@ -226,5 +233,38 @@ export default function Profile() {
         </div>
       </section>}
     </>
+  );
+}
+
+// Issue #21: the one email setting. Saves as soon as it's flipped, apart from
+// the form above, and puts the box back if the save fails.
+function EmailPreference({ enabled, onSaved }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function toggle(e) {
+    const next = e.target.checked;
+    setSaving(true);
+    setError(null);
+    try {
+      onSaved(await setEmailNotifications(next));
+    } catch (err) {
+      setError(err.message || 'Could not save your email setting. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h2>Email</h2>
+      <p className="desc">We send these to your UTRGV address so you hear about them when you’re not on TeamUp.</p>
+      <label className="switch">
+        <input type="checkbox" checked={enabled} disabled={saving} onChange={toggle} />
+        Email me about join requests, answers to my requests, and when my team is complete
+      </label>
+      <p className="hint">Deadline reminders and announcements from your instructor are always emailed.</p>
+      {error && <p className="inline-error" role="alert">{error}</p>}
+    </section>
   );
 }
