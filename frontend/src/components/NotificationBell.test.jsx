@@ -127,6 +127,25 @@ describe('NotificationBell', () => {
     expect(notifications.filter((n) => !n.read_at)).toHaveLength(1);
   });
 
+  // Issue #34: a decline has no team page to open, so it goes back to Browse.
+  // The bell starts on /team here so landing on /browse is a real move.
+  test('clicking a declined request opens Browse', async () => {
+    notifications.push(note({ kind: 'request_declined', actor_id: 'u-jose' }));
+    setSessionUserId(ME);
+    render(
+      <MemoryRouter initialEntries={['/team']}>
+        <NotificationBell />
+        <CurrentPath />
+      </MemoryRouter>
+    );
+    expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
+
+    await userEvent.click(bell());
+    await userEvent.click(screen.getByRole('button', { name: /Your request to join .* was declined/ }));
+
+    expect(screen.getByTestId('path')).toHaveTextContent('/browse');
+  });
+
   test('each kind opens its own page', async () => {
     renderBell([note()]);
     await userEvent.click(await screen.findByRole('button', { name: /Notifications \(1 unread\)/ }));
