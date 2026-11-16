@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import NotificationBell from './NotificationBell';
+import NotificationBell, { LINKS } from './NotificationBell';
 import { addMockNotification, getNotificationFeed, setSessionUserId } from '../api/client';
 import { notifications } from '../api/mockData';
 
@@ -36,11 +36,11 @@ function CurrentPath() {
   return <output data-testid="path">{useLocation().pathname}</output>;
 }
 
-function renderBell(seed = []) {
+function renderBell(seed = [], start = '/browse') {
   notifications.push(...seed);
   setSessionUserId(ME);
   render(
-    <MemoryRouter initialEntries={['/browse']}>
+    <MemoryRouter initialEntries={[start]}>
       <NotificationBell />
       <CurrentPath />
     </MemoryRouter>
@@ -79,6 +79,22 @@ describe('NotificationBell', () => {
     expect(screen.getByText('Rita Cano asked to join “Campus parking tracker”')).toBeInTheDocument();
   });
 
+  // Realtime can send the same row again on reconnect; the list already
+  // ignored the repeat, and the count has to as well.
+  test('the same notification delivered twice only counts once', async () => {
+    const seeded = note();
+    renderBell([seeded]);
+    expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
+
+    act(() => addMockNotification(seeded));
+    expect(screen.getByTestId('bell-badge')).toHaveTextContent('1');
+
+    const fresh = note({ actor_id: 'u-rita' });
+    act(() => addMockNotification(fresh));
+    act(() => addMockNotification(fresh));
+    expect(screen.getByTestId('bell-badge')).toHaveTextContent('2');
+  });
+
   test('a notification for someone else doesn’t change the count', async () => {
     renderBell([note()]);
     expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
@@ -111,11 +127,33 @@ describe('NotificationBell', () => {
     expect(notifications.filter((n) => !n.read_at)).toHaveLength(1);
   });
 
-  test('each kind opens its own page', async () => {
-    renderBell([note()]);
-    await userEvent.click(await screen.findByRole('button', { name: /Notifications \(1 unread\)/ }));
-    await userEvent.click(screen.getByRole('button', { name: /asked to join/ }));
-    expect(screen.getByTestId('path')).toHaveTextContent('/requests');
+  // The page each kind should open, written out by hand. Reading these from
+  // LINKS would only compare the map with itself, and pointing
+  // request_declined at /team (#34) would have passed.
+  const EXPECTED_LINKS = {
+    join_request: '/requests',
+    member_left: '/team',
+    member_removed: '/browse',
+    project_removed: '/browse',
+    request_accepted: '/team',
+    request_declined: '/browse',
+    team_complete: '/team',
+  };
+
+  test('every kind in LINKS has an expected page here', () => {
+    expect(Object.keys(EXPECTED_LINKS).sort()).toEqual(Object.keys(LINKS).sort());
+  });
+
+  // Starts somewhere no kind links to, so landing on /browse is a real move.
+  test.each(Object.entries(EXPECTED_LINKS))('clicking a %s notification opens %s', async (kind, page) => {
+    renderBell([note({ kind, project_title: 'Campus parking tracker' })], '/start');
+    expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
+
+    await userEvent.click(bell());
+    const panel = screen.getByRole('region', { name: 'Notifications' });
+    await userEvent.click(within(within(panel).getByRole('list')).getByRole('button'));
+
+    expect(screen.getByTestId('path')).toHaveTextContent(page);
   });
 
   test('"Mark all as read" sets the count to 0', async () => {
@@ -139,5 +177,59 @@ describe('NotificationBell', () => {
     renderBell();
     await userEvent.click(bell());
     expect(await screen.findByText('Nothing yet.')).toBeInTheDocument();
+  });
+});
+
+// --- a project that no longer exists (issue #25) --------------------------
+//
+// The only kind whose project is gone by the time the notification is read.
+// It carries the title instead of a project_id, because a project_id would
+// have cascaded the row away with the project — see
+// supabase/32_notify_on_project_delete.sql.
+
+describe('a deleted project', () => {
+  const removed = () =>
+    note({
+      kind: 'project_removed',
+      project_id: null,
+      project_title: 'Campus parking tracker',
+      actor_id: 'u-sofia',
+    });
+
+  test('says the project went and the request went with it', async () => {
+    renderBell([removed()]);
+    await screen.findByTestId('bell-badge');
+    await userEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
+    expect(
+      screen.getByText(
+        '“Campus parking tracker” was removed, so your request to join it is cancelled'
+      )
+    ).toBeInTheDocument();
+  });
+
+  test('names the project from the stored title, with no project to join on', async () => {
+    renderBell([removed()]);
+    await screen.findByTestId('bell-badge');
+    await userEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
+    // The fallback is "a project"; seeing the real name proves the stored
+    // title is used rather than the join, which has no project_id to follow.
+    expect(screen.getByText(/Campus parking tracker/)).toBeInTheDocument();
+    expect(screen.queryByText(/“a project”/)).not.toBeInTheDocument();
+  });
+
+  test('falls back gracefully if even the title is missing', async () => {
+    renderBell([note({ kind: 'project_removed', project_id: null, project_title: null })]);
+    await screen.findByTestId('bell-badge');
+    await userEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
+    expect(screen.getByText(/“a project” was removed/)).toBeInTheDocument();
+  });
+
+  test('opens Browse, since the project it was about is gone', async () => {
+    const user = userEvent.setup();
+    renderBell([removed()]);
+    await screen.findByTestId('bell-badge');
+    await user.click(screen.getByRole('button', { name: /^Notifications/ }));
+    await user.click(await screen.findByText(/was removed, so your request/));
+    await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/browse'));
   });
 });

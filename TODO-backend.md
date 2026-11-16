@@ -382,13 +382,37 @@ In the app, `RequestAlerts.jsx` shows each unread one above every page ("Ana ask
 “Trail Finder”. Review on your Requests page") and puts the pending count on the Requests tab
 (`getPendingRequestCount()`). Opening `/requests` marks them read.
 
+## A note with the request, and the rest of the refusals (#32)
+
+`supabase/35_join_request_message.sql` adds `join_requests.message` (trimmed, null when empty, at
+most 300 characters by `join_requests_message_length_check`) and replaces `create_join_request()`
+with `create_join_request(p_project_id uuid, p_message text default null)`. The one-argument
+version is dropped first, since both together would make a one-argument call ambiguous. Two more
+refusals run after the original three: the project is full (counted from the roster), and the
+formation deadline (`formation_deadline()`) has passed. The sentences it raises are the ones in
+`frontend/src/lib/joinRequests.js`; `validation.test.js` fails if they drift.
+
 ### Email notifications
 
-Email goes out from the `notify-email` Edge Function (`supabase/functions/notify-email/`), which a
-database webhook calls for every new `notifications` row. It only emails kinds that
-`email.js`'s `composeEmail()` knows (today just `'join_request'`) and skips the rest, so a later
-story adds its kind there. It reads the notification back by id with the service role, so nothing
-in the email comes from the request body. Until this is set up, everything in-app still works.
+Email goes out from the `notify-email` Edge Function (`supabase/functions/notify-email/`, issues
+#26 and #21). Two database webhooks call it:
+
+- **every new `notifications` row** — it emails that one recipient if `email.js` knows the kind:
+  `join_request`, `request_accepted`, `request_declined`, `team_complete` (the "team full" email),
+  and `deadline_reminder`, which #43's reminder job will write. Every other kind stays in-app only.
+- **every new `announcements` row** — it emails everyone except the admin who posted it, one email
+  per person, in Resend batches of 100. Edits are not re-sent.
+
+Students can turn off the non-essential ones on their profile (`users.email_notifications`, from
+`36_email_preferences.sql`). Deadline reminders and announcements ignore that flag
+(`ESSENTIAL_KINDS` in `email.js`). Each email links to the same page the bell opens.
+
+The function only takes the row id from the webhook and reads everything else back with the
+service role. Webhooks fire after the row is committed, so a Resend failure can't undo a
+notification. A 429, a 5xx or a network error is retried up to three times (0.5 s, then 1 s), and
+every failure is logged (`send.js`). Each request carries an `Idempotency-Key`
+(`notification-<id>`, or `announcement-<id>-<batch>`), so neither a retry nor a repeated webhook
+emails anyone twice. Until this is set up, everything in-app still works.
 
 One-time setup, with the Supabase CLI linked to the project:
 
@@ -403,8 +427,9 @@ One-time setup, with the Supabase CLI linked to the project:
 4. Dashboard → **Database → Webhooks → Create a new hook**: table `public.notifications`, event
    **Insert**, type **Supabase Edge Functions**, function `notify-email`, method POST. Keep the
    `Authorization` header it adds and add `x-webhook-secret: <the same random string>`.
-5. Check: request to join a project from a second account; the owner gets the email. Failures show
-   under **Edge Functions → notify-email → Logs**.
+5. Create a second hook the same way for table `public.announcements`, event **Insert**.
+6. Check: request to join a project from a second account and the owner gets the email; post an
+   announcement and a student gets it. Failures show under **Edge Functions → notify-email → Logs**.
 
 ## Accepting a join request — one transaction, `respond_to_join_request()`
 
@@ -532,8 +557,8 @@ adds a `notifications` table: `leave_team()` writes a `'member_left'` row for th
 which `Team.jsx` shows them until they dismiss it. It's an in-app feed only — real push or email
 would need a service worker or a mail provider. (#26 later added email for join requests through an
 Edge Function; see [Email notifications](#email-notifications).) The same file
-adds a class-wide formation deadline, read only through `formation_deadline()` (today it returns
-`app_settings.formation_deadline`; #38 will point it at its milestones table). After it,
+adds a class-wide formation deadline, read only through `formation_deadline()` (since #38 it
+returns the `milestones` row flagged `is_formation_deadline`, from `26_milestones.sql`). After it,
 `leave_team()` refuses students. Taking a student off is an admin's job (#39), and both paths share
 `private.remove_from_team(p_user_id, p_by_admin)` — the one place a seat is given up: it deletes the
 membership, restores the role, resyncs the project and notifies the creator. Only an admin
@@ -547,6 +572,66 @@ still remove any student except the creator after the deadline. The removed stud
 `'member_removed'` notification, which `Team.jsx` shows even once they're off the team. The creator
 is only notified (`'member_left'`, `by_admin`) when an admin did the removal. Once the
 `team_members` row is gone, the student is free to request or start another project.
+
+**Deadlines and milestones.** `26_milestones.sql` (issue #38) adds `public.milestones` (name,
+`due_at`, `is_formation_deadline`), readable by everyone and written only through the admin RPCs
+`save_milestone()` and `delete_milestone()`. A partial unique index allows one formation deadline;
+flagging another milestone moves the flag. `app_settings` is dropped once its date has been carried
+over. After the deadline, a trigger on `projects` and `join_requests` inserts stops students posting
+projects or sending requests (it only checks browser roles, so the SQL editor can still seed data).
+`leave_team()` and `remove_member()` already refuse students. Students see upcoming milestones in a
+banner on every page; admins manage them on the Milestones tab (`/admin/milestones`).
+
+`28_milestone_messages.sql` adds an optional `message` to each milestone and keeps garbage out of
+every milestone field, with CHECK constraints as the boundary and the same raises in
+`save_milestone()` (mirrored in `lib/validation.js`). The name and message have to contain letters
+or numbers, and can't hold control characters or invisible ones (zero-width, bidirectional
+overrides, BOM). The name can't hold line breaks; the message allows them, but not two blank lines
+in a row, and is capped at 1000 characters. Due dates have to fall in 2000–2099. None of the #38/#39
+functions build SQL from text (no `EXECUTE`), and every id argument is typed `uuid`, so injection
+attempts are stored or refused as plain values. `milestone_input_safety.test.sql` throws garbage,
+SQL and HTML payloads at all of it.
+
+**Announcements.** `29_announcements.sql` adds `public.announcements` (title, body, author,
+timestamps), readable by signed-in users and written only through the admin RPCs
+`save_announcement()` and `delete_announcement()`. The title and body CHECK constraints use the
+same rules as milestone messages, and both are required. `announcement_feed()` returns them with
+the author's name, because students can't read admin rows under `users` RLS.
+`unseen_announcement_count()` and `mark_announcements_seen()` drive the tab's badge through
+`users.announcements_seen_at`. Anything with `updated_at` after that time counts as new, so an
+edited announcement or a moved deadline shows up again. Admins always get 0.
+
+**Admins place students.** `27_admin_placement.sql` (issue #39) adds `admin_assign_student()` and
+`admin_move_student()`. Both take a student, a team with an open seat, and a role, and work after the
+deadline. They seat a student the way an accepted request does: the role's seat is taken, the
+project fills, and any pending requests are declined. A move also reopens the old team, and a
+project's creator can't be moved. The student gets `'member_assigned'`, the new team's owner gets
+`'member_added'`, and on a move the old owner gets `'member_left'` (all `by_admin`). Every admin
+assign, move and removal writes a `public.admin_actions` row (admin, action, student, teams, role,
+time), readable only by admins and shown on `/admin` via `admin_recent_actions()`. Accepting a
+request that was already pending at the deadline is still allowed; the issue didn't ask for that to
+lock.
+
+**Next steps.** `33_next_steps.sql` (issue #42) adds `public.next_steps` (`title`, optional
+`due_at`, `sort_order` 1..n), readable by signed-in users and written only through the admin RPCs
+`save_next_step()`, `delete_next_step()` and `reorder_next_steps()`. The title follows the
+milestone name rules (CHECK constraints, mirrored in `lib/validation.js`). `sort_order` is unique,
+but the constraint is checked at the end of each statement, so a reorder is one atomic `UPDATE`.
+`reorder_next_steps()` takes every id in the new order and refuses anything else, so a stale list
+can't scramble the order. Deleting a step closes the gap. It also adds
+`public.next_step_completions` (`team_id`, `step_id`, `completed_by`, `completed_at`; primary key
+`(team_id, step_id)`, cascading from both), readable by that team's members and admins, with no
+write path yet: #30 adds the function that checks an item off, and the "team complete"
+notification. `admin_dashboard()` and `admin_team_details()` add `next_steps: { done, total }` to
+each team.
+
+**Next steps (#30).** `34_next_steps.sql` builds on #42's tables: it adds the write path for
+`next_step_completions`, `set_next_step_done(team, step, done)` (members of a full team only;
+re-checking a done item keeps the first completer), and `team_checklist(team)`, which returns every
+step in `sort_order` with the team's progress and the completer's name. A trigger on
+`projects.status` sends every member a `'team_complete'` notification when a project goes from open
+to full, so accepting a request, an admin placing a student, and an owner lowering the target are
+all covered.
 
 ## Deleting a team — `delete_team()`
 
@@ -774,3 +859,46 @@ Then work through the checks below.
   requester hears back when their request is answered.
 - **No way to remove yourself as owner** other than deleting the team, and no way to transfer
   ownership. Both are fine for now; flagged in case the scope grows.
+
+### AI fit review (the `fit-review` Edge Function)
+
+The Browse card's score comes from the point system in
+`frontend/src/lib/matching/fit.js`, which runs in the browser, instantly and
+offline. **Get AI verdict** is the optional second stage: it sends the project,
+the student's skills and the point system's own working to Gemini, which reads
+the project *description* — the one thing a skill-id comparison cannot — and
+answers with its own score. That score then replaces the number in the ring.
+
+The key never reaches the browser. Vite inlines every `VITE_*` variable into
+the public bundle, so the call goes to our own Edge Function and only it holds
+`GEMINI_API_KEY`.
+
+Set it up:
+
+```bash
+supabase secrets set GEMINI_API_KEY=<key from https://aistudio.google.com/apikey>
+supabase functions deploy fit-review
+```
+
+Optional: `supabase secrets set GEMINI_MODEL=<model>`. The default is
+`gemini-3.1-flash-lite`. Measured on 2026-10-14 against the real prompt, three
+students: `gemini-3.1-flash-lite` answered in 1.6–3.3 s and
+`gemini-3.5-flash-lite` in 11–17 s, with identical scores and no thinking
+tokens, so the faster one is the default.
+
+**Until it is deployed, nothing breaks.** Every failure — no key, not
+deployed, rate limited, offline, slow, or a reply that cannot be read — leaves
+the point score on screen with a one-line note saying the review was not
+available. The button only appears when `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY` are set, and never on a project scoring zero, where
+the point system is already certain and the call would be wasted.
+
+Nothing personal is sent. No name, email or id goes into the payload — the
+free tier's terms forbid personal information, and none of it helps judge a
+skills match. `buildPayload()` copies each field out by hand rather than
+spreading objects, precisely so a new column on `users` cannot leak into the
+prompt later; `judge.test.js` asserts it against a student carrying every
+identifier the app has.
+
+The free tier allows 15 requests a minute. One press of the button is one
+call, and a 429 is reported as "try again in a minute" rather than an error.

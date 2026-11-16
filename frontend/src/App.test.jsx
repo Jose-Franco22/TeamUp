@@ -6,6 +6,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import App from './App';
+import { announcements, announcementsSeenAt } from './api/mockData';
 import { SessionProvider } from './auth/SessionContext';
 import { ThemeProvider } from './theme/ThemeContext';
 
@@ -109,13 +110,27 @@ describe('first-sign-in walkthrough', () => {
     await user.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
 
-    // Walk to the end; the last step's button finishes the tour.
-    while (!screen.queryByRole('button', { name: 'Browse projects' })) {
-      await user.click(screen.getByRole('button', { name: 'Next' }));
-    }
-    await user.click(screen.getByRole('button', { name: 'Browse projects' }));
+    // Two steps: skills, then the choice. The choice is the way forward,
+    // so the last step has no Next.
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByRole('heading', { name: 'Find your team' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('list', { name: 'Step 2 of 2' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Browse projects/ }));
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(path()).toBe('/browse');
+    expect(JSON.parse(localStorage.getItem(ONBOARDED_KEY))).toContain('u-jose');
+  });
+
+  test('choosing to create a project finishes the tour on the create page', async () => {
+    renderApp('/browse', { signedInAs: 'u-sofia', onboarded: false });
+    const dialog = await screen.findByRole('dialog');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: /Create a project/ }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(path()).toBe('/projects/new');
+    expect(JSON.parse(localStorage.getItem(ONBOARDED_KEY))).toContain('u-sofia');
   });
 });
 
@@ -137,6 +152,7 @@ describe('admin access (#36)', () => {
     renderApp('/admin', { signedInAs: 'u-instructor', onboarded: false });
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(screen.getByRole('link', { name: 'Milestones' })).toHaveAttribute('href', '/admin/milestones');
     expect(screen.queryByRole('link', { name: 'Create a project' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Your team' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -146,6 +162,24 @@ describe('admin access (#36)', () => {
     renderApp(start, { signedInAs: 'u-instructor' });
     await waitFor(() => expect(path()).toBe('/admin'));
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
+  });
+
+  test('milestones have their own admin tab (#38)', async () => {
+    renderApp('/admin', { signedInAs: 'u-instructor' });
+    await screen.findByRole('heading', { name: 'Administration' });
+    expect(screen.queryByRole('form', { name: 'Add a milestone' })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('link', { name: 'Milestones' }));
+    expect(await screen.findByRole('heading', { name: 'Deadlines and milestones' })).toBeInTheDocument();
+    expect(path()).toBe('/admin/milestones');
+    expect(screen.getByRole('form', { name: 'Add a milestone' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Milestones' })).toHaveClass('on');
+    expect(screen.getByRole('link', { name: 'Admin' })).not.toHaveClass('on');
+  });
+
+  test('students opening /admin/milestones are redirected', async () => {
+    renderApp('/admin/milestones', { signedInAs: 'u-adan' });
+    await waitFor(() => expect(path()).toBe('/browse'));
+    expect(screen.queryByRole('link', { name: 'Milestones' })).not.toBeInTheDocument();
   });
 
   test('admin sign-out removes admin navigation and returns to login', async () => {
@@ -227,5 +261,37 @@ describe('phone menu (#46)', () => {
 
     await waitFor(() => expect(path()).toBe('/login'));
     expect(screen.queryByRole('button', { name: /menu/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('announcements tab', () => {
+  const post = (id) => ({
+    id, title: `Announcement ${id}`, body: 'Something for the class.',
+    author_id: 'u-instructor', created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  });
+
+  test('students see how many are new, and opening the page clears it', async () => {
+    announcements.length = 0;
+    delete announcementsSeenAt['u-sofia'];
+    announcements.push(post('a'), post('b'));
+    renderApp('/browse', { signedInAs: 'u-sofia' });
+
+    const tab = await screen.findByRole('link', { name: 'Announcements (2 new)' });
+    expect(tab).toHaveAttribute('href', '/announcements');
+    await userEvent.setup().click(tab);
+    expect(await screen.findByRole('heading', { name: 'Announcements', level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Announcements' })).toBeInTheDocument());
+    // The page lists deadlines itself, so the banner steps aside there.
+    expect(document.querySelector('.milestone-banner')).toBeNull();
+    announcements.length = 0;
+  });
+
+  test('admins get the tab too, without a count', async () => {
+    announcements.length = 0;
+    announcements.push(post('c'));
+    renderApp('/admin', { signedInAs: 'u-instructor' });
+    await screen.findByRole('heading', { name: 'Administration' });
+    expect(screen.getByRole('link', { name: 'Announcements' })).toHaveAttribute('href', '/announcements');
+    announcements.length = 0;
   });
 });

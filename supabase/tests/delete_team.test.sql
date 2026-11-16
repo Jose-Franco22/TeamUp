@@ -5,12 +5,15 @@
 -- and every request anyone sent it. The UI asks for confirmation, but the UI
 -- is not the boundary: anyone signed in can call this function directly.
 begin;
-select plan(22);
+select plan(38);
 
 select set_config('tests.owner',    tests.sign_in_with_microsoft('owner25@utrgv.edu', 'Owner')::text, true);
 select set_config('tests.joiner',   tests.sign_in_with_microsoft('joiner25@utrgv.edu', 'Joiner')::text, true);
 select set_config('tests.asker',    tests.sign_in_with_microsoft('asker25@utrgv.edu', 'Asker')::text, true);
 select set_config('tests.stranger', tests.sign_in_with_microsoft('stranger25@utrgv.edu', 'Stranger')::text, true);
+select set_config('tests.waiting', tests.sign_in_with_microsoft('waiting25@utrgv.edu', 'Waiting')::text, true);
+select set_config('tests.declined', tests.sign_in_with_microsoft('declined25@utrgv.edu', 'Declined')::text, true);
+select set_config('tests.waiting2', tests.sign_in_with_microsoft('waiting2_34@utrgv.edu', 'Waiting Too')::text, true);
 
 select set_config('tests.r_pm', (select id from public.roles where name = 'Project Manager')::text, true);
 select set_config('tests.r_fe', (select id from public.roles where name = 'Frontend Developer')::text, true);
@@ -144,12 +147,151 @@ select lives_ok(
   $$ select public.delete_team(current_setting('tests.team')::uuid) $$,
   'and can now delete the team');
 
+-- Their request was answered (accepted) long before the delete, so the
+-- delete has nothing new to tell them (issue #34).
+select tests.clear_authentication();
+select is(
+  (select count(*)::int from public.notifications
+    where user_id = current_setting('tests.joiner')::uuid and kind = 'project_removed'),
+  0,
+  'the student whose request was accepted earlier is not told the project was removed');
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+
 -- --- a team that is not there --------------------------------------------
 
 select throws_like(
   $$ select public.delete_team(gen_random_uuid()) $$,
   '%Team not found%',
   'deleting a team that does not exist is an error, not a silent no-op');
+
+-- --- the people left waiting are told (issue #25) ------------------------
+--
+-- The cascade cancels their requests; this is the half that was missing.
+-- The notification cannot reference the project — notifications.project_id
+-- is `on delete cascade`, so it would be deleted a moment later along with
+-- the project it points at. It carries the title instead.
+
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select set_config('tests.project', tests.make_project()::text, true);
+select set_config('tests.team', tests.team_of(current_setting('tests.project')::uuid)::text, true);
+
+-- Two students still waiting, and one already turned down.
+select tests.authenticate_as(current_setting('tests.waiting')::uuid);
+select set_config('tests.req_waiting',
+  (select (public.create_join_request(current_setting('tests.project')::uuid)).id::text), true);
+
+select tests.authenticate_as(current_setting('tests.waiting2')::uuid);
+select set_config('tests.req_waiting2',
+  (select (public.create_join_request(current_setting('tests.project')::uuid)).id::text), true);
+
+select tests.authenticate_as(current_setting('tests.declined')::uuid);
+select set_config('tests.req_declined',
+  (select (public.create_join_request(current_setting('tests.project')::uuid)).id::text), true);
+
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select lives_ok(
+  $$ select public.respond_to_join_request(current_setting('tests.req_declined')::uuid, 'declined') $$,
+  'one of the two is turned down before the project is deleted');
+
+select tests.clear_authentication();
+select is(
+  (select count(*)::int from public.notifications
+    where user_id = current_setting('tests.waiting')::uuid and kind = 'project_removed'),
+  0,
+  'nobody has been told anything yet');
+
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select lives_ok(
+  $$ select public.delete_team(current_setting('tests.team')::uuid) $$,
+  'the creator deletes the project out from under them');
+
+select tests.clear_authentication();
+
+select is(
+  (select count(*)::int from public.notifications
+    where user_id = current_setting('tests.waiting')::uuid and kind = 'project_removed'),
+  1,
+  'the student who was still waiting is told');
+
+-- Issue #34: every pending requester, not just the first one found.
+select is(
+  (select count(*)::int from public.notifications
+    where user_id = current_setting('tests.waiting2')::uuid and kind = 'project_removed'),
+  1,
+  'so is the second student still waiting');
+
+select is(
+  (select count(*)::int from public.notifications
+    where kind = 'project_removed'
+      and user_id in (current_setting('tests.waiting')::uuid,
+                      current_setting('tests.waiting2')::uuid,
+                      current_setting('tests.declined')::uuid)),
+  2,
+  'exactly one notification per pending requester, and none for the answered one');
+
+-- The whole reason the title is copied rather than referenced.
+select is(
+  (select project_title from public.notifications
+    where user_id = current_setting('tests.waiting')::uuid and kind = 'project_removed'),
+  'Campus parking tracker',
+  'and the notification names the project, which no longer exists to be joined to');
+
+select is(
+  (select project_id from public.notifications
+    where user_id = current_setting('tests.waiting')::uuid and kind = 'project_removed'),
+  null,
+  'project_id is null on purpose — set, it would cascade this row away with the project');
+
+select is(
+  (select actor_id from public.notifications
+    where user_id = current_setting('tests.waiting')::uuid and kind = 'project_removed'),
+  current_setting('tests.owner')::uuid,
+  'and records who deleted it');
+
+-- Someone already answered does not need telling twice.
+select is(
+  (select count(*)::int from public.notifications
+    where user_id = current_setting('tests.declined')::uuid and kind = 'project_removed'),
+  0,
+  'the student already turned down is not told again');
+
+-- The notification outlives the thing it is about: that is the point.
+select is(
+  (select count(*)::int from public.projects where id = current_setting('tests.project')::uuid),
+  0,
+  'the project is gone');
+select is(
+  (select count(*)::int from public.join_requests where id = current_setting('tests.req_waiting')::uuid),
+  0,
+  'their request went with it');
+select is(
+  (select count(*)::int from public.notifications
+    where user_id = current_setting('tests.waiting')::uuid and kind = 'project_removed'),
+  1,
+  'but the notification survived the cascade that took both');
+
+-- --- deleting a project nobody asked about -------------------------------
+
+-- Counted before and after rather than against a fixed number: earlier
+-- sections of this file delete projects that had pending requests too, so
+-- the running total is not 1 and asserting it would only measure how many
+-- tests came first.
+select set_config(
+  'tests.notices_before',
+  (select count(*)::text from public.notifications where kind = 'project_removed'),
+  true);
+
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select set_config('tests.project', tests.make_project()::text, true);
+select set_config('tests.team', tests.team_of(current_setting('tests.project')::uuid)::text, true);
+select lives_ok(
+  $$ select public.delete_team(current_setting('tests.team')::uuid) $$,
+  'a project with no requests deletes without complaint');
+select tests.clear_authentication();
+select is(
+  (select count(*)::int from public.notifications where kind = 'project_removed'),
+  current_setting('tests.notices_before')::int,
+  'and tells nobody, because there was nobody to tell');
 
 select * from finish();
 rollback;

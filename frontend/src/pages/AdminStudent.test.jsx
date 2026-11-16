@@ -2,11 +2,22 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import AdminStudent from './AdminStudent';
-import { getAdminStudent } from '../api/client';
-import { QUIET_STUDENT, UNPLACED_STUDENT } from '../test/adminFixtures';
+import { getAdminDashboard, getAdminStudent, getRoles } from '../api/client';
+import { DASHBOARD, QUIET_STUDENT, UNPLACED_STUDENT } from '../test/adminFixtures';
 
-vi.mock('../api/client', () => ({ getAdminStudent: vi.fn() }));
-beforeEach(() => getAdminStudent.mockReset().mockResolvedValue(UNPLACED_STUDENT));
+vi.mock('../api/client', () => ({
+  getAdminStudent: vi.fn(),
+  getAdminDashboard: vi.fn(),
+  getRoles: vi.fn(),
+  adminAssignStudent: vi.fn(),
+  adminMoveStudent: vi.fn(),
+  removeMember: vi.fn(),
+}));
+beforeEach(() => {
+  getAdminStudent.mockReset().mockResolvedValue(UNPLACED_STUDENT);
+  getAdminDashboard.mockResolvedValue(DASHBOARD);
+  getRoles.mockResolvedValue([]);
+});
 
 function renderStudent() {
   render(<MemoryRouter initialEntries={['/admin/students/adan']}>
@@ -23,7 +34,9 @@ test('opens an unplaced student profile with skills, availability and pending re
   expect(screen.getByText('Not on a team.')).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'GitHub profile' })).toHaveAttribute('href', 'https://github.com/adanbarrera');
   expect(screen.getByRole('link', { name: 'Campus parking tracker' })).toHaveAttribute('href', '/admin/teams/team-open');
-  expect(screen.queryByRole('button', { name: /save|assign|remove/i })).not.toBeInTheDocument();
+  // Profiles stay read-only; the only actions are placement ones (#39).
+  expect(screen.queryByRole('button', { name: /save|remove/i })).not.toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Assign Adan' })).toBeDisabled();
 });
 
 test('a placed student links to their team and role', async () => {

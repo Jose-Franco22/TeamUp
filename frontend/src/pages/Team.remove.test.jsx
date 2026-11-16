@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Team from './Team';
 import * as client from '../api/client';
-import { appSettings, notifications, projects, teamMembers, teams } from '../api/mockData';
+import { setFormationDeadline, notifications, projects, teamMembers, teams } from '../api/mockData';
 import { SessionProvider } from '../auth/SessionContext';
 
 // Spy on removeMember but keep the real (mock-mode) implementation, so a
@@ -35,7 +35,7 @@ afterEach(() => {
   teams.splice(0, teams.length, ...snapshot.teams);
   projects.splice(0, projects.length, ...snapshot.projects);
   notifications.length = 0;
-  appSettings.formation_deadline = null;
+  setFormationDeadline(null);
 });
 
 async function renderTeamAs(userId, heading = 'Your team') {
@@ -105,21 +105,21 @@ describe('removing', () => {
 
 describe('formation deadline', () => {
   test('after the deadline the creator gets no Remove buttons and is pointed to an admin', async () => {
-    appSettings.formation_deadline = '2020-01-01T00:00:00Z';
+    setFormationDeadline('2020-01-01T00:00:00Z');
     await renderTeamAs(CREATOR);
     expect(removeButtons()).toHaveLength(0);
     expect(screen.getByText(/To remove a member, ask an admin/)).toBeInTheDocument();
   });
 
   test('removeMember() itself refuses the creator after the deadline', async () => {
-    appSettings.formation_deadline = '2020-01-01T00:00:00Z';
+    setFormationDeadline('2020-01-01T00:00:00Z');
     client.setSessionUserId(CREATOR);
     await expect(client.removeMember(MEMBER)).rejects.toThrow(/formation deadline has passed/);
     expect(teamMembers.some((tm) => tm.user_id === MEMBER)).toBe(true);
   });
 
   test('an admin can still remove after the deadline, and the creator is told', async () => {
-    appSettings.formation_deadline = '2020-01-01T00:00:00Z';
+    setFormationDeadline('2020-01-01T00:00:00Z');
     client.setSessionUserId(ADMIN);
     await client.removeMember(MEMBER);
     expect(teamMembers.some((tm) => tm.user_id === MEMBER)).toBe(false);

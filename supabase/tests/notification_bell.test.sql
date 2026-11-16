@@ -1,5 +1,5 @@
 -- The notification bell (issue #20): who can read, mark and write
--- notifications. 20_leave_team_rules.sql and 24_notification_bell.sql.
+-- notifications. 20_leave_team_rules.sql and 30_notification_bell.sql.
 -- "A join request notifies the creator once" lives in
 -- join_request_notifications.test.sql; this file relies on it for setup.
 begin;

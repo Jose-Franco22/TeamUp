@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
-import { getAdminDashboard } from '../api/client';
+import { getAdminActions, getAdminDashboard } from '../api/client';
+import { formatDue } from '../components/Milestones';
 import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
 import StatusPill from '../components/StatusPill';
@@ -14,6 +15,54 @@ export function PendingProjectLinks({ requests }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+const ACTION_TEXT = {
+  assign: (a) => `placed ${a.student_name ?? 'a student'} on “${a.to_project_title}”`,
+  move: (a) => `moved ${a.student_name ?? 'a student'} from “${a.from_project_title}” to “${a.to_project_title}”`,
+  remove: (a) => `took ${a.student_name ?? 'a student'} off “${a.from_project_title}”`,
+};
+
+// Every admin placement change (issue #39), newest first.
+export function RecentChanges() {
+  const { data, loading, error, reload } = useAsync(() => getAdminActions(20), []);
+  return (
+    <section aria-labelledby="changes-heading">
+      <h2 className="section" id="changes-heading">Recent admin changes</h2>
+      {loading ? <Loading label="Loading changes" /> : error ? <ErrorState error={error} onRetry={reload} /> : data.length === 0 ? (
+        <Empty title="No admin changes yet."><p>Assignments, moves and removals show up here.</p></Empty>
+      ) : (
+        <div className="card">
+          <ul className="admin-list" aria-label="Recent admin changes">
+            {data.map((a) => (
+              <li key={a.id}>
+                {a.admin_name ?? 'An admin'} {ACTION_TEXT[a.action]?.(a) ?? a.action}
+                {a.role_name && a.action !== 'remove' ? ` as ${a.role_name}` : ''}
+                <span className="admin-secondary">{formatDue(a.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// How far a team is through the next-steps checklist (issue #42). Teams
+// only see the checklist once they're complete (#30), so an open team has
+// nothing to show yet.
+export function NextStepProgress({ team }) {
+  const progress = team.next_steps;
+  if (!progress) return null;
+  if (progress.total === 0) {
+    return <span className="desc">No checklist yet</span>;
+  }
+  if (team.status !== 'full' && progress.done === 0) return <span className="desc">Not complete yet</span>;
+  return (
+    <span className={progress.done === progress.total ? 'next-step-progress done' : 'next-step-progress'}>
+      {progress.done} of {progress.total} done
+    </span>
   );
 }
 
@@ -46,7 +95,7 @@ export default function Admin() {
         ) : (
           <div className="admin-table-wrap">
             <table className="admin-table" aria-labelledby="all-teams-heading">
-              <thead><tr><th scope="col">Team</th><th scope="col">Members and roles</th><th scope="col">Seats filled</th><th scope="col">Status</th></tr></thead>
+              <thead><tr><th scope="col">Team</th><th scope="col">Members and roles</th><th scope="col">Seats filled</th><th scope="col">Status</th><th scope="col">Next steps</th></tr></thead>
               <tbody>
                 {data.teams.map((t) => (
                   <tr key={t.id}>
@@ -65,6 +114,7 @@ export default function Admin() {
                     </td>
                     <td>{t.member_count} of {t.team_size_target}</td>
                     <td><StatusPill status={t.status} /></td>
+                    <td><NextStepProgress team={t} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -96,6 +146,8 @@ export default function Admin() {
           </div>
         )}
       </section>
+
+      <RecentChanges />
     </>
   );
 }
