@@ -395,13 +395,18 @@ formation deadline (`formation_deadline()`) has passed. The sentences it raises 
 ### Email notifications
 
 Email goes out from the `notify-email` Edge Function (`supabase/functions/notify-email/`, issues
-#26 and #21). Two database webhooks call it:
+#26, #21 and #59). Three database webhooks call it:
 
 - **every new `notifications` row** — it emails that one recipient if `email.js` knows the kind:
   `join_request`, `request_accepted`, `request_declined`, `team_complete` (the "team full" email),
   and `deadline_reminder`, which #43's reminder job will write. Every other kind stays in-app only.
 - **every new `announcements` row** — it emails everyone except the admin who posted it, one email
   per person, in Resend batches of 100. Edits are not re-sent.
+- **every new `adviser_digests` row** — it emails that adviser their weekly digest (#59,
+  `digest.js`). The rows come from `private.send_adviser_digests()`, which pg_cron runs Mondays at
+  13:00 and 14:00 UTC and which only acts at 8:00 AM Central (`38_adviser_digest.sql`). Advisers
+  turn it off on their profile (`users.adviser_digest`). Until #53/#54 link advisers to teams,
+  `private.advised_teams()` is a stub that returns nothing, so no digest is sent.
 
 Students can turn off the non-essential ones on their profile (`users.email_notifications`, from
 `36_email_preferences.sql`). Deadline reminders and announcements ignore that flag
@@ -427,7 +432,8 @@ One-time setup, with the Supabase CLI linked to the project:
 4. Dashboard → **Database → Webhooks → Create a new hook**: table `public.notifications`, event
    **Insert**, type **Supabase Edge Functions**, function `notify-email`, method POST. Keep the
    `Authorization` header it adds and add `x-webhook-secret: <the same random string>`.
-5. Create a second hook the same way for table `public.announcements`, event **Insert**.
+5. Create a second hook the same way for table `public.announcements`, event **Insert**, and a
+   third for `public.adviser_digests`, event **Insert**.
 6. Check: request to join a project from a second account and the owner gets the email; post an
    announcement and a student gets it. Failures show under **Edge Functions → notify-email → Logs**.
 

@@ -1287,7 +1287,7 @@ export async function removeSkill(skillId) {
 // test in client.test.js that reads 07_profile_evidence.sql and asserts this
 // nesting, so the two cannot drift again.
 export const USER_SELECT =
-  'id, email, name, bio, availability_hours, github_url, is_admin, email_notifications, ' +
+  'id, email, name, bio, availability_hours, github_url, is_admin, email_notifications, adviser_digest, ' +
   'user_skills ( source, skills ( id, name, category ), profile_evidence ( months, projects ) )';
 
 // PostgREST returns an embedded child as an object when it can tell the
@@ -1364,6 +1364,24 @@ export async function setEmailNotifications(enabled) {
   }
   const viewerId = requireViewerId(await getViewerId());
   const { error } = await supabase.from('users').update({ email_notifications: value }).eq('id', viewerId);
+  if (error) throw error;
+  return value;
+}
+
+// Turns the Monday email digest of the teams they advise on or off for the
+// signed-in adviser (issue #59). Saved on its own, like the student email
+// setting above. Only advisers see the switch; the digest job only reads it
+// for them (supabase/38_adviser_digest.sql).
+export async function setAdviserDigest(enabled) {
+  const value = Boolean(enabled);
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    users.find((x) => x.id === id).adviser_digest = value;
+    return value;
+  }
+  const viewerId = requireViewerId(await getViewerId());
+  const { error } = await supabase.from('users').update({ adviser_digest: value }).eq('id', viewerId);
   if (error) throw error;
   return value;
 }
