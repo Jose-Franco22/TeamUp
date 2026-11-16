@@ -11,7 +11,7 @@ import {
 // The page each kind opens. Worked out here rather than stored, as
 // supabase/20_leave_team_rules.sql describes. A student taken off a team, or
 // turned down, has no team page to go to, so they're sent to Browse.
-const LINKS = {
+export const LINKS = {
   // Only sent to students who aren't on a full team (#43), so Browse is
   // where they'd go to find one.
   deadline_reminder: '/browse',
