@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import NotificationBell from './NotificationBell';
+import NotificationBell, { LINKS } from './NotificationBell';
 import { addMockNotification, getNotificationFeed, setSessionUserId } from '../api/client';
 import { notifications } from '../api/mockData';
 
@@ -36,11 +36,11 @@ function CurrentPath() {
   return <output data-testid="path">{useLocation().pathname}</output>;
 }
 
-function renderBell(seed = []) {
+function renderBell(seed = [], start = '/browse') {
   notifications.push(...seed);
   setSessionUserId(ME);
   render(
-    <MemoryRouter initialEntries={['/browse']}>
+    <MemoryRouter initialEntries={[start]}>
       <NotificationBell />
       <CurrentPath />
     </MemoryRouter>
@@ -127,30 +127,33 @@ describe('NotificationBell', () => {
     expect(notifications.filter((n) => !n.read_at)).toHaveLength(1);
   });
 
-  // Issue #34: a decline has no team page to open, so it goes back to Browse.
-  // The bell starts on /team here so landing on /browse is a real move.
-  test('clicking a declined request opens Browse', async () => {
-    notifications.push(note({ kind: 'request_declined', actor_id: 'u-jose' }));
-    setSessionUserId(ME);
-    render(
-      <MemoryRouter initialEntries={['/team']}>
-        <NotificationBell />
-        <CurrentPath />
-      </MemoryRouter>
-    );
+  // The page each kind should open, written out by hand. Reading these from
+  // LINKS would only compare the map with itself, and pointing
+  // request_declined at /team (#34) would have passed.
+  const EXPECTED_LINKS = {
+    join_request: '/requests',
+    member_left: '/team',
+    member_removed: '/browse',
+    project_removed: '/browse',
+    request_accepted: '/team',
+    request_declined: '/browse',
+    team_complete: '/team',
+  };
+
+  test('every kind in LINKS has an expected page here', () => {
+    expect(Object.keys(EXPECTED_LINKS).sort()).toEqual(Object.keys(LINKS).sort());
+  });
+
+  // Starts somewhere no kind links to, so landing on /browse is a real move.
+  test.each(Object.entries(EXPECTED_LINKS))('clicking a %s notification opens %s', async (kind, page) => {
+    renderBell([note({ kind, project_title: 'Campus parking tracker' })], '/start');
     expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
 
     await userEvent.click(bell());
-    await userEvent.click(screen.getByRole('button', { name: /Your request to join .* was declined/ }));
+    const panel = screen.getByRole('region', { name: 'Notifications' });
+    await userEvent.click(within(within(panel).getByRole('list')).getByRole('button'));
 
-    expect(screen.getByTestId('path')).toHaveTextContent('/browse');
-  });
-
-  test('each kind opens its own page', async () => {
-    renderBell([note()]);
-    await userEvent.click(await screen.findByRole('button', { name: /Notifications \(1 unread\)/ }));
-    await userEvent.click(screen.getByRole('button', { name: /asked to join/ }));
-    expect(screen.getByTestId('path')).toHaveTextContent('/requests');
+    expect(screen.getByTestId('path')).toHaveTextContent(page);
   });
 
   test('"Mark all as read" sets the count to 0', async () => {
