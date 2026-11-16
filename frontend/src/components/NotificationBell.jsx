@@ -12,6 +12,9 @@ import {
 // supabase/20_leave_team_rules.sql describes. A student taken off a team, or
 // turned down, has no team page to go to, so they're sent to Browse.
 const LINKS = {
+  // Only sent to students who aren't on a full team (#43), so Browse is
+  // where they'd go to find one.
+  deadline_reminder: '/browse',
   join_request: '/requests',
   member_left: '/team',
   member_removed: '/browse',
@@ -30,6 +33,12 @@ export function notificationLink(n) {
 export function notificationText(n) {
   const project = `“${n.project_title}”`;
   switch (n.kind) {
+    // About no project: it's the class-wide formation deadline
+    // (supabase/37_deadline_reminders.sql). Says what to do rather than how
+    // long is left, which the deadline banner already counts down and which
+    // would be out of date by the time an old reminder is read.
+    case 'deadline_reminder':
+      return "The team formation deadline is coming up and you're not on a full team yet — find a team before rosters lock";
     case 'join_request':
       return `${n.actor_name} asked to join ${project}`;
     case 'member_left':

@@ -618,6 +618,21 @@ step in `sort_order` with the team's progress and the completer's name. A trigge
 to full, so accepting a request, an admin placing a student, and an owner lowering the target are
 all covered.
 
+**Deadline reminders (#43).** `37_deadline_reminders.sql` adds `'deadline_reminder'` to
+`notifications_kind_check` and a job, `private.send_deadline_reminders(p_now default now())`, that
+pg_cron runs at the top of every hour (job `deadline-reminders`, `0 * * * *`). Every non-admin who
+isn't on a team whose project is `'full'` gets the 3-day reminder once `now` is within 3 days of
+`formation_deadline()`, and the 1-day reminder once it's within 1 day; nothing is sent before that,
+at or after the deadline, or when there is no deadline. Sent reminders are recorded in
+`private.deadline_reminders`, keyed `(user_id, deadline_at, days_before)`, so a second run (even a
+concurrent one) sends nothing, while moving the deadline sends reminders for the new date. The
+notification has no project or actor; it reaches email through the same `notifications` webhook
+(`email.js` handles the kind once #21 is merged). The job is not callable from the app. pg_cron
+must be enabled (Database → Extensions; it already is on the live project) before applying the
+file, or the job isn't scheduled and the file says so in a NOTICE. To check it's scheduled:
+`select jobname, schedule, active from cron.job where jobname = 'deadline-reminders';` and the runs
+are in `cron.job_run_details`.
+
 ## Deleting a team — `delete_team()`
 
 > This section assumes the function approach. A single DELETE policy on `projects` would also

@@ -211,3 +211,41 @@ describe('a deleted project', () => {
     await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/browse'));
   });
 });
+
+// --- deadline reminders (issue #43) ----------------------------------------
+//
+// Written hourly by supabase/37_deadline_reminders.sql for students who
+// aren't on a full team. Like every kind, they arrive in the bell.
+
+describe('a deadline reminder', () => {
+  const reminder = () =>
+    note({ kind: 'deadline_reminder', project_id: null, actor_id: null, project_title: null });
+
+  test('says the deadline is coming up, without naming a project', async () => {
+    renderBell([reminder()]);
+    expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
+    await userEvent.click(bell());
+    expect(
+      screen.getByText(
+        "The team formation deadline is coming up and you're not on a full team yet — find a team before rosters lock"
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/a project/)).not.toBeInTheDocument();
+  });
+
+  test('opens Browse, to find a team', async () => {
+    const user = userEvent.setup();
+    renderBell([reminder()]);
+    await screen.findByTestId('bell-badge');
+    await user.click(bell());
+    await user.click(await screen.findByText(/formation deadline is coming up/));
+    await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/browse'));
+  });
+
+  test('arrives live, like any other notification', async () => {
+    renderBell();
+    await waitFor(() => expect(bell()).toHaveAccessibleName('Notifications'));
+    act(() => addMockNotification(reminder()));
+    expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
+  });
+});
