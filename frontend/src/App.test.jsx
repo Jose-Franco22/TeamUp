@@ -99,38 +99,56 @@ describe('first-sign-in walkthrough', () => {
     expect(JSON.parse(localStorage.getItem(ONBOARDED_KEY))).toContain('u-jose');
   });
 
-  test('Next and Back move between steps, and the last step finishes the tour', async () => {
-    renderApp('/browse', { signedInAs: 'u-jose', onboarded: false });
+  // #52: the tour opens on a choice, and each path finishes on its own page.
+  // Walkthrough.test.jsx covers the steps; these check the whole app ends
+  // up on the right page with the student marked onboarded.
+  test('the join path finishes the tour on Browse', async () => {
+    renderApp('/profile', { signedInAs: 'u-jose', onboarded: false });
     const dialog = await screen.findByRole('dialog');
     const user = userEvent.setup();
 
-    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Back' }));
-    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('heading', { name: 'Are you creating a team or joining one?' })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /Join a team/ }));
+    expect(within(dialog).getByRole('list', { name: 'Step 1 of 3' })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Browse projects' }));
 
-    // Two steps: skills, then the choice. The choice is the way forward,
-    // so the last step has no Next.
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByRole('heading', { name: 'Find your team' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('list', { name: 'Step 2 of 2' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Browse projects/ }));
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(path()).toBe('/browse');
     expect(JSON.parse(localStorage.getItem(ONBOARDED_KEY))).toContain('u-jose');
   });
 
-  test('choosing to create a project finishes the tour on the create page', async () => {
+  test('the create path finishes the tour on the create page', async () => {
     renderApp('/browse', { signedInAs: 'u-sofia', onboarded: false });
     const dialog = await screen.findByRole('dialog');
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    await user.click(screen.getByRole('button', { name: /Create a project/ }));
+
+    await user.click(within(dialog).getByRole('button', { name: /Create a team/ }));
+    expect(within(dialog).getByRole('list', { name: 'Step 1 of 3' })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Create your project' }));
+
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(path()).toBe('/projects/new');
     expect(JSON.parse(localStorage.getItem(ONBOARDED_KEY))).toContain('u-sofia');
+  });
+
+  test('after the create path, the student can still go join from Browse', async () => {
+    renderApp('/browse', { signedInAs: 'u-sofia', onboarded: false });
+    const dialog = await screen.findByRole('dialog');
+    const user = userEvent.setup();
+    await user.click(within(dialog).getByRole('button', { name: /Create a team/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Create your project' }));
+    await waitFor(() => expect(path()).toBe('/projects/new'));
+
+    await user.click(screen.getByRole('link', { name: 'Browse' }));
+    expect(await screen.findByRole('heading', { name: 'Open projects' })).toBeInTheDocument();
+    expect(path()).toBe('/browse');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
 
