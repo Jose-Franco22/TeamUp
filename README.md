@@ -189,6 +189,14 @@ Apply `supabase/34_next_steps.sql` after `33`. When a team's last seat fills, ev
 order the admin set. Any member can check an item off (or undo it); the team sees who did each one
 and when, overdue items are highlighted, and the progress shows up on `/admin`.
 
+## Deadline reminders (#43)
+
+Enable `pg_cron` (Supabase dashboard → Database → Extensions), then apply
+`supabase/37_deadline_reminders.sql` after `35`. Every student who isn't on a full team gets a
+reminder in the bell (and by email, with #21) 3 days and again 1 day before the team formation
+deadline. The job runs hourly; running it again never sends a second copy. Before each demo, check
+the `deadline-reminders` job is listed under Integrations → Cron in the Supabase dashboard.
+
 ## Reviewing a requester (#27)
 
 Each incoming request on the Requests page shows the student's skills, availability and GitHub
