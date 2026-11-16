@@ -2,7 +2,7 @@
 -- 37_deadline_reminders.sql. The job runs with a fixed clock (p_now), so
 -- every case is checked at an exact distance from the deadline.
 begin;
-select plan(28);
+select plan(29);
 
 select set_config('tests.admin',  tests.sign_in_with_microsoft('dradmin@utrgv.edu', 'Admin Ada')::text, true);
 select set_config('tests.full1',  tests.sign_in_with_microsoft('drfull1@utrgv.edu', 'Full Fay')::text, true);
@@ -125,15 +125,22 @@ select throws_ok(
 select tests.clear_authentication();
 
 -- --- At or after the deadline: nothing ---------------------------------------
-select is(pg_temp.run_at(interval '0'), 0, 'at the deadline, the job sends nothing');
+-- Everyone above already has both reminders on record, so they'd get nothing
+-- here anyway. A student who signs up now has none, so only the deadline
+-- check itself keeps them from being told the deadline is "coming up".
+select set_config('tests.newcomer', tests.sign_in_with_microsoft('drnewcomer@utrgv.edu', 'Newcomer Nia')::text, true);
+select is(pg_temp.run_at(interval '0'), 0, 'at the deadline, the job sends nothing, even to a student with no reminders yet');
 select is(pg_temp.run_at(interval '1 day'), 0, 'after it, the job sends nothing');
+select is(
+  (select count(*)::int from public.notifications where user_id = current_setting('tests.newcomer')::uuid),
+  0, 'a student who first becomes eligible after the deadline is never told it''s coming up');
 
 -- --- The deadline moves: reminders for the new date --------------------------
 update public.milestones set due_at = due_at + interval '7 days' where is_formation_deadline;
 select set_config('tests.deadline', public.formation_deadline()::text, true);
 
-select is(pg_temp.run_at(-interval '3 days'), 2,
-  'when the deadline moves, the students still unplaced are reminded of the new date');
+select is(pg_temp.run_at(-interval '3 days'), 3,
+  'when the deadline moves, the students still unplaced (now including the newcomer) are reminded of the new date');
 select is(pg_temp.run_at(-interval '3 days'), 0, 'and only once');
 
 -- --- No deadline: nothing ----------------------------------------------------
