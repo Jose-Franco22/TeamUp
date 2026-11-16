@@ -105,7 +105,10 @@ async function emailAnnouncement(db: SupabaseClient, id: string) {
     .from('users')
     .select('email')
     .neq('id', a.author_id)
-    .not('email', 'is', null);
+    .not('email', 'is', null)
+    // A fixed order keeps each announcement-<id>-<batch> idempotency key
+    // covering the same people if the webhook fires twice.
+    .order('id');
   if (usersError) return reply(usersError.message, 500);
 
   const email = composeEmail({ kind: 'announcement', appUrl: env('APP_URL'), announcement: a });

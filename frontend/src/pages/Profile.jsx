@@ -22,6 +22,8 @@ export default function Profile() {
   const [removeError, setRemoveError] = useState(null);
   const [serverErrors, setServerErrors] = useState({});
 
+  // Depends on the fields the form mirrors, not on data itself: saving the
+  // email preference replaces data, and that mustn't wipe unsaved edits.
   useEffect(() => {
     if (data) {
       setForm({
@@ -30,7 +32,7 @@ export default function Profile() {
         availability_hours: data.availability_hours ?? 0,
       });
     }
-  }, [data]);
+  }, [data?.bio, data?.github_url, data?.availability_hours]);
 
   if (loading) return <Loading label="Loading your profile" />;
   if (error) return <ErrorState error={error} onRetry={reload} />;

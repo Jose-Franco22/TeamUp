@@ -199,6 +199,25 @@ describe('email preference', () => {
     expect(users.find((u) => u.id === ME).email_notifications).toBe(true);
   });
 
+  test('flipping it keeps unsaved edits in the form', async () => {
+    const user = userEvent.setup();
+    const { bio, github, hours, save } = await renderProfile();
+    await user.clear(bio);
+    await user.type(bio, 'Not saved yet');
+    await user.clear(github);
+    await user.clear(hours);
+    await user.type(hours, '7');
+
+    const box = screen.getByRole('checkbox', { name: EMAIL_LABEL });
+    await user.click(box);
+    await waitFor(() => expect(box).not.toBeChecked());
+
+    expect(bio).toHaveValue('Not saved yet');
+    expect(github).toHaveValue('');
+    expect(hours).toHaveValue(7);
+    expect(save).toBeEnabled();
+  });
+
   test('admins do not see it', async () => {
     client.setSessionUserId('u-instructor');
     render(
