@@ -167,6 +167,7 @@ select throws_ok(
              current_setting('tests.other')::uuid,
              current_setting('tests.owner')::uuid) $$,
   '23505',
+  null,
   'and the unique index refuses a second open row even on a direct insert');
 
 -- Still nobody signed in, so this is the anonymous case.
@@ -216,6 +217,7 @@ select throws_ok(
              current_setting('tests.other')::uuid,
              current_setting('tests.owner')::uuid) $$,
   '42501',
+  null,
   'even the owner cannot write a request straight at the table');
 
 select lives_ok(

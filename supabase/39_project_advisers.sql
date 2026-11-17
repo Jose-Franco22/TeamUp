@@ -353,7 +353,12 @@ begin
     raise exception 'Not signed in';
   end if;
 
-  select * into v_project from public.projects where id = p_project_id;
+  -- `p.id`, not `id`: this function returns a table with a column called
+  -- `id`, so an unqualified one here is ambiguous between that OUT column
+  -- and projects.id, and plpgsql raises rather than guessing. The other
+  -- functions in this file can write `where id = …` because none of them
+  -- returns a table. Same for `name` and `email` below.
+  select * into v_project from public.projects p where p.id = p_project_id;
   if not found then
     raise exception 'Project not found';
   end if;
