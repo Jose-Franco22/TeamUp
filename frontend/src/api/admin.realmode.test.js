@@ -4,7 +4,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { DASHBOARD, OPEN_TEAM, UNPLACED_STUDENT } from '../test/adminFixtures';
 
 const fake = vi.hoisted(() => {
-  const state = { viewerId: 'seeker', projects: [], requests: [], counts: [], adminError: null };
+  const state = { viewerId: 'seeker', projects: [], requests: [], counts: [], advisers: [], adminError: null };
   const supabase = {
     auth: { getSession: vi.fn(async () => ({ data: {
       session: state.viewerId ? { user: { id: state.viewerId } } : null,
@@ -27,6 +27,12 @@ const fake = vi.hoisted(() => {
       }
       if (name === 'project_member_counts') {
         return { data: state.counts.filter((c) => args.p_project_ids.includes(c.project_id)), error: null };
+      }
+      // Advisers come back from an RPC rather than an embed under `projects`
+      // (#53): adviser_requests has two foreign keys to `users`, and an
+      // ambiguous embed is exactly what answered PGRST200 in #47.
+      if (name === 'project_advisers') {
+        return { data: state.advisers.filter((a) => args.p_project_ids.includes(a.project_id)), error: null };
       }
       throw new Error(`unexpected rpc ${name}`);
     }),
@@ -60,6 +66,7 @@ beforeEach(async () => {
     project_roles_needed: [], teams: { id: 'team-2', formed_at: null, team_members: [] },
   }];
   fake.state.counts = [{ project_id: 'project', member_count: 2 }, { project_id: 'project-2', member_count: 1 }];
+  fake.state.advisers = [];
   client = await import('./client');
 });
 
@@ -77,7 +84,34 @@ test('a signed-in seeker sees other teams rosters without any count RPC', async 
     { user_id: 'mate', name: 'Mate', role_id: 'fe', role: 'Frontend Developer' },
   ]);
   expect(project).toMatchObject({ member_count: 2, avg_availability_hours: 13 });
-  expect(fake.supabase.rpc).not.toHaveBeenCalled();
+  // The roster came from RLS, not from a count function: that is the point of
+  // this case. The one call made is for advisers (#53), which has no embed to
+  // read it from, and it is batched for the whole page.
+  expect(fake.supabase.rpc).toHaveBeenCalledTimes(1);
+  expect(fake.supabase.rpc).not.toHaveBeenCalledWith('project_member_counts', expect.anything());
+  expect(fake.supabase.rpc).toHaveBeenCalledWith('project_advisers', {
+    p_project_ids: ['project', 'project-2'],
+  });
+});
+
+// #53. An adviser is not on the roster, so the card has to name them from
+// somewhere else — and a guest, who sees no identities anywhere on a card,
+// must not be sent them at all.
+test('a signed-in viewer gets accepted advisers on the cards, and a guest gets none', async () => {
+  fake.state.advisers = [{ project_id: 'project', adviser_id: 'dana', adviser_name: 'Dana Kim' }];
+
+  const [project, second] = await client.getProjects();
+  expect(project).toMatchObject({ adviser_id: 'dana', adviser_name: 'Dana Kim' });
+  // Still two members: an adviser holds no seat.
+  expect(project.member_count).toBe(2);
+  expect(project.members.map((m) => m.user_id)).not.toContain('dana');
+  expect(second).toMatchObject({ adviser_id: null, adviser_name: null });
+
+  vi.clearAllMocks();
+  fake.state.viewerId = null;
+  const [asGuest] = await client.getProjects();
+  expect(asGuest).toMatchObject({ adviser_id: null, adviser_name: null });
+  expect(fake.supabase.rpc).not.toHaveBeenCalledWith('project_advisers', expect.anything());
 });
 
 test('guests get every seat count from one batched call, without identities or availability', async () => {
