@@ -2183,6 +2183,135 @@ export async function removeAdviser(projectId) {
   if (error) throw error;
 }
 
+// --- Answering an invitation to advise (issue #54) -----------------------
+//
+// #53 is the owner asking; this is the other person's answer, and what they
+// get afterwards. Nothing here writes to team_members or touches a project's
+// fill state — accepting is the moment that would be tempting, and the seat
+// rule is the same one 39_project_advisers.sql is built around.
+
+// The invitations waiting for the caller's answer. Pending only: an answered
+// one is not waiting for anything, and a withdrawn one stops being offered.
+export async function getMyAdviserRequests() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'pending')
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((r) => {
+        const project = projects.find((p) => p.id === r.project_id);
+        const owner = users.find((u) => u.id === project.creator_id);
+        return {
+          id: r.id,
+          project_id: r.project_id,
+          project_title: project.title,
+          project_description: project.description,
+          owner_id: owner.id,
+          owner_name: owner.name,
+          created_at: r.created_at,
+        };
+      });
+  }
+
+  const { data, error } = await supabase.rpc('my_adviser_requests');
+  if (error) throw error;
+  return data ?? [];
+}
+
+// accept === false declines. The two share a function because they are one
+// answer with two values, and because only one of them may ever be given.
+export async function respondToAdviserRequest(requestId, accept) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (accept !== true && accept !== false) {
+      throw new Error('Answer the invitation with accept or decline');
+    }
+    const row = adviserRequests.find((r) => r.id === requestId);
+    if (!row) throw new Error('Adviser request not found');
+    if (row.adviser_id !== id) {
+      throw new Error('Only the person who was asked can answer this invitation');
+    }
+    if (row.status !== 'pending') throw new Error('That adviser request has already been answered');
+
+    const project = projects.find((p) => p.id === row.project_id);
+    row.status = accept ? 'accepted' : 'declined';
+    row.responded_at = new Date().toISOString();
+    mockNotify({
+      user_id: project.creator_id,
+      kind: accept ? 'adviser_accepted' : 'adviser_declined',
+      project_id: project.id,
+      actor_id: id,
+    });
+    return row;
+  }
+
+  const { data, error } = await supabase.rpc('respond_to_adviser_request', {
+    p_request_id: requestId,
+    p_accept: accept,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// The mirror of removeAdviser(): same end state, opposite direction, and the
+// notification goes the other way. The row lands on 'cancelled' either way —
+// which of the two it was lives in the notification, not the status.
+export async function stepDownAsAdviser(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+    const row = adviserRequests.find(
+      (r) => r.project_id === projectId && r.adviser_id === id && r.status === 'accepted'
+    );
+    if (!row) throw new Error('You are not the adviser for this project');
+    row.status = 'cancelled';
+    row.responded_at = new Date().toISOString();
+    mockNotify({
+      user_id: project.creator_id,
+      kind: 'adviser_stepped_down',
+      project_id: projectId,
+      actor_id: id,
+    });
+    return;
+  }
+
+  const { error } = await supabase.rpc('step_down_as_adviser', { p_project_id: projectId });
+  if (error) throw error;
+}
+
+// The projects the caller advises, shaped exactly like every other project
+// view: the ids come from the database, the projects themselves come through
+// the same select Browse uses, so there is no second composition to drift.
+export async function getAdvisedProjects() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'accepted')
+      .map((r) => projects.find((p) => p.id === r.project_id))
+      .filter(Boolean)
+      .map((p) => buildProject(p, id));
+  }
+
+  const viewerId = requireViewerId(await getViewerId());
+  const { data: ids, error: idsErr } = await supabase.rpc('advised_project_ids');
+  if (idsErr) throw idsErr;
+  const projectIds = (ids ?? []).map((row) => (typeof row === 'string' ? row : row.advised_project_ids));
+  if (projectIds.length === 0) return [];
+
+  const [{ data: rows, error }, requestMap] = await Promise.all([
+    supabase.from('projects').select(PROJECT_SELECT).in('id', projectIds),
+    fetchViewerRequestMap(viewerId),
+  ]);
+  if (error) throw error;
+  const advisers = await fetchProjectAdvisers(viewerId, rows);
+  return rows.map((row) => composeProject(row, viewerId, requestMap, undefined, advisers));
+}
+
 // Accepted advisers for a page of Browse cards, in one call — the same shape
 // and the same reason as fetchGuestMemberCounts() above: one round trip for
 // the list instead of one per card.
