@@ -207,13 +207,19 @@ button:disabled { opacity: 0.45; cursor: default; }
 .admin-summary > div { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
 .admin-summary dt { font-size: 13px; color: var(--slate); }
 .admin-summary dd { margin: 8px 0 0; font-size: 28px; font-weight: 600; }
-.admin-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 24px; }
-.admin-table { width: 100%; border-collapse: collapse; background: var(--paper); text-align: left; font-size: 13.5px; }
-.admin-table th, .admin-table td { padding: 16px; vertical-align: top; border-bottom: 1px solid var(--line); }
-.admin-table thead { background: var(--canvas); color: var(--slate); }
-.admin-table th { font-weight: 500; }
-.admin-table tbody tr:last-child > * { border-bottom: 0; }
+/* .data-table is the same table, under a name that is not about admin: the
+   repository activity on the team page uses it (#58). */
+.admin-table-wrap, .data-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 24px; }
+.admin-table, .data-table { width: 100%; border-collapse: collapse; background: var(--paper); text-align: left; font-size: 13.5px; }
+.admin-table th, .admin-table td, .data-table th, .data-table td { padding: 16px; vertical-align: top; border-bottom: 1px solid var(--line); }
+.admin-table thead, .data-table thead { background: var(--canvas); color: var(--slate); }
+.admin-table th, .data-table th { font-weight: 500; }
+.admin-table tbody tr:last-child > *, .data-table tbody tr:last-child > * { border-bottom: 0; }
 .admin-table .pill { margin-left: 0; }
+/* Numbers read better right-aligned, but the member column must not be. */
+.data-table td + td, .data-table th + th { text-align: right; }
+.data-table .tag { margin-left: 8px; }
+.data-table .sub { font-size: 12.5px; color: var(--slate); margin-top: 3px; }
 .admin-list { list-style: none; padding: 0; margin: 0; }
 .admin-list li + li { margin-top: 10px; }
 .card > .admin-list { margin-top: 12px; }
@@ -221,7 +227,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .admin-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 620px) {
   .admin-summary { grid-template-columns: 1fr; gap: 8px; }
-  .admin-table { min-width: 540px; }
+  .admin-table, .data-table { min-width: 540px; }
 }
 
 .card {

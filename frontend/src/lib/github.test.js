@@ -6,14 +6,17 @@
 // the Edge Function's URL climb out of the repository it was handed.
 import { describe, expect, test } from 'vitest';
 import {
+  ACTIVITY_MESSAGES,
   CANONICAL_REPO_PATTERN,
   WINDOW_DAYS,
+  activityMessage,
   activityRows,
   isCanonicalRepoUrl,
   loginFromProfileUrl,
   matchContributor,
   membersMissingLink,
   parseRepoUrl,
+  refreshedLabel,
 } from './github';
 import { WINDOW_DAYS as FUNCTION_WINDOW_DAYS } from '../../../supabase/functions/github-activity/activity.js';
 
@@ -316,6 +319,82 @@ describe('activityRows', () => {
     expect(out.map((r) => r.commits)).toEqual([12, 12]);
     // Claimed, so it is not also appended as an unlinked row.
     expect(out.filter((r) => r.unlinked)).toHaveLength(0);
+  });
+});
+
+// --- the wording for a missing answer ------------------------------------
+
+describe('activityMessage', () => {
+  // THE CRITERION: "for private repos the page explains how to give access".
+  // GitHub answers 404 for a private repository as well as a missing one —
+  // it will not confirm that a private repo exists — so this one sentence
+  // carries both readings, and has to name the fix.
+  test('a repo we cannot see explains how to grant access', () => {
+    expect(activityMessage('not_found')).toMatch(/read-only collaborator/);
+    expect(activityMessage('not_found')).toMatch(/private/);
+    expect(activityMessage('forbidden')).toMatch(/read-only collaborator/);
+  });
+
+  test('a rate limit says it will pass', () => {
+    expect(activityMessage('rate_limited')).toMatch(/within the hour/);
+  });
+
+  // Not the team's problem to fix, and saying so stops them digging through
+  // their repository settings for an hour.
+  test('our own expired token does not send the team looking at their repo', () => {
+    expect(activityMessage('bad_token')).toMatch(/nothing is wrong with your repo/);
+  });
+
+  test('every reason the pieces can produce has a sentence', () => {
+    // activity.js's reasons, the Edge Function shell's, and this file's own.
+    const reasons = [
+      // activity.js: reasonForStatus() and collectActivity()
+      'not_found', 'forbidden', 'rate_limited', 'bad_token', 'bad_repo',
+      'unreachable', 'upstream_error',
+      // index.ts: the shell's own refusals, plus its timeout
+      'signed_out', 'not_on_team', 'no_repo', 'no_project', 'refused',
+      'not_configured', 'bad_request', 'timeout',
+      // client.js: the function is not reachable in this build at all
+      'unavailable',
+    ];
+    for (const reason of reasons) {
+      expect(ACTIVITY_MESSAGES[reason], reason).toBeTruthy();
+    }
+  });
+
+  test('and an unknown one still says something rather than nothing', () => {
+    expect(activityMessage('something_new')).toBe(ACTIVITY_MESSAGES.upstream_error);
+    expect(activityMessage(undefined)).toBeTruthy();
+  });
+});
+
+describe('refreshedLabel', () => {
+  const now = new Date('2026-11-19T12:00:00Z');
+  const ago = (minutes) => new Date(now.getTime() - minutes * 60000).toISOString();
+
+  test('counts in minutes, because the cache window is fifteen of them', () => {
+    expect(refreshedLabel(ago(0), now)).toBe('just now');
+    expect(refreshedLabel(ago(1), now)).toBe('a minute ago');
+    expect(refreshedLabel(ago(6), now)).toBe('6 minutes ago');
+    expect(refreshedLabel(ago(59), now)).toBe('59 minutes ago');
+  });
+
+  test('then hours, then a date', () => {
+    expect(refreshedLabel(ago(60), now)).toBe('an hour ago');
+    expect(refreshedLabel(ago(150), now)).toBe('2 hours ago');
+    expect(refreshedLabel(ago(60 * 24), now)).toMatch(/^on /);
+  });
+
+  // A browser clock a few seconds ahead of the server's should not produce
+  // "in 0 minutes" or a negative count.
+  test('a timestamp from the near future reads as now', () => {
+    expect(refreshedLabel(new Date(now.getTime() + 20000).toISOString(), now)).toBe('just now');
+  });
+
+  test('and nothing at all is "never", not a crash', () => {
+    expect(refreshedLabel(null, now)).toBe('never');
+    expect(refreshedLabel(undefined, now)).toBe('never');
+    expect(refreshedLabel('not a date', now)).toBe('never');
   });
 });
 

@@ -227,3 +227,75 @@ export function activityRows(contributors, members) {
 export function membersMissingLink(members) {
   return (members || []).filter((m) => !loginFromProfileUrl(m?.github_url));
 }
+
+// --- what to say when there is no answer ---------------------------------
+//
+// One sentence per reason, written for a student rather than a log, the same
+// way lib/matching/judge.js writes the judge's failures. The difference is
+// what is still on screen underneath: the judge always has a point score to
+// fall back on, and here there may be nothing but the link — so each of
+// these has to say what happened *and* what to do about it, or the page is
+// just a shrug.
+//
+// The reason codes come from three places and are deliberately one list:
+// collectActivity() in the Edge Function's activity.js (and the
+// repo_activity_error_known constraint, which is the same list), the
+// function's own shell (signed_out, no_repo, not_on_team, not_configured,
+// timeout, bad_request), and this file's own 'unavailable' for a function
+// that has not been deployed.
+export const ACTIVITY_MESSAGES = {
+  // GitHub answers 404 for a repository that does not exist *and* for a
+  // private one it will not confirm exists, so this one sentence has to
+  // serve both. Issue #58 asks for the private case to explain itself, and
+  // this is where that lives.
+  not_found:
+    'We can’t see that repository. If it’s private, add the TeamUp GitHub account as a ' +
+    'read-only collaborator (Settings → Collaborators → Add people), or check the link above.',
+  forbidden:
+    'GitHub refused the request for this repository. If it’s private, it needs TeamUp added ' +
+    'as a read-only collaborator.',
+  rate_limited: 'GitHub is rate-limiting us right now — this will catch up within the hour.',
+  bad_token: 'TeamUp’s GitHub access needs renewing. Tell your instructor; nothing is wrong with your repo.',
+  bad_repo: 'That link isn’t a repository we can read. Change it above.',
+  unreachable: 'Couldn’t reach GitHub just now. The counts below are the last ones we have.',
+  upstream_error: 'GitHub had a problem answering. The counts below are the last ones we have.',
+  timeout: 'GitHub took too long to answer. The counts below are the last ones we have.',
+  no_repo: 'No repository is linked yet.',
+  not_on_team: 'Only this team can refresh its activity.',
+  no_project: 'That project no longer exists.',
+  refused: 'TeamUp couldn’t check this repository just now.',
+  signed_out: 'Sign in again to refresh the activity.',
+  not_configured: 'Repository activity isn’t set up on the server yet.',
+  unavailable: 'Repository activity isn’t available in this build yet.',
+  bad_request: 'TeamUp couldn’t ask about this repository.',
+};
+
+export const activityMessage = (reason) =>
+  ACTIVITY_MESSAGES[reason] ?? ACTIVITY_MESSAGES.upstream_error;
+
+/**
+ * How old the numbers are, in words: "just now", "6 minutes ago",
+ * "2 hours ago", or a date once it is past a day.
+ *
+ * Its own function rather than lib/deadlines.js's relativeDue(), which
+ * counts calendar days and would call everything here "today". The cache
+ * window is fifteen minutes, so minutes are the unit that matters: "updated
+ * 2 minutes ago" is the difference between trusting the table and pressing
+ * refresh.
+ */
+export function refreshedLabel(iso, now = new Date()) {
+  if (!iso) return 'never';
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return 'never';
+
+  const minutes = Math.floor((new Date(now).getTime() - then.getTime()) / 60000);
+  // A clock disagreeing with the server's by a few seconds should read as
+  // now, not as the future.
+  if (minutes < 1) return 'just now';
+  if (minutes === 1) return 'a minute ago';
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return 'an hour ago';
+  if (hours < 24) return `${hours} hours ago`;
+  return `on ${then.toLocaleDateString()}`;
+}

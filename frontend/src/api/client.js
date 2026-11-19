@@ -28,10 +28,13 @@ import {
   skillsForUser,
   profileEvidence,
   evidenceForUser,
+  repoActivity,
+  repoActivityFor,
 } from './mockData';
 import { supabase } from '../lib/supabaseClient';
 import { isOpenProject } from '../lib/browseFilters';
 import { JOIN_BLOCKED, isPastDeadline } from '../lib/joinRequests';
+import { WINDOW_DAYS, parseRepoUrl } from '../lib/github';
 import {
   ValidationError,
   fieldErrorsFromDbError,
@@ -761,7 +764,7 @@ function embeddedOne(value) {
 }
 
 const PROJECT_SELECT = `
-  id, creator_id, title, description, team_size_target, status, created_at,
+  id, creator_id, title, description, team_size_target, status, created_at, github_repo,
   creator:users!creator_id ( name ),
   project_roles_needed ( role_id, skill_id, quantity_needed, roles ( name ), skills ( name, category ) ),
   teams ( id, formed_at, team_members ( user_id, role_id, roles ( name ), users ( name, availability_hours ) ) )
@@ -853,6 +856,9 @@ function composeProject(row, viewerId, viewerRequestsByProject, guestMemberCount
     description: row.description,
     team_size_target: row.team_size_target,
     status: row.status,
+    // Empty when nothing is linked (#58). As public as the rest of the row:
+    // it is a column on `projects`, which guests browse.
+    github_repo: row.github_repo ?? '',
     creator_name: row.creator?.name ?? null,
     team_id: team?.id ?? null,
     formed_at: team?.formed_at ?? null,
@@ -1706,6 +1712,10 @@ export async function getMyTeam() {
           ...m,
           availability_hours: u.availability_hours,
           skills: skillsForUser(m.user_id).map((s) => s.name),
+          // #58 matches commits to members by the GitHub URL on their
+          // profile, so the roster has to carry it. Only on this enriched
+          // view, not on every project card: nothing else needs it.
+          github_url: u.github_url ?? '',
         };
       }),
     };
@@ -1740,7 +1750,7 @@ export async function getMyTeam() {
   // unlike the plain project views — see TODO-backend.md.
   const { data: memberRows, error: membersErr } = await supabase
     .from('team_members')
-    .select('user_id, role_id, roles ( name ), users ( name, availability_hours, user_skills ( skills ( name ) ) )')
+    .select('user_id, role_id, roles ( name ), users ( name, availability_hours, github_url, user_skills ( skills ( name ) ) )')
     .eq('team_id', membership.team_id);
   if (membersErr) throw membersErr;
 
@@ -1754,6 +1764,8 @@ export async function getMyTeam() {
       role: tm.roles?.name ?? null,
       availability_hours: tm.users.availability_hours,
       skills: (tm.users.user_skills || []).map((us) => us.skills.name),
+      // #58 matches commits to members by this (lib/github.js:matchContributor).
+      github_url: tm.users.github_url ?? '',
     })),
   };
 }
@@ -1767,6 +1779,189 @@ export async function getMyTeam() {
 async function fetchLeaveRules() {
   const { data: deadline } = await supabase.rpc('formation_deadline');
   return { formation_deadline: deadline ?? null };
+}
+
+// --- The team's GitHub repository (issue #58) ----------------------------
+//
+// Three calls, in the order the page uses them: the owner sets the link, the
+// page reads what we last heard from GitHub, and anyone on the team can ask
+// for that to be refreshed.
+//
+// The refresh is the odd one out and the only one that does not throw. It
+// goes to an Edge Function that may not be deployed, through a token we may
+// not have, to a service that may be rate-limiting us — and the link and the
+// last known counts are on screen the whole time. So it answers
+// { ok: false, reason } the way lib/matching/judge.js does, and the page
+// shows a sentence beside the table instead of replacing it with an error.
+
+// Mock-mode only: the membership test that `repo_activity`'s select policy
+// and project_repo_for_refresh() both make server-side.
+function mockOnProjectTeam(projectId, userId) {
+  const team = teams.find((t) => t.project_id === projectId);
+  return Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === userId));
+}
+
+/**
+ * Links a repository, changes it, or unlinks with ''.
+ *
+ * Parsed here as well as in the form, because this is the last place before
+ * the write and a caller is not obliged to have used the form. What goes to
+ * the database is always the canonical URL — set_project_repo() restates the
+ * same pattern and is the actual boundary.
+ */
+export async function setProjectRepo(projectId, repo) {
+  const raw = String(repo ?? '').trim();
+  let url = '';
+  if (raw !== '') {
+    const parsed = parseRepoUrl(raw);
+    if (parsed.error) throw new ValidationError({ github_repo: parsed.error });
+    url = parsed.url;
+  }
+
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+    if (project.creator_id !== id) {
+      throw new Error('Only the project creator can link a repository');
+    }
+    // Same as the migration: pointing somewhere else throws away an answer
+    // that was about the old repository.
+    if (url !== (project.github_repo ?? '')) {
+      const index = repoActivity.findIndex((r) => r.project_id === projectId);
+      if (index !== -1) repoActivity.splice(index, 1);
+    }
+    project.github_repo = url;
+    return { ...project };
+  }
+
+  const { data, error } = await supabase.rpc('set_project_repo', {
+    p_project_id: projectId,
+    p_repo: url,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * What GitHub last told us, or null if we have never asked.
+ *
+ * Null is the normal state of a repository that was linked a moment ago, and
+ * the page treats it as "ask now" rather than as an error.
+ */
+export async function getRepoActivity(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    // The select policy, restated: who committed how much is the team's
+    // business. Returning null rather than throwing matches what the real
+    // query does for a row RLS hides.
+    if (!mockOnProjectTeam(projectId, id)) return null;
+    const row = repoActivityFor(projectId);
+    return row ? { ...row, contributors: row.contributors.map((c) => ({ ...c })) } : null;
+  }
+
+  const { data, error } = await supabase
+    .from('repo_activity')
+    .select('repo, contributors, last_commit_at, window_days, fetched_at, error')
+    .eq('project_id', projectId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+// Both are needed to reach an Edge Function at all. They are absent in a
+// plain mock-mode checkout, which is why the page asks before offering a
+// refresh — same guard as judgeIsAvailable() in lib/matching/judge.js.
+function activityFunctionIsAvailable(env = import.meta.env) {
+  return Boolean(env?.VITE_SUPABASE_URL && env?.VITE_SUPABASE_ANON_KEY);
+}
+
+const ACTIVITY_FUNCTION_PATH = '/functions/v1/github-activity';
+// Longer than the function's own 20s budget, so its considered answer wins
+// over this blunter one. This only catches the function being unreachable
+// rather than slow.
+const ACTIVITY_TIMEOUT_MS = 25000;
+
+/**
+ * Asks the Edge Function to refresh, and gives back what it said.
+ *
+ * Returns { ok: true, activity, cached } or { ok: false, reason }. Never
+ * throws: see the note at the top of this section.
+ */
+export async function refreshRepoActivity(projectId, { force = false } = {}) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = sessionUserId;
+    // The order is project_repo_for_refresh()'s order, deliberately: signed
+    // in, then the project exists, then membership, then a repo to fetch. A
+    // test caught this the wrong way round, where a project that does not
+    // exist reported "not on the team" here and "not found" in real mode.
+    if (!id) return { ok: false, reason: 'signed_out' };
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return { ok: false, reason: 'no_project' };
+    if (!mockOnProjectTeam(projectId, id)) return { ok: false, reason: 'not_on_team' };
+    if (!(project.github_repo ?? '')) return { ok: false, reason: 'no_repo' };
+
+    // There is no GitHub in mock mode, so a "refresh" re-stamps whatever the
+    // fixtures hold. The one thing worth keeping honest is the cache
+    // decision itself: an answer from the last 15 minutes is returned as
+    // cached, exactly as getActivity() would.
+    const existing = repoActivityFor(projectId);
+    const fresh =
+      existing && Date.now() - new Date(existing.fetched_at).getTime() < 15 * 60 * 1000;
+    if (existing && fresh && !force) {
+      return { ok: true, cached: true, activity: { ...existing } };
+    }
+    const row = {
+      project_id: projectId,
+      repo: project.github_repo,
+      contributors: existing?.contributors ?? [],
+      last_commit_at: existing?.last_commit_at ?? null,
+      window_days: WINDOW_DAYS,
+      fetched_at: new Date().toISOString(),
+      error: null,
+    };
+    const index = repoActivity.findIndex((r) => r.project_id === projectId);
+    if (index === -1) repoActivity.push(row);
+    else repoActivity[index] = row;
+    return { ok: true, cached: false, activity: { ...row } };
+  }
+
+  if (!activityFunctionIsAvailable()) return { ok: false, reason: 'unavailable' };
+
+  const { data: session } = (await supabase?.auth.getSession()) ?? {};
+  const token = session?.session?.access_token;
+  if (!token) return { ok: false, reason: 'signed_out' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ACTIVITY_TIMEOUT_MS);
+  try {
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}${ACTIVITY_FUNCTION_PATH}`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          // The caller's own token: the function checks team membership with
+          // it, so the anon key alone cannot spend a GitHub request.
+          Authorization: `Bearer ${token}`,
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ project_id: projectId, force }),
+      }
+    );
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return { ok: false, reason: body?.error ?? 'upstream_error' };
+    if (!body?.activity) return { ok: false, reason: 'upstream_error' };
+    return { ok: true, cached: Boolean(body.cached), activity: body.activity };
+  } catch (error) {
+    return { ok: false, reason: error?.name === 'AbortError' ? 'timeout' : 'unreachable' };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Deletes the team *and* the project it belongs to — a team exists only to
