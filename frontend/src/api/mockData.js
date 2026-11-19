@@ -195,6 +195,10 @@ export const projects = [
       'Live lot occupancy estimated from existing camera feeds, with a map of where spaces are opening up.',
     team_size_target: 4,
     status: 'open',
+    // The one project with a repository linked (#58). Every other project
+    // reads as unlinked, which is the state most of them are in all
+    // semester and the one the owner's form has to handle.
+    github_repo: 'https://github.com/Jose-Franco22/TeamUp',
   },
   {
     id: 'p-degree',
@@ -271,6 +275,44 @@ export const teams = [
   { id: 't-scam', project_id: 'p-scam', formed_at: null },
   { id: 't-lab', project_id: 'p-lab', formed_at: '2026-10-14T16:00:00Z' },
 ];
+
+// --- REPO_ACTIVITY -----------------------------------------------------
+// repo_activity: project_id, repo, contributors, last_commit_at,
+// window_days, fetched_at, error (issue #58).
+//
+// One row, on the one project with a repository linked. Its three
+// contributors are each a case the page has to draw differently:
+//
+//   - nguerra matches Nicolas's profile github_url, so his commits land on
+//     his roster row;
+//   - Jose is on this team and has a profile link, but nothing in the
+//     window, so he reads as a zero rather than as missing;
+//   - dependabot[bot] and the login-less commit match nobody, so they show
+//     below the roster as unlinked contributors — kept, not dropped, so the
+//     team's total matches what the repository holds.
+export const repoActivity = [
+  {
+    project_id: 'p-parking',
+    repo: 'https://github.com/Jose-Franco22/TeamUp',
+    contributors: [
+      { login: 'nguerra', name: 'Nicolas Guerra', commits: 12, pull_requests: 3, last_commit_at: '2026-11-18T22:14:00Z' },
+      { login: 'dependabot[bot]', name: null, commits: 4, pull_requests: 4, last_commit_at: '2026-11-17T06:02:00Z' },
+      // No account behind the email, which is what committing from a machine
+      // nobody configured looks like from GitHub's side.
+      { login: null, name: 'nicolas@thinkpad', commits: 2, pull_requests: 0, last_commit_at: '2026-11-16T19:40:00Z' },
+    ],
+    last_commit_at: '2026-11-18T22:14:00Z',
+    window_days: 14,
+    // Relative rather than fixed, so the demo always reads as a refresh that
+    // just happened — "updated 6 minutes ago" — instead of one from whenever
+    // these fixtures were written.
+    fetched_at: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+    error: null,
+  },
+];
+
+export const repoActivityFor = (projectId) =>
+  repoActivity.find((r) => r.project_id === projectId) ?? null;
 
 export const teamMembers = [
   { team_id: 't-parking', user_id: 'u-nicolas', role_id: 'r-backend' },
@@ -420,6 +462,10 @@ export function buildProject(project, viewerId = null) {
   return {
     ...project,
     creator_name: userById[project.creator_id].name,
+    // Always a string, never undefined: composeProject() in the real client
+    // returns '' for a project with nothing linked, and a mock shape that
+    // differs from the real one is how #47 shipped a broken query (#58).
+    github_repo: project.github_repo ?? '',
     team_id: team ? team.id : null,
     formed_at: team ? team.formed_at : null,
     members,
