@@ -99,6 +99,48 @@ describe('getProjectAdviser', () => {
     expect(await getProjectAdviser(LAB)).toBeNull();
   });
 
+  // Caught in review on PR #88: the first version filtered on nothing but
+  // the project, so any signed-in student could read the name on an open
+  // invitation and, after a decline, who had turned down which project.
+  // Mock mode has to refuse it too, or the panel's tests pass against a rule
+  // the database no longer has.
+  describe('an unanswered or refused invitation is the team’s business', () => {
+    test('a stranger is not told who was asked', async () => {
+      setSessionUserId('u-sofia'); // no team, no row, nothing to do with p-degree
+      expect(await getProjectAdviser(DEGREE)).toBeNull();
+    });
+
+    test('nor who declined', async () => {
+      setSessionUserId('u-sofia');
+      expect(await getProjectAdviser(SCAM)).toBeNull();
+    });
+
+    test('but the person asked sees their own invitation', async () => {
+      setSessionUserId('u-luis');
+      expect(await getProjectAdviser(DEGREE)).toMatchObject({
+        status: 'pending',
+        adviser_id: 'u-luis',
+        adviser_email: null, // the owner's alone
+      });
+    });
+
+    test('and so does the owner who asked', async () => {
+      setSessionUserId('u-alexis');
+      expect(await getProjectAdviser(DEGREE)).toMatchObject({ status: 'pending' });
+    });
+
+    // The other half of the rule, deliberately open: project_advisers() puts
+    // the same name on a Browse card for every signed-in student anyway.
+    test('an accepted adviser is visible to any signed-in student', async () => {
+      setSessionUserId('u-sofia');
+      expect(await getProjectAdviser(PARKING)).toMatchObject({
+        status: 'accepted',
+        adviser_name: 'Dana Kim',
+        adviser_email: null,
+      });
+    });
+  });
+
   test('and a project that does not exist is an error, not null', async () => {
     setSessionUserId('u-omar');
     await expect(getProjectAdviser('p-nope')).rejects.toThrow('Project not found');

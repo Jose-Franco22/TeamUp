@@ -2049,7 +2049,18 @@ export async function searchAdvisers(projectId, query) {
 // The project's adviser as the team page shows it: the open invitation if
 // there is one, otherwise the most recent answered one, so a decline stays
 // visible instead of the panel silently emptying. null when nobody has been
-// asked. The email comes back only to the owner.
+// asked.
+//
+// Who sees what, matching project_adviser() in the migration:
+//   accepted          → anyone signed in, the same as a Browse card
+//   pending, declined → the project's team, and the person asked
+//   the email         → the owner only
+//
+// The second line is not a nicety. The first version of the function filtered
+// on nothing but the project id, which handed every signed-in student the name
+// on any unanswered invitation and, after a decline, who had turned down which
+// project (caught in review on PR #88). Mock mode has to refuse it too, or the
+// panel's tests would be passing against a rule the database no longer has.
 export async function getProjectAdviser(projectId) {
   if (USE_MOCKS) {
     await delay();
@@ -2058,6 +2069,14 @@ export async function getProjectAdviser(projectId) {
     if (!project) throw new Error('Project not found');
     const row = adviserFor(projectId);
     if (!row) return null;
+
+    const maySee =
+      row.status === 'accepted' ||
+      project.creator_id === id ||
+      row.adviser_id === id ||
+      mockIsOnProjectTeam(projectId, id);
+    if (!maySee) return null;
+
     const adviser = users.find((u) => u.id === row.adviser_id);
     return {
       status: row.status,

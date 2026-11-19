@@ -15,7 +15,7 @@
 -- unauthenticated, and say so. When #54 lands those lines become calls to
 -- its function and these assertions should still pass unchanged.
 begin;
-select plan(84);
+select plan(99);
 
 select set_config('tests.owner',   tests.sign_in_with_microsoft('owner53@utrgv.edu', 'Olivia Owner')::text, true);
 select set_config('tests.member',  tests.sign_in_with_microsoft('member53@utrgv.edu', 'Mark Member')::text, true);
@@ -291,6 +291,17 @@ select is((select count(*)::int from public.team_members
             where user_id = current_setting('tests.adviser')::uuid), 0,
   'and is on no roster at all, so advising has not used up their one team');
 
+-- Cancelling is for an invitation nobody answered. An accepted adviser is
+-- remove_adviser()'s job, and the difference is that removal tells them —
+-- so widening cancel_adviser_request()'s selector to take an accepted row
+-- would drop an adviser in silence. Nothing caught that until this case.
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select throws_like(
+  $$ select public.cancel_adviser_request(current_setting('tests.project')::uuid) $$,
+  '%no pending adviser request to cancel%',
+  'an accepted adviser cannot be dropped through cancel, which would tell them nothing');
+select tests.clear_authentication();
+
 -- sync_project_fill_state() recomputes status from the roster. Called
 -- explicitly: if an adviser ever started counting, this is where it shows.
 select public.sync_project_fill_state(current_setting('tests.project')::uuid);
@@ -371,6 +382,14 @@ select throws_like(
   '%Only the project creator can remove the adviser%',
   'and neither can a member of the team — they see the adviser but cannot change it');
 
+-- Held by id, not by looking it up again afterwards: every row in this file
+-- is created inside one transaction, so they all share now() and created_at
+-- cannot tell them apart.
+select tests.clear_authentication();
+select set_config('tests.accepted_row',
+  (select id::text from public.adviser_requests
+    where project_id = current_setting('tests.project')::uuid and status = 'accepted'), true);
+
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select lives_ok(
   $$ select public.remove_adviser(current_setting('tests.project')::uuid) $$,
@@ -381,6 +400,13 @@ select is((select count(*)::int from public.adviser_requests
             where project_id = current_setting('tests.project')::uuid
               and status in ('pending', 'accepted')), 0,
   'the project has no adviser any more');
+
+-- Exactly 'cancelled', not merely "not open". Landing on 'declined' would
+-- also empty the project, and project_adviser() would then read
+-- "Turned down the invitation" for somebody the owner had just dropped.
+select is((select status from public.adviser_requests
+            where id = current_setting('tests.accepted_row')::uuid), 'cancelled',
+  'the removed row is cancelled — the owner withdrew it, the adviser did not refuse');
 
 -- Unlike a cancelled invitation, this one is told: they had said yes.
 select is((select count(*)::int from public.notifications
@@ -467,6 +493,35 @@ select throws_like(
   '%Project not found%',
   'and asking about a project that does not exist is an error');
 
+-- --- an unanswered invitation is not public (PR #88 review) --------------
+--
+-- project_adviser() is SECURITY DEFINER and reachable as
+-- /rpc/project_adviser, so it walks straight through the RLS policy on the
+-- table. Its first version filtered on nothing but the project id, which
+-- handed every signed-in student the name on any open invitation — and,
+-- after a decline, who had turned down which project. The direct table read
+-- and project_advisers() both returned nothing for the same caller, so this
+-- was the one path that contradicted both.
+--
+-- Ben is the stranger, not Ada: Ada was invited here three times, and the
+-- policy lets anyone read a row that names them, so she sees her own refused
+-- invitation and always should. Ben has no row on this project and is not on
+-- its team — a stranger by every measure the function has.
+
+select tests.authenticate_as(current_setting('tests.adviser_b')::uuid);
+select is((select count(*)::int from public.adviser_requests
+            where project_id = current_setting('tests.project')::uuid), 0,
+  'a stranger reads no adviser rows directly, as RLS has always said');
+select is((select count(*)::int from public.project_adviser(
+            current_setting('tests.project')::uuid)), 0,
+  'and gets nothing from project_adviser either, while the invitation is unanswered');
+
+select tests.authenticate_as(current_setting('tests.other')::uuid);
+select is((select status from public.project_adviser(current_setting('tests.project')::uuid)), 'pending',
+  'the person asked still sees the invitation they were sent');
+select is((select adviser_email from public.project_adviser(current_setting('tests.project')::uuid)), null,
+  'without the email, which is the owner''s alone');
+
 -- The Browse list's version: accepted only, many projects in one call.
 select is((select count(*)::int from public.project_advisers(
             array[current_setting('tests.project')::uuid,
@@ -477,6 +532,16 @@ select tests.clear_authentication();
 update public.adviser_requests
    set status = 'accepted', responded_at = now()
  where project_id = current_setting('tests.project')::uuid and status = 'pending';
+
+-- Accepted is the other half of the rule, and it is deliberately open: the
+-- same name project_advisers() puts on a Browse card for every signed-in
+-- student, so withholding it here would only be inconsistent.
+select tests.authenticate_as(current_setting('tests.adviser_b')::uuid);
+select is((select adviser_name from public.project_adviser(current_setting('tests.project')::uuid)),
+  'Otto Other',
+  'once accepted, any signed-in student sees the adviser — the Browse card names them anyway');
+select is((select adviser_email from public.project_adviser(current_setting('tests.project')::uuid)), null,
+  'still without the email');
 
 select tests.authenticate_as(current_setting('tests.member')::uuid);
 select is((select count(*)::int from public.project_advisers(
@@ -509,6 +574,56 @@ select tests.authenticate_as(current_setting('tests.member')::uuid);
 select is((select count(*)::int from public.adviser_requests
             where project_id = current_setting('tests.project')::uuid), 4,
   'and the team reads its own, all four invitations of it');
+
+-- --- a decline is not public either ---------------------------------------
+-- Project B's invitation to Ben is still unanswered. Declining it must not
+-- publish "Ben turned down the degree plan builder" to the whole class —
+-- the same leak as the pending case, on the status that is worst to leak.
+
+select tests.clear_authentication();
+update public.adviser_requests
+   set status = 'declined', responded_at = now()
+ where project_id = current_setting('tests.project_b')::uuid and status = 'pending';
+
+select tests.authenticate_as(current_setting('tests.second')::uuid);
+select is((select count(*)::int from public.project_adviser(
+            current_setting('tests.project_b')::uuid)), 0,
+  'a student with no connection to the project is not told who turned it down');
+
+select tests.authenticate_as(current_setting('tests.adviser_b')::uuid);
+select is((select status from public.project_adviser(current_setting('tests.project_b')::uuid)), 'declined',
+  'while the person who declined still sees their own answer');
+
+select tests.authenticate_as(current_setting('tests.owner_b')::uuid);
+select is((select status from public.project_adviser(current_setting('tests.project_b')::uuid)), 'declined',
+  'and so does the owner who asked, who has somebody else to find');
+
+-- --- guests get none of it -------------------------------------------------
+-- project_advisers() is the only one of these a guest could plausibly want,
+-- since Browse is public — and it is the one that must refuse, because an
+-- adviser is an identity and guests see no identities on a card. The revoke
+-- in the migration is all that stands between the two, so it gets a case.
+
+select tests.clear_authentication();
+select set_config('role', 'anon', true);
+select throws_ok(
+  $$ select * from public.project_advisers(array[current_setting('tests.project')::uuid]) $$,
+  '42501',
+  null,
+  'a guest cannot call project_advisers');
+select throws_ok(
+  $$ select * from public.project_adviser(current_setting('tests.project')::uuid) $$,
+  '42501',
+  null,
+  'nor project_adviser');
+select throws_ok(
+  $$ select * from public.search_advisers(current_setting('tests.project')::uuid, 'Ada') $$,
+  '42501',
+  null,
+  'nor search for one');
+select is((select count(*)::int from public.adviser_requests), 0,
+  'and reads nothing from the table, which has no policy for them at all');
+select tests.clear_authentication();
 
 -- --- the project goes away ------------------------------------------------
 -- Deleted directly rather than through delete_team(), which has rules of its

@@ -219,6 +219,7 @@ begin
 end;
 $$;
 
+revoke all on function public.invite_adviser(uuid, uuid) from public, anon;
 grant execute on function public.invite_adviser(uuid, uuid) to authenticated;
 
 -- --- cancel_adviser_request -----------------------------------------------
@@ -270,6 +271,7 @@ begin
 end;
 $$;
 
+revoke all on function public.cancel_adviser_request(uuid) from public, anon;
 grant execute on function public.cancel_adviser_request(uuid) to authenticated;
 
 -- --- remove_adviser -------------------------------------------------------
@@ -318,6 +320,7 @@ begin
 end;
 $$;
 
+revoke all on function public.remove_adviser(uuid) from public, anon;
 grant execute on function public.remove_adviser(uuid) to authenticated;
 
 -- --- search_advisers ------------------------------------------------------
@@ -395,6 +398,7 @@ begin
 end;
 $$;
 
+revoke all on function public.search_advisers(uuid, text) from public, anon;
 grant execute on function public.search_advisers(uuid, text) to authenticated;
 
 -- --- project_adviser ------------------------------------------------------
@@ -402,11 +406,23 @@ grant execute on function public.search_advisers(uuid, text) to authenticated;
 -- most recent answered one, so a decline stays visible instead of the panel
 -- silently emptying. Null when the project has never asked anyone.
 --
--- Readable by anyone signed in, like the roster itself
--- (`team_members_select_students`), so a student can see who advises a
--- project before asking to join it. Email comes back only to the owner:
--- the team needs the name, and only the owner has a reason to contact them
--- through the app.
+-- WHO SEES WHAT, and why it is not one rule:
+--
+--   accepted            → anyone signed in. The same thing project_advisers()
+--                         puts on a Browse card, so withholding it here would
+--                         only be inconsistent.
+--   pending, declined   → the project's team, and the person asked. Nobody
+--                         else.
+--
+-- The second line is the one that matters. This function is SECURITY DEFINER
+-- and reachable as /rpc/project_adviser, so it walks straight through
+-- `adviser_requests_select_team_or_adviser` above — and the first version of
+-- it filtered on nothing but the project id, which handed every signed-in
+-- student the name on any unanswered invitation and, after a decline, who
+-- turned down which project. Caught in review on PR #88.
+--
+-- Email is narrower still: the owner only. The team needs the name; only the
+-- owner has a reason to contact them through the app.
 
 create or replace function public.project_adviser(p_project_id uuid)
 returns table (
@@ -425,6 +441,7 @@ as $$
 declare
   caller uuid := auth.uid();
   v_is_owner boolean;
+  v_on_team boolean;
 begin
   if caller is null then
     raise exception 'Not signed in';
@@ -435,6 +452,17 @@ begin
   if not found then
     raise exception 'Project not found';
   end if;
+
+  -- The creator is always seated on their own team, so v_is_owner implies
+  -- this. Both are computed anyway rather than leaning on that: it is a fact
+  -- about create_project(), not about this function, and the day it stops
+  -- being true the failure here would be a quiet leak.
+  select exists (
+    select 1
+      from public.teams t
+      join public.team_members tm on tm.team_id = t.id
+     where t.project_id = p_project_id and tm.user_id = caller
+  ) into v_on_team;
 
   return query
     select ar.status,
@@ -451,12 +479,20 @@ begin
        -- showing who they just dropped. A decline is someone else's answer,
        -- so that one stays.
        and ar.status <> 'cancelled'
+       -- See the header. An unanswered or refused invitation is the team's
+       -- business and the invitee's; an accepted adviser is on the Browse
+       -- card anyway.
+       and (ar.status = 'accepted'
+            or v_on_team
+            or v_is_owner
+            or ar.adviser_id = caller)
      -- Open first, then newest.
      order by (ar.status in ('pending', 'accepted')) desc, ar.created_at desc
      limit 1;
 end;
 $$;
 
+revoke all on function public.project_adviser(uuid) from public, anon;
 grant execute on function public.project_adviser(uuid) to authenticated;
 
 -- --- project_advisers -----------------------------------------------------
