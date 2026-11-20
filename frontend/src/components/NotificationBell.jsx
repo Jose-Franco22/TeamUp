@@ -12,6 +12,13 @@ import {
 // supabase/20_leave_team_rules.sql describes. A student taken off a team, or
 // turned down, has no team page to go to, so they're sent to Browse.
 export const LINKS = {
+  // An invitation to advise is something waiting for an answer, and that is
+  // what /requests is. #54 builds the row that answers it there; until then
+  // this is still where the person will go looking.
+  adviser_invited: '/requests',
+  // Nothing of theirs left to open: an adviser holds no seat, so there is no
+  // team page of theirs to send them to (#53).
+  adviser_removed: '/browse',
   // Only sent to students who aren't on a full team (#43), so Browse is
   // where they'd go to find one.
   deadline_reminder: '/browse',
@@ -39,6 +46,13 @@ export function notificationText(n) {
     // would be out of date by the time an old reminder is read.
     case 'deadline_reminder':
       return "The team formation deadline is coming up and you're not on a full team yet — find a team before rosters lock";
+    // Issue #53. Says what is being asked of them rather than that something
+    // happened: this is the only notification that wants an answer back, and
+    // "an adviser" means nothing to somebody who has never been asked before.
+    case 'adviser_invited':
+      return `${n.actor_name} asked you to advise ${project} — their team's contact, not a seat on it`;
+    case 'adviser_removed':
+      return `You are no longer the adviser for ${project}`;
     case 'join_request':
       return `${n.actor_name} asked to join ${project}`;
     case 'member_left':

@@ -131,6 +131,11 @@ describe('NotificationBell', () => {
   // LINKS would only compare the map with itself, and pointing
   // request_declined at /team (#34) would have passed.
   const EXPECTED_LINKS = {
+    // An invitation to advise wants an answer, and /requests is where things
+    // waiting for one live (#53). Being removed as adviser does not: they
+    // hold no seat, so there is no team page of theirs to open.
+    adviser_invited: '/requests',
+    adviser_removed: '/browse',
     deadline_reminder: '/browse',
     join_request: '/requests',
     member_left: '/team',
