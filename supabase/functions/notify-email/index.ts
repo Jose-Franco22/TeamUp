@@ -6,6 +6,8 @@
 //     email.js knows the kind and their preference allows it;
 //   * every insert into public.announcements: emails everyone but the author.
 //     Announcements are essential, so nobody's preference stops them.
+//   * every insert into public.adviser_digests: emails that adviser their
+//     weekly digest (#59), unless they've turned it off since the job ran.
 //
 // Email goes out after the row is committed (webhooks are asynchronous), so a
 // Resend failure never touches the notification itself; it's logged and
@@ -20,6 +22,7 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { composeEmail, isEmailedKind, shouldEmail } from './email.js';
 import { chunk, resendRequest, sendWithRetry } from './send.js';
+import { composeDigest } from './digest.js';
 
 const env = (name: string) => {
   const value = Deno.env.get(name);
@@ -45,6 +48,7 @@ Deno.serve(async (req) => {
 
   if (payload.table === 'notifications') return emailNotification(db, id);
   if (payload.table === 'announcements') return emailAnnouncement(db, id);
+  if (payload.table === 'adviser_digests') return emailAdviserDigest(db, id);
   return reply('Not a table notify-email handles', 400);
 });
 
@@ -130,4 +134,30 @@ async function emailAnnouncement(db: SupabaseClient, id: string) {
   return failed
     ? reply(`${failed} of ${batches.length} batches failed; see logs`, 502)
     : reply(`Sent to ${users.length}`);
+}
+
+// One adviser's weekly digest (#59). The job (38_adviser_digest.sql) already
+// left out advisers with the digest off; it's checked again here in case they
+// turned it off in the minutes since.
+async function emailAdviserDigest(db: SupabaseClient, id: string) {
+  const { data: d, error } = await db
+    .from('adviser_digests')
+    .select('data, adviser:users!adviser_id ( email, name, adviser_digest )')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return reply(error.message, 500);
+  if (!d) return reply('Digest not found', 404);
+
+  const adviser = d.adviser as { email?: string; name?: string; adviser_digest?: boolean } | null;
+  if (!adviser?.email) return reply('Skipped: no address', 200);
+  if (adviser.adviser_digest === false) return reply('Skipped: opted out', 200);
+
+  const email = composeDigest({ data: d.data, appUrl: env('APP_URL'), adviserName: adviser.name });
+  const { url, init } = resendRequest({
+    apiKey: env('RESEND_API_KEY'),
+    idempotencyKey: `adviser-digest-${id}`,
+    email: { from: env('EMAIL_FROM'), to: adviser.email, ...email },
+  });
+  const result = await sendWithRetry(() => fetch(url, init), { label: `adviser digest ${id}` });
+  return result.ok ? reply('Sent') : reply(`Resend: ${result.body}`, 502);
 }

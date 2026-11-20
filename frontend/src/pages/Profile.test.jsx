@@ -16,6 +16,7 @@ vi.mock('../api/client', async (importOriginal) => {
     ...actual,
     updateCurrentUser: vi.fn(actual.updateCurrentUser),
     setEmailNotifications: vi.fn(actual.setEmailNotifications),
+    setAdviserDigest: vi.fn(actual.setAdviserDigest),
   };
 });
 
@@ -234,6 +235,71 @@ describe('email preference', () => {
     const user = userEvent.setup();
     await renderProfile();
     const box = screen.getByRole('checkbox', { name: EMAIL_LABEL });
+    await user.click(box);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Network down');
+    expect(box).toBeChecked();
+  });
+});
+
+// Issue #59 — the adviser's weekly digest switch.
+describe('weekly digest', () => {
+  const DIGEST_LABEL = /weekly digest of the teams I advise/i;
+  const ADVISER = 'u-instructor';
+
+  beforeEach(() => {
+    delete users.find((u) => u.id === ADVISER).adviser_digest;
+  });
+
+  async function renderAsAdviser() {
+    client.setSessionUserId(ADVISER);
+    render(
+      <MemoryRouter>
+        <Profile />
+      </MemoryRouter>
+    );
+    await screen.findByRole('heading', { name: 'Your profile' });
+    return screen.getByRole('checkbox', { name: DIGEST_LABEL });
+  }
+
+  test('advisers see it, on by default', async () => {
+    const box = await renderAsAdviser();
+    expect(box).toBeChecked();
+    expect(screen.getByText(/every Monday at 8:00 AM Central/)).toBeInTheDocument();
+  });
+
+  // Advising isn't tied to is_admin (#92): a student may advise a team, so a
+  // student gets the switch too, beside their own email setting.
+  test('students see it too, separately from their email setting', async () => {
+    await renderProfile();
+    expect(screen.getByRole('checkbox', { name: DIGEST_LABEL })).toBeChecked();
+    expect(screen.getByRole('heading', { name: 'Adviser digest' })).toBeInTheDocument();
+    expect(screen.getByText(/only while you advise at least one team/)).toBeInTheDocument();
+  });
+
+  test('turning it off saves right away', async () => {
+    const user = userEvent.setup();
+    const box = await renderAsAdviser();
+    await user.click(box);
+    expect(client.setAdviserDigest).toHaveBeenLastCalledWith(false);
+    await waitFor(() => expect(box).not.toBeChecked());
+    expect(users.find((u) => u.id === ADVISER).adviser_digest).toBe(false);
+  });
+
+  test('turning it back on saves true', async () => {
+    users.find((u) => u.id === ADVISER).adviser_digest = false;
+    const user = userEvent.setup();
+    const box = await renderAsAdviser();
+    expect(box).not.toBeChecked();
+    await user.click(box);
+    await waitFor(() => expect(box).toBeChecked());
+    expect(client.setAdviserDigest).toHaveBeenLastCalledWith(true);
+    expect(users.find((u) => u.id === ADVISER).adviser_digest).toBe(true);
+  });
+
+  test('a failed save shows an error and leaves the box as it was', async () => {
+    client.setAdviserDigest.mockRejectedValueOnce(new Error('Network down'));
+    const user = userEvent.setup();
+    const box = await renderAsAdviser();
     await user.click(box);
     expect(await screen.findByRole('alert')).toHaveTextContent('Network down');
     expect(box).toBeChecked();
