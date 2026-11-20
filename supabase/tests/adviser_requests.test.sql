@@ -292,8 +292,8 @@ select lives_ok(
 
 select tests.clear_authentication();
 select is((select count(*)::int from public.adviser_requests
-            where project_id = current_setting('tests.project')::uuid), 3,
-  'every invitation is kept: cancelled, declined, and the one now open');
+            where project_id = current_setting('tests.project')::uuid), 4,
+  'every invitation is kept: two cancelled (one of them the admin), declined, and the one now open');
 select is((select count(*)::int from public.adviser_requests
             where project_id = current_setting('tests.project')::uuid
               and status in ('pending', 'accepted')), 1,
@@ -601,8 +601,8 @@ select is((select count(*)::int from public.adviser_requests
 
 select tests.authenticate_as(current_setting('tests.member')::uuid);
 select is((select count(*)::int from public.adviser_requests
-            where project_id = current_setting('tests.project')::uuid), 4,
-  'and the team reads its own, all four invitations of it');
+            where project_id = current_setting('tests.project')::uuid), 5,
+  'and the team reads its own, all five invitations of it');
 
 -- --- a decline is not public either ---------------------------------------
 -- Project B's invitation to Ben is still unanswered. Declining it must not
