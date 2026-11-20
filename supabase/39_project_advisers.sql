@@ -23,14 +23,32 @@
 --
 -- Two decisions worth stating, since neither is obvious from the code:
 --
--- 1. ADVISERS ARE STUDENTS, NOT ADMINS. 18_admin_access.sql hides admin
---    accounts from students (`users_select_students_or_admin`) and keeps them
---    off rosters. The search function below is SECURITY DEFINER and would
---    sail straight through that policy, so it filters admins out itself and
---    `invite_adviser()` refuses one. If the course decides faculty advisers
---    should be admin accounts, that is a change to an access rule somebody
---    made on purpose, and it belongs in its own issue — #60 is where adviser
---    identity gets revisited anyway.
+-- 1. ADVISING IS NOT TIED TO `users.is_admin`, IN EITHER DIRECTION. Who may
+--    advise and who may be *found* are two different questions, and this file
+--    answers them separately:
+--
+--      * `invite_adviser()` does not look at the flag at all. Any account the
+--        owner can name may be asked. #53's story asks for "a faculty contact
+--        attached to the project", and #54's adviser is "a user" who may still
+--        be on a team of their own, so neither reading of the flag fits both.
+--      * `search_advisers()` still returns no admin accounts, because
+--        `users_select_students_or_admin` (18_admin_access.sql) hides them
+--        from students and this function is SECURITY DEFINER — it would sail
+--        straight through that policy. An admin becomes discoverable when
+--        they opt in, which is #60's "Available to advise" switch, not before.
+--
+--    The rule 18_admin_access.sql actually enforces is narrower than it
+--    looks: `require_student_participant()` is on `projects`, `team_members`
+--    and `join_requests` — the three ways to take a seat. An adviser takes no
+--    seat (see above), so advising was never one of the paths that trigger
+--    guards, and an earlier version of this file refusing admins outright was
+--    extending a roster rule to a role defined as not being on the roster.
+--
+--    The consequence to see clearly: `project_adviser()` returns the adviser's
+--    name to everyone on the team, so an admin who accepts an invitation is
+--    named to students who could not otherwise read that row. That is the
+--    point of inviting them — the owner chose them deliberately — but it is a
+--    deliberate hole in `users_select_students_or_admin`, not an oversight.
 --
 -- 2. EVERY READ GOES THROUGH A FUNCTION, not a PostgREST embed. This table
 --    has two foreign keys to `users` (adviser_id, invited_by), so embedding
@@ -175,11 +193,9 @@ begin
     raise exception 'That account does not exist';
   end if;
 
-  -- See the header: this function reads `users` as its owner, so the policy
-  -- that hides admins from students does not apply and has to be restated.
-  if v_adviser.is_admin then
-    raise exception 'Admin accounts cannot advise a student project';
-  end if;
+  -- `v_adviser.is_admin` is deliberately not consulted here; see decision 1
+  -- in the header. Being invitable and being findable are separate, and the
+  -- admin filter lives in search_advisers() alone.
 
   if p_adviser_id = caller then
     raise exception 'You cannot invite yourself to advise your own project';
@@ -374,6 +390,12 @@ begin
     return;
   end if;
 
+  -- The one place the admin flag is read, and it is about discoverability,
+  -- not eligibility: this function is SECURITY DEFINER, so returning an admin
+  -- row here would hand a student a name that
+  -- `users_select_students_or_admin` hides from them. `invite_adviser()` will
+  -- accept one by id; #60's "Available to advise" switch is what should make
+  -- them appear here, and until it exists nobody has opted in.
   return query
     select u.id, u.name, u.email
       from public.users u
