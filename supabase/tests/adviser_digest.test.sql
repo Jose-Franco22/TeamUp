@@ -5,7 +5,7 @@
 -- one that reads a table of this test's own (all rolled back at the end), the
 -- way #53/#54's real version will answer, and check everything built on it.
 begin;
-select plan(32);
+select plan(39);
 
 select set_config('tests.adv',    tests.sign_in_with_microsoft('dgadv@utrgv.edu', 'Adviser Ana')::text, true);
 select set_config('tests.off',    tests.sign_in_with_microsoft('dgoff@utrgv.edu', 'Adviser Off')::text, true);
@@ -51,9 +51,9 @@ select is(private.send_adviser_digests('2026-11-16 14:00+00'), 0,
   'and the job sends nothing, even at 8 AM on a Monday');
 
 -- --- with advisers linked to teams ------------------------------------------------
--- adv advises both teams, off advises one but turned the digest off, idle
--- advises nothing. s1 (a student) is linked to a team too, to show students
--- never get one.
+-- adv (an admin) advises both teams, off advises one but turned the digest
+-- off, idle advises nothing. s1 (a student) advises a team too: advising
+-- isn't tied to is_admin (39_project_advisers.sql, PR #92), so s1 gets one.
 create table tests.advising (adviser_id uuid, team_id uuid);
 insert into tests.advising values
   (current_setting('tests.adv')::uuid,  current_setting('tests.team_b')::uuid),
@@ -68,8 +68,8 @@ $$;
 
 select results_eq(
   $$ select id from private.adviser_digest_recipients() r(id) $$,
-  $$ values (current_setting('tests.adv')::uuid) $$,
-  'the send list is the advisers with the digest on who advise a team: not those who turned it off, advise nothing, or are students');
+  $$ select x from (values (current_setting('tests.adv')::uuid), (current_setting('tests.s1')::uuid)) v(x) order by x $$,
+  'the send list is everyone with the digest on who advises a team, admin or student: not those who turned it off or advise nothing');
 
 -- --- the data -------------------------------------------------------------------
 -- The class calendar, around the week of Monday 2026-11-16 (Central).
@@ -84,6 +84,10 @@ insert into public.milestones (name, due_at) values
 select set_config('tests.data',
   private.adviser_digest_data(current_setting('tests.adv')::uuid, '2026-11-16 14:00+00')::text, true);
 
+select is(current_setting('tests.data')::jsonb -> 'adviser_is_admin', 'true'::jsonb,
+  'an admin adviser''s digest says so, so the email links to /admin pages');
+select is(private.adviser_digest_data(current_setting('tests.s1')::uuid, '2026-11-16 14:00+00') -> 'adviser_is_admin', 'false'::jsonb,
+  'a student adviser''s does not, so the email links to /team');
 select is(current_setting('tests.data')::jsonb ->> 'week_start', '2026-11-09',
   'a digest sent Monday Nov 16 covers the week starting Monday Nov 9');
 select is(current_setting('tests.data')::jsonb ->> 'week_end', '2026-11-15', '... through Sunday Nov 15');
@@ -113,23 +117,35 @@ select is(
 
 -- --- the job --------------------------------------------------------------------
 select is(private.send_adviser_digests('2026-11-16 13:59+00'), 0, 'Monday 7:59 AM Central: nothing yet');
-select is(private.send_adviser_digests('2026-11-16 14:00+00'), 1, 'Monday 8:00 AM Central: one digest');
+select is(private.send_adviser_digests('2026-11-16 14:00+00'), 2, 'Monday 8:00 AM Central: one digest per adviser on the send list');
 select results_eq(
-  $$ select adviser_id, week_start from public.adviser_digests $$,
-  $$ values (current_setting('tests.adv')::uuid, '2026-11-09'::date) $$,
-  'it is for the one adviser on the send list, for last week');
-select is((select data from public.adviser_digests),
+  $$ select adviser_id, week_start from public.adviser_digests order by adviser_id $$,
+  $$ select x, '2026-11-09'::date from (values (current_setting('tests.adv')::uuid), (current_setting('tests.s1')::uuid)) v(x) order by x $$,
+  'they are for the two advisers on the send list, for last week');
+select is((select data from public.adviser_digests where adviser_id = current_setting('tests.adv')::uuid),
   private.adviser_digest_data(current_setting('tests.adv')::uuid, '2026-11-16 14:00+00'),
   'the row holds that adviser''s digest data');
 select is(private.send_adviser_digests('2026-11-16 14:30+00'), 0, 'running again the same morning sends nothing more');
 select is(private.send_adviser_digests('2026-11-16 15:00+00'), 0, 'Monday 9:00 AM Central: nothing');
 select is(private.send_adviser_digests('2026-11-17 14:00+00'), 0, 'Tuesday 8:00 AM Central: nothing');
 -- In daylight time 8 AM Central is 13:00 UTC: Monday 2027-06-14.
-select is(private.send_adviser_digests('2027-06-14 13:00+00'), 1, 'in daylight time, Monday 13:00 UTC is 8 AM Central: sends');
+select is(private.send_adviser_digests('2027-06-14 13:00+00'), 2, 'in daylight time, Monday 13:00 UTC is 8 AM Central: sends');
 select is(private.send_adviser_digests('2027-06-14 14:00+00'), 0, '... and 14:00 UTC (9 AM CDT) sends nothing');
 
 -- --- nobody reads it through the API ----------------------------------------------
+select ok((select relrowsecurity from pg_class where oid = 'public.adviser_digests'::regclass),
+  'RLS is on for adviser_digests, a second layer behind the revoked grants');
 select tests.authenticate_as(current_setting('tests.adv')::uuid);
+-- `authenticated` has USAGE on private, and functions are executable by
+-- PUBLIC unless revoked: these would hand any student another adviser's digest.
+select throws_ok($$ select private.adviser_digest_data(current_setting('tests.adv')::uuid) $$, '42501', null,
+  'signed-in users cannot read an adviser''s digest data');
+select throws_ok($$ select * from private.advised_teams(current_setting('tests.adv')::uuid) $$, '42501', null,
+  'signed-in users cannot ask who advises what');
+select throws_ok($$ select * from private.adviser_digest_recipients() $$, '42501', null,
+  'signed-in users cannot read the send list');
+select throws_ok($$ select private.digest_this_monday(now()) $$, '42501', null,
+  'signed-in users cannot call the week helper');
 select throws_ok($$ select * from public.adviser_digests $$, '42501', null,
   'signed-in users cannot read adviser_digests');
 select throws_ok($$ select private.send_adviser_digests() $$, '42501', null,
@@ -138,7 +154,8 @@ select tests.clear_authentication();
 
 -- --- the schedule -------------------------------------------------------------------
 -- pg_cron isn't in the test database, so this only checks the job where it
--- is; the job itself is checked in the Supabase dashboard before each demo.
+-- is. The schedule string itself is pinned by
+-- supabase/functions/notify-email/digest.test.js, which reads this migration.
 create function pg_temp.digest_job_scheduled() returns boolean
 language plpgsql as $$
 declare

@@ -10,11 +10,14 @@
 
 const TZ = 'America/Chicago';
 
-// The adviser's view of a team, and their dashboard. The Advising dashboard
-// (#56) doesn't exist yet; until it does, the admin dashboard is where an
-// adviser sees their teams. Change DASHBOARD_PATH when #56 lands.
-export const teamPath = (teamId) => `/admin/teams/${encodeURIComponent(teamId)}`;
-export const DASHBOARD_PATH = '/admin';
+// The adviser's view of a team, and their dashboard. Advisers can be students
+// or admins (38_adviser_digest.sql's header), and the two live in different
+// parts of the app: /admin/* is admin-only, and a student adviser sees the
+// teams they advise on /team ("Teams you advise", #54). The Advising
+// dashboard (#56) doesn't exist yet; change these when it lands.
+export const teamPath = (teamId, { admin = false } = {}) =>
+  admin ? `/admin/teams/${encodeURIComponent(teamId)}` : '/team';
+export const dashboardPath = ({ admin = false } = {}) => (admin ? '/admin' : '/team');
 
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -101,7 +104,8 @@ export function composeDigest({ data, appUrl, adviserName }) {
   const teams = sortTeams(data?.teams ?? []);
   const due = Array.isArray(data?.due_this_week) ? data.due_this_week : [];
   const quiet = teams.every((t) => !hadActivity(t, weekStart));
-  const dashboard = `${app}${DASHBOARD_PATH}`;
+  const admin = data?.adviser_is_admin === true;
+  const dashboard = `${app}${dashboardPath({ admin })}`;
 
   const range = weekStart && weekEnd ? `${shortDay(weekStart)} – ${shortDay(weekEnd)}` : 'last week';
   const subject = `Your TeamUp teams: week of ${weekStart ? shortDay(weekStart) : 'last week'}`;
@@ -127,7 +131,7 @@ export function composeDigest({ data, appUrl, adviserName }) {
 
   for (const team of teams) {
     const title = team.project_title || 'Untitled project';
-    const link = `${app}${teamPath(team.team_id)}`;
+    const link = `${app}${teamPath(team.team_id, { admin })}`;
     const heading = team.flagged ? `${title} (needs attention)` : title;
     const lines = quiet ? [] : teamLines(team);
 

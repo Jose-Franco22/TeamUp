@@ -267,9 +267,13 @@ describe('weekly digest', () => {
     expect(screen.getByText(/every Monday at 8:00 AM Central/)).toBeInTheDocument();
   });
 
-  test('students do not see it', async () => {
+  // Advising isn't tied to is_admin (#92): a student may advise a team, so a
+  // student gets the switch too, beside their own email setting.
+  test('students see it too, separately from their email setting', async () => {
     await renderProfile();
-    expect(screen.queryByRole('checkbox', { name: DIGEST_LABEL })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: DIGEST_LABEL })).toBeChecked();
+    expect(screen.getByRole('heading', { name: 'Adviser digest' })).toBeInTheDocument();
+    expect(screen.getByText(/only while you advise at least one team/)).toBeInTheDocument();
   });
 
   test('turning it off saves right away', async () => {

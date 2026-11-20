@@ -3,7 +3,10 @@
 --
 -- Every Monday at 8:00 AM Central, each adviser who advises at least one
 -- team gets one email summarizing last week (Monday to Sunday, Central) for
--- every team they advise. Advisers are users.is_admin (18_admin_access.sql).
+-- every team they advise. An adviser is whoever private.advised_teams()
+-- says advises a team: an accepted adviser_requests row (39_project_advisers.sql,
+-- #53/#54). Nothing here reads users.is_admin — advising isn't tied to the
+-- flag (decision 1 in 39's header, settled in PR #92).
 --
 -- THIS IS THE SHELL. The digest reports on things other stories add, none of
 -- which exist yet:
@@ -32,7 +35,9 @@
 -- What this adds:
 --
 --   * users.adviser_digest, on by default, set from the Profile page;
---   * private.advised_teams(adviser), the stub #53/#54 replace;
+--   * private.advised_teams(adviser), the stub #54 replaces, in a migration
+--     merged after this one (merge order, not file number, decides which
+--     body wins on the live database);
 --   * private.adviser_digest_data(adviser, now), one adviser's digest;
 --   * private.adviser_digest_recipients(), the send list;
 --   * public.adviser_digests, what's been sent;
@@ -79,6 +84,8 @@ $$;
 -- Returns:
 --
 --   {
+--     "adviser_is_admin": false,         which links the email uses: admins
+--                                        have /admin/teams/:id, students /team
 --     "week_start": "2026-11-09",        last week's Monday
 --     "week_end":   "2026-11-15",        last week's Sunday
 --     "due_this_week": [ { "name": ..., "due_at": ... } ],
@@ -107,6 +114,7 @@ as $$
     select private.digest_this_monday(p_now) as this_monday
   )
   select jsonb_build_object(
+    'adviser_is_admin', coalesce((select u.is_admin from public.users u where u.id = p_adviser), false),
     'week_start', (w.this_monday - 7),
     'week_end',   (w.this_monday - 1),
     'due_this_week', coalesce((
@@ -135,7 +143,8 @@ as $$
 $$;
 
 -- --- the send list -----------------------------------------------------------
--- Advisers with the digest on who advise at least one team.
+-- Advisers with the digest on who advise at least one team. Students and
+-- admins alike: who advises is advised_teams()'s answer alone.
 create or replace function private.adviser_digest_recipients()
 returns setof uuid
 language sql
@@ -145,8 +154,7 @@ set search_path = ''
 as $$
   select u.id
     from public.users u
-   where u.is_admin
-     and u.adviser_digest
+   where u.adviser_digest
      and exists (select 1 from private.advised_teams(u.id))
    order by u.id;
 $$;
@@ -173,6 +181,10 @@ revoke all on table public.adviser_digests from anon, authenticated;
 -- Monday: pg_cron runs in UTC, and 8 AM Central is 13:00 UTC in daylight
 -- time and 14:00 UTC in standard time, so the schedule below fires at both
 -- and this lets through only the one that's 8 AM locally.
+--
+-- The two hours are not a retry: only one of them is ever 8 AM Central, so if
+-- the database is down at that hour, that week's digest is skipped rather
+-- than sent late. The cron string is pinned by digest.test.js.
 create or replace function private.send_adviser_digests(p_now timestamptz default now())
 returns integer
 language plpgsql

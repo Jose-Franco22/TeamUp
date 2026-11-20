@@ -197,12 +197,13 @@ export default function Profile() {
         />
       )}
 
-      {data.is_admin && (
-        <DigestPreference
-          enabled={data.adviser_digest !== false}
-          onSaved={(on) => setData({ ...data, adviser_digest: on })}
-        />
-      )}
+      {/* Anyone can be asked to advise a team (39_project_advisers.sql), so
+          everyone gets the switch; the digest itself only goes to people who
+          advise at least one team. */}
+      <DigestPreference
+        enabled={data.adviser_digest !== false}
+        onSaved={(on) => setData({ ...data, adviser_digest: on })}
+      />
 
       {!data.is_admin && <section className="card">
         <h2>Skills</h2>
@@ -278,7 +279,7 @@ function EmailPreference({ enabled, onSaved }) {
   );
 }
 
-// Issue #59: advisers' Monday digest of the teams they advise. Saves as soon
+// Issue #59: the Monday digest of the teams someone advises. Saves as soon
 // as it's flipped, like EmailPreference, and puts the box back on failure.
 function DigestPreference({ enabled, onSaved }) {
   const [saving, setSaving] = useState(false);
@@ -299,8 +300,10 @@ function DigestPreference({ enabled, onSaved }) {
 
   return (
     <section className="card">
-      <h2>Email</h2>
-      <p className="desc">Sent to your UTRGV address every Monday at 8:00 AM Central.</p>
+      <h2>Adviser digest</h2>
+      <p className="desc">
+        Sent to your UTRGV address every Monday at 8:00 AM Central, only while you advise at least one team.
+      </p>
       <label className="switch">
         <input type="checkbox" checked={enabled} disabled={saving} onChange={toggle} />
         Email me a weekly digest of the teams I advise

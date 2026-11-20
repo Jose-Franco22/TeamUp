@@ -64,6 +64,15 @@ beforeEach(() => {
 });
 
 describe('the shape of the profile query', () => {
+  // Profile tests run on mocks and never see USER_SELECT. Without this column
+  // the real profile reads adviser_digest as undefined, and the switch shows
+  // "on" for someone who turned the digest off (#59).
+  test('asks for the settings the Profile switches show', async () => {
+    const { USER_SELECT } = await realMode();
+    expect(USER_SELECT).toMatch(/\bemail_notifications\b/);
+    expect(USER_SELECT).toMatch(/\badviser_digest\b/);
+  });
+
   test('asks for profile_evidence nested inside user_skills, where the FK is', async () => {
     const { USER_SELECT } = await realMode();
     expect(USER_SELECT).toContain(
