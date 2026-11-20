@@ -30,7 +30,9 @@ import {
   evidenceForUser,
   adviserRequests,
   adviserFor,
+  checkIns,
 } from './mockData';
+import { validateCheckIn, weekStart } from '../lib/checkIns';
 import { supabase } from '../lib/supabaseClient';
 import { isOpenProject } from '../lib/browseFilters';
 import { JOIN_BLOCKED, isPastDeadline } from '../lib/joinRequests';
@@ -2310,6 +2312,105 @@ export async function getAdvisedProjects() {
   if (error) throw error;
   const advisers = await fetchProjectAdvisers(viewerId, rows);
   return rows.map((row) => composeProject(row, viewerId, requestMap, undefined, advisers));
+}
+
+// --- Weekly check-ins (#55) -------------------------------------------------
+// One per member per Monday–Sunday Central week, once the team is formed.
+// The team and its accepted adviser read them; a member writes only their
+// own, only this week. supabase/41_check_ins.sql holds every rule as RLS.
+
+const CHECK_IN_SELECT =
+  'id, project_id, user_id, week_start, did, doing_next, blockers, created_at, updated_at, users ( name )';
+
+function mockCanReadCheckIns(projectId, viewerId) {
+  const team = teams.find((t) => t.project_id === projectId);
+  const onTeam = Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === viewerId));
+  const advises = adviserRequests.some(
+    (r) => r.project_id === projectId && r.adviser_id === viewerId && r.status === 'accepted'
+  );
+  return onTeam || advises;
+}
+
+// What the database's refusals mean to the person who hit them.
+function checkInError(error) {
+  if (error?.code === '23505') {
+    return new Error("You've already checked in this week. Reload the page to edit it.");
+  }
+  if (error?.code === '42501') {
+    return new Error('Only members of a formed team can check in, and only for the current week.');
+  }
+  return error;
+}
+
+// The project's check-ins, every week, newest week first. Each row carries
+// user_name so the list doesn't need the roster to say who wrote it.
+export async function getCheckIns(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!mockCanReadCheckIns(projectId, id)) {
+      throw new Error("Only this team and its adviser can see the team's check-ins");
+    }
+    return checkIns
+      .filter((c) => c.project_id === projectId)
+      .map((c) => ({ ...c, user_name: users.find((u) => u.id === c.user_id)?.name ?? null }))
+      .sort((a, b) => b.week_start.localeCompare(a.week_start));
+  }
+
+  const { data, error } = await supabase
+    .from('check_ins')
+    .select(CHECK_IN_SELECT)
+    .eq('project_id', projectId)
+    .order('week_start', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(({ users: author, ...c }) => ({ ...c, user_name: author?.name ?? null }));
+}
+
+// Posts this week's check-in, or edits it if `checkInId` is the one already
+// posted this week. Returns the project's check-ins afterwards.
+export async function saveCheckIn(projectId, fields, checkInId = null) {
+  const { values, errors, isValid } = validateCheckIn(fields);
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const team = teams.find((t) => t.project_id === projectId);
+    const onTeam = Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === id));
+    if (!onTeam || !team.formed_at) throw checkInError({ code: '42501' });
+    const week = weekStart();
+    const existing = checkIns.find((c) => c.project_id === projectId && c.user_id === id && c.week_start === week);
+    const now = new Date().toISOString();
+    if (checkInId) {
+      if (!existing || existing.id !== checkInId) throw checkInError({ code: '42501' });
+      Object.assign(existing, values, { updated_at: now });
+    } else {
+      if (existing) throw checkInError({ code: '23505' });
+      checkIns.push({
+        id: `ci-${Date.now()}-${checkIns.length}`,
+        project_id: projectId,
+        user_id: id,
+        week_start: week,
+        ...values,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+    return getCheckIns(projectId);
+  }
+
+  // user_id and week_start come from the column defaults (auth.uid() and the
+  // current Central week), so the browser's clock never picks the week.
+  const { error } = checkInId
+    ? await supabase.from('check_ins').update(values).eq('id', checkInId).select('id').single()
+    : await supabase.from('check_ins').insert({ project_id: projectId, ...values }).select('id').single();
+  if (error) {
+    // An update of a row that's no longer editable (its week ended while the
+    // form was open) matches nothing, which .single() reports as PGRST116.
+    if (error.code === 'PGRST116') throw new Error('That week has ended, so its check-in can no longer be edited.');
+    throw checkInError(error);
+  }
+  return getCheckIns(projectId);
 }
 
 // Accepted advisers for a page of Browse cards, in one call — the same shape

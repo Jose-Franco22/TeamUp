@@ -27,6 +27,9 @@ export const LINKS = {
   // Only sent to students who aren't on a full team (#43), so Browse is
   // where they'd go to find one.
   deadline_reminder: '/browse',
+  // Only sent to members of a formed team (#55), and the form is on their
+  // team page.
+  check_in_reminder: '/team',
   join_request: '/requests',
   member_left: '/team',
   member_removed: '/browse',
@@ -66,6 +69,10 @@ export function notificationText(n) {
       return `${n.actor_name} stepped down as adviser for ${project} — you can ask someone else`;
     case 'adviser_removed':
       return `You are no longer the adviser for ${project}`;
+    // #55, from Friday evening Central to anyone on a formed team who hasn't
+    // posted this week's check-in.
+    case 'check_in_reminder':
+      return `You haven't checked in for ${project} this week — post a quick update before Sunday`;
     case 'join_request':
       return `${n.actor_name} asked to join ${project}`;
     case 'member_left':

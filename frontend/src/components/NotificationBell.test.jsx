@@ -142,6 +142,8 @@ describe('NotificationBell', () => {
     adviser_declined: '/team',
     adviser_stepped_down: '/team',
     deadline_reminder: '/browse',
+    // The check-in form is on the team page (#55).
+    check_in_reminder: '/team',
     join_request: '/requests',
     member_left: '/team',
     member_removed: '/browse',
