@@ -5,7 +5,7 @@
 // only thing that changes is the fetch in client.js — no component has to
 // be touched, because the shapes already match.
 
-import { addWeeks, weekStart } from '../lib/checkIns';
+import { addWeeks, weekStart } from '../lib/checkIns.js';
 
 // --- ROLES -------------------------------------------------------------
 // roles: id, name, sort_order

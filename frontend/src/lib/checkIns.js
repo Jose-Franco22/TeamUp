@@ -3,7 +3,7 @@
 // it (supabase/41_check_ins.sql); this file is what the form and the list
 // show before anything is sent.
 
-import { charCount } from './validation';
+import { charCount } from './validation.js';
 
 // Mirrored by check_ins_*_length in 41_check_ins.sql.
 export const CHECK_IN_MAX = 500;
