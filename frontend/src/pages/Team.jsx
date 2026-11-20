@@ -16,6 +16,7 @@ import { Empty, ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
 import StatusPill from '../components/StatusPill';
 import { TeamChecklist } from '../components/NextSteps';
+import AdviserPanel from '../components/AdviserPanel';
 
 export default function Team() {
   const { data, loading, error, reload, setData } = useAsync(getMyTeam, []);
@@ -225,6 +226,10 @@ export default function Team() {
           </div>
         </div>
       </section>
+
+      {/* Above the roster, and not in it: an adviser holds no seat (issue
+          #53), so listing them among the members would imply they do. */}
+      <AdviserPanel projectId={data.id} isOwner={isOwner} />
 
       {/* The checklist is for complete teams (issue #30); set_next_step_done()
           refuses a team that's still forming. */}
