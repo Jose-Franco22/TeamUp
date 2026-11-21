@@ -185,6 +185,23 @@ describe('inviteAdviser', () => {
     expect(rowsFor(SCAM)).toHaveLength(2);
   });
 
+  // Not a refusal, which is the point: advising is not tied to `is_admin`
+  // (39_project_advisers.sql, decision 1). An admin stays out of
+  // searchAdvisers(), so this is reachable only by id — but it is reachable,
+  // and the database agrees (adviser_requests.test.sql).
+  test('an admin account can be asked, by id', async () => {
+    setSessionUserId('u-omar');
+    const row = await inviteAdviser(LAB, 'u-instructor');
+    expect(row.status).toBe('pending');
+    expect(row.adviser_id).toBe('u-instructor');
+  });
+
+  test('but an admin is never offered as a candidate', async () => {
+    setSessionUserId('u-omar');
+    const results = await searchAdvisers(LAB, 'Instructor');
+    expect(results).toEqual([]);
+  });
+
   describe('refusals', () => {
     test('a member of the team cannot invite', async () => {
       setSessionUserId('u-jose');
@@ -208,13 +225,6 @@ describe('inviteAdviser', () => {
     test('nor somebody already on the team', async () => {
       setSessionUserId('u-omar');
       await expect(inviteAdviser(LAB, 'u-priya')).rejects.toThrow('already on this team');
-    });
-
-    test('nor an admin account', async () => {
-      setSessionUserId('u-omar');
-      await expect(inviteAdviser(LAB, 'u-instructor')).rejects.toThrow(
-        'Admin accounts cannot advise a student project'
-      );
     });
 
     test('nor an account that does not exist', async () => {

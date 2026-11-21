@@ -15,7 +15,7 @@
 -- unauthenticated, and say so. When #54 lands those lines become calls to
 -- its function and these assertions should still pass unchanged.
 begin;
-select plan(99);
+select plan(101);
 
 select set_config('tests.owner',   tests.sign_in_with_microsoft('owner53@utrgv.edu', 'Olivia Owner')::text, true);
 select set_config('tests.member',  tests.sign_in_with_microsoft('member53@utrgv.edu', 'Mark Member')::text, true);
@@ -135,11 +135,10 @@ select throws_like(
   '%That account does not exist%',
   'inviting an account that is not there is an error, not a dangling row');
 
-select throws_like(
-  $$ select public.invite_adviser(current_setting('tests.project')::uuid,
-                                  current_setting('tests.admin')::uuid) $$,
-  '%Admin accounts cannot advise%',
-  'an admin account cannot advise — 18_admin_access.sql keeps them out of student teams');
+-- An admin account is not refused here: the flag is not an eligibility rule.
+-- It cannot be asserted at this point either way, because an invitation is
+-- already open and the pending-request guard below would answer first. The
+-- case has its own section, after the cancellation.
 
 select throws_like(
   $$ select public.invite_adviser(current_setting('tests.project')::uuid,
@@ -220,6 +219,36 @@ select throws_ok(
   null,
   'even the owner cannot write a request straight at the table');
 
+-- --- an admin account may be asked ---------------------------------------
+--
+-- invite_adviser() does not consult `users.is_admin`; see decision 1 in
+-- 39_project_advisers.sql. The rule 18_admin_access.sql enforces is
+-- require_student_participant(), which is on `projects`, `team_members` and
+-- `join_requests` — the three ways to take a seat. An adviser takes no seat,
+-- so advising was never one of the paths that trigger guards.
+--
+-- Being *findable* is the separate question, and the answer there is still
+-- no: the search section below asserts that an admin does not appear. This
+-- case therefore goes through the id, which is what the function takes.
+
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select lives_ok(
+  $$ select public.invite_adviser(current_setting('tests.project')::uuid,
+                                  current_setting('tests.admin')::uuid) $$,
+  'an admin account can be asked to advise — the flag is not an eligibility rule');
+
+select tests.clear_authentication();
+select is((select status from public.adviser_requests
+            where project_id = current_setting('tests.project')::uuid
+              and adviser_id = current_setting('tests.admin')::uuid), 'pending',
+  'and the invitation is an ordinary pending row');
+
+-- Back to no open invitation, which is what every section below assumes.
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select lives_ok(
+  $$ select public.cancel_adviser_request(current_setting('tests.project')::uuid) $$,
+  'and it can be cancelled like any other');
+
 select lives_ok(
   $$ select public.invite_adviser(current_setting('tests.project')::uuid,
                                   current_setting('tests.adviser')::uuid) $$,
@@ -263,8 +292,8 @@ select lives_ok(
 
 select tests.clear_authentication();
 select is((select count(*)::int from public.adviser_requests
-            where project_id = current_setting('tests.project')::uuid), 3,
-  'every invitation is kept: cancelled, declined, and the one now open');
+            where project_id = current_setting('tests.project')::uuid), 4,
+  'every invitation is kept: two cancelled (one of them the admin), declined, and the one now open');
 select is((select count(*)::int from public.adviser_requests
             where project_id = current_setting('tests.project')::uuid
               and status in ('pending', 'accepted')), 1,
@@ -461,7 +490,7 @@ select is((select count(*)::int from public.search_advisers(
   'nor is anybody already on the team');
 select is((select count(*)::int from public.search_advisers(
             current_setting('tests.project')::uuid, 'Instructor')), 0,
-  'nor an admin account');
+  'nor an admin account — invitable by id, but not discoverable until #60''s opt-in');
 select is((select count(*)::int from public.search_advisers(
             current_setting('tests.project')::uuid, 'Otto Other')), 0,
   'nor whoever is already holding an open invitation');
@@ -572,8 +601,8 @@ select is((select count(*)::int from public.adviser_requests
 
 select tests.authenticate_as(current_setting('tests.member')::uuid);
 select is((select count(*)::int from public.adviser_requests
-            where project_id = current_setting('tests.project')::uuid), 4,
-  'and the team reads its own, all four invitations of it');
+            where project_id = current_setting('tests.project')::uuid), 5,
+  'and the team reads its own, all five invitations of it');
 
 -- --- a decline is not public either ---------------------------------------
 -- Project B's invitation to Ben is still unanswered. Declining it must not
