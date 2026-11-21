@@ -11,6 +11,8 @@
 // tempted to seat somebody.
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
+  adminAssignStudent,
+  createJoinRequest,
   getAdvisedProjects,
   getMyAdviserRequests,
   getProject,
@@ -20,7 +22,13 @@ import {
   setSessionUserId,
   stepDownAsAdviser,
 } from './client';
-import { adviserRequests, notifications, projects, teamMembers } from './mockData';
+import {
+  adviserRequests,
+  notifications,
+  projects,
+  setFormationDeadline,
+  teamMembers,
+} from './mockData';
 
 // From mockData.js: u-luis has an unanswered invitation to advise p-degree
 // (u-alexis owns it); u-dana already advises p-parking; u-priya turned
@@ -50,6 +58,7 @@ afterEach(() => {
   teamMembers.push(...snapshot.teamMembers);
   notifications.length = 0;
   setSessionUserId(null);
+  setFormationDeadline(null);
 });
 
 // --- what is waiting for an answer ---------------------------------------
@@ -289,5 +298,69 @@ describe('accepting gives no seat', () => {
     await respondToAdviserRequest(LUIS_INVITE, true);
 
     expect(teamMembers.filter((m) => m.user_id === 'u-luis')).toHaveLength(1);
+  });
+});
+
+// --- one person, not both (#90 review) -----------------------------------
+// Advising a team and holding a seat on it are mutually exclusive, and until
+// now the only thing saying so was inviteAdviser() refusing somebody already
+// on the team. That is one moment, and both orders got around it. Each order
+// has a case here, matching supabase/tests/adviser_responses.test.sql.
+//
+// Unseating u-dana below is not contrived: every one of createJoinRequest's own
+// refusals comes before the adviser rule, exactly as they do server-side where
+// the trigger fires on the insert. On a team, "you are already on a team"
+// answers first and this rule is never reached.
+
+describe('one person, not both', () => {
+  const unseat = (userId) => {
+    const at = teamMembers.findIndex((m) => m.user_id === userId);
+    teamMembers.splice(at, 1);
+  };
+
+  test('somebody on the team cannot accept the invitation they were holding', async () => {
+    // Reachable in one order only: invited first, seated second, since
+    // inviteAdviser refuses anybody already on the team.
+    teamMembers.push({ team_id: 't-degree', user_id: 'u-luis', role_id: 'r-backend' });
+
+    setSessionUserId('u-luis');
+    await expect(respondToAdviserRequest(LUIS_INVITE, true))
+      .rejects.toThrow('you cannot also advise it');
+    expect(adviserRequests.find((r) => r.id === LUIS_INVITE).status).toBe('pending');
+  });
+
+  test('but declining is still open to them, which is the way out', async () => {
+    teamMembers.push({ team_id: 't-degree', user_id: 'u-luis', role_id: 'r-backend' });
+
+    setSessionUserId('u-luis');
+    await expect(respondToAdviserRequest(LUIS_INVITE, false))
+      .resolves.toMatchObject({ status: 'declined' });
+  });
+
+  test('the adviser of a project cannot ask for a seat on it', async () => {
+    setFormationDeadline('2999-01-01T00:00:00Z');
+    unseat('u-dana'); // advises p-parking, sits on t-scam in the fixtures
+
+    setSessionUserId('u-dana');
+    await expect(createJoinRequest(PARKING)).rejects.toThrow('cannot also hold a seat on it');
+  });
+
+  test('and can still ask to join one they do not advise', async () => {
+    setFormationDeadline('2999-01-01T00:00:00Z');
+    unseat('u-dana');
+
+    setSessionUserId('u-dana');
+    await expect(createJoinRequest(DEGREE)).resolves.toMatchObject({ status: 'pending' });
+  });
+
+  test('nor can an admin place them on the team they advise', async () => {
+    // The path a guard inside createJoinRequest would have missed, and the
+    // reason the rule is a trigger on team_members rather than a check in one
+    // caller: eight statements insert into that table.
+    setSessionUserId('u-instructor');
+    await expect(adminAssignStudent('u-dana', 't-parking', 'r-frontend'))
+      .rejects.toThrow('cannot also hold a seat on it');
+    expect(teamMembers.some((m) => m.team_id === 't-parking' && m.user_id === 'u-dana'))
+      .toBe(false);
   });
 });
