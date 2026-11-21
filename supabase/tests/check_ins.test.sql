@@ -1,4 +1,4 @@
--- Weekly team check-ins (issue #55): 41_check_ins.sql.
+-- Weekly team check-ins (issue #55): 42_check_ins.sql.
 --
 -- "This week" is whatever week the transaction's now() falls in, which is
 -- what the policies compare against. Last week's rows are written as the

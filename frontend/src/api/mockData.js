@@ -371,7 +371,7 @@ export function adviserFor(projectId) {
 // --- CHECK_INS ----------------------------------------------------------
 // check_ins: id, project_id, user_id, week_start ('YYYY-MM-DD', a Monday in
 // Central time), did, doing_next, blockers (null when none), created_at,
-// updated_at. See supabase/41_check_ins.sql. One per member per project per
+// updated_at. See supabase/42_check_ins.sql. One per member per project per
 // week. Seeded for the lab-scheduler team, the one formed team here: both
 // checked in last week (Priya with a blocker), and only Omar so far this week.
 const thisWeek = weekStart();

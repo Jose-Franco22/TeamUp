@@ -242,7 +242,7 @@ export default function Team() {
       {data.status === 'full' && <TeamChecklist teamId={data.team_id} />}
 
       {/* Weekly check-ins (#55), once the team is formed — the same moment
-          the database starts accepting them (41_check_ins.sql). */}
+          the database starts accepting them (42_check_ins.sql). */}
       {data.formed_at && (
         <CheckIns
           projectId={data.id}

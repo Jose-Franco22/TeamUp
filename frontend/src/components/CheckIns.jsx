@@ -28,7 +28,7 @@ const FIELDS = [
 //   canPost    false for an adviser, who reads but holds no seat
 //
 // One check-in per member per Monday–Sunday Central week, editable until the
-// week ends. The database enforces all of that (41_check_ins.sql); the form
+// week ends. The database enforces all of that (42_check_ins.sql); the form
 // just doesn't offer what would be refused.
 export default function CheckIns({ projectId, members, formedAt, viewerId, canPost = true }) {
   const { data, loading, error, setData } = useAsync(() => getCheckIns(projectId), [projectId]);

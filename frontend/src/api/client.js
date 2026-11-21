@@ -2319,7 +2319,7 @@ export async function getAdvisedProjects() {
 // --- Weekly check-ins (#55) -------------------------------------------------
 // One per member per Monday–Sunday Central week, once the team is formed.
 // The team and its accepted adviser read them; a member writes only their
-// own, only this week. supabase/41_check_ins.sql holds every rule as RLS.
+// own, only this week. supabase/42_check_ins.sql holds every rule as RLS.
 
 const CHECK_IN_SELECT =
   'id, project_id, user_id, week_start, did, doing_next, blockers, created_at, updated_at, users ( name )';

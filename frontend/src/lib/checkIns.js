@@ -1,11 +1,11 @@
 // Weekly team check-ins (issue #55): the week arithmetic, the form's rules,
 // and how the list is grouped. The database is the real boundary for all of
-// it (supabase/41_check_ins.sql); this file is what the form and the list
+// it (supabase/42_check_ins.sql); this file is what the form and the list
 // show before anything is sent.
 
 import { charCount } from './validation.js';
 
-// Mirrored by check_ins_*_length in 41_check_ins.sql.
+// Mirrored by check_ins_*_length in 42_check_ins.sql.
 export const CHECK_IN_MAX = 500;
 
 // UTRGV's time zone. Weeks run Monday–Sunday here, whatever zone the browser
