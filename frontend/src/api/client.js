@@ -2103,7 +2103,9 @@ export async function inviteAdviser(projectId, adviserId) {
 
     const adviser = users.find((u) => u.id === adviserId);
     if (!adviser) throw new Error('That account does not exist');
-    if (adviser.is_admin) throw new Error('Admin accounts cannot advise a student project');
+    // `adviser.is_admin` is deliberately not checked: advising is not tied to
+    // the flag (39_project_advisers.sql, decision 1). searchAdvisers() above
+    // still leaves admins out, so the only way here is by id.
     if (adviserId === id) throw new Error('You cannot invite yourself to advise your own project');
     if (mockIsOnProjectTeam(projectId, adviserId)) {
       throw new Error('They are already on this team, so they cannot advise it');
