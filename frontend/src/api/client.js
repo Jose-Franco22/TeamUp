@@ -30,7 +30,9 @@ import {
   evidenceForUser,
   adviserRequests,
   adviserFor,
+  checkIns,
 } from './mockData';
+import { validateCheckIn, weekStart } from '../lib/checkIns';
 import { supabase } from '../lib/supabaseClient';
 import { isOpenProject } from '../lib/browseFilters';
 import { JOIN_BLOCKED, isPastDeadline } from '../lib/joinRequests';
@@ -2183,6 +2185,234 @@ export async function removeAdviser(projectId) {
 
   const { error } = await supabase.rpc('remove_adviser', { p_project_id: projectId });
   if (error) throw error;
+}
+
+// --- Answering an invitation to advise (issue #54) -----------------------
+//
+// #53 is the owner asking; this is the other person's answer, and what they
+// get afterwards. Nothing here writes to team_members or touches a project's
+// fill state — accepting is the moment that would be tempting, and the seat
+// rule is the same one 39_project_advisers.sql is built around.
+
+// The invitations waiting for the caller's answer. Pending only: an answered
+// one is not waiting for anything, and a withdrawn one stops being offered.
+export async function getMyAdviserRequests() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'pending')
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((r) => {
+        const project = projects.find((p) => p.id === r.project_id);
+        const owner = users.find((u) => u.id === project.creator_id);
+        return {
+          id: r.id,
+          project_id: r.project_id,
+          project_title: project.title,
+          project_description: project.description,
+          owner_id: owner.id,
+          owner_name: owner.name,
+          created_at: r.created_at,
+        };
+      });
+  }
+
+  const { data, error } = await supabase.rpc('my_adviser_requests');
+  if (error) throw error;
+  return data ?? [];
+}
+
+// accept === false declines. The two share a function because they are one
+// answer with two values, and because only one of them may ever be given.
+export async function respondToAdviserRequest(requestId, accept) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (accept !== true && accept !== false) {
+      throw new Error('Answer the invitation with accept or decline');
+    }
+    const row = adviserRequests.find((r) => r.id === requestId);
+    if (!row) throw new Error('Adviser request not found');
+    if (row.adviser_id !== id) {
+      throw new Error('Only the person who was asked can answer this invitation');
+    }
+    if (row.status !== 'pending') throw new Error('That adviser request has already been answered');
+
+    const project = projects.find((p) => p.id === row.project_id);
+    row.status = accept ? 'accepted' : 'declined';
+    row.responded_at = new Date().toISOString();
+    mockNotify({
+      user_id: project.creator_id,
+      kind: accept ? 'adviser_accepted' : 'adviser_declined',
+      project_id: project.id,
+      actor_id: id,
+    });
+    return row;
+  }
+
+  const { data, error } = await supabase.rpc('respond_to_adviser_request', {
+    p_request_id: requestId,
+    p_accept: accept,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// The mirror of removeAdviser(): same end state, opposite direction, and the
+// notification goes the other way. The row lands on 'cancelled' either way —
+// which of the two it was lives in the notification, not the status.
+export async function stepDownAsAdviser(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+    const row = adviserRequests.find(
+      (r) => r.project_id === projectId && r.adviser_id === id && r.status === 'accepted'
+    );
+    if (!row) throw new Error('You are not the adviser for this project');
+    row.status = 'cancelled';
+    row.responded_at = new Date().toISOString();
+    mockNotify({
+      user_id: project.creator_id,
+      kind: 'adviser_stepped_down',
+      project_id: projectId,
+      actor_id: id,
+    });
+    return;
+  }
+
+  const { error } = await supabase.rpc('step_down_as_adviser', { p_project_id: projectId });
+  if (error) throw error;
+}
+
+// The projects the caller advises, shaped exactly like every other project
+// view: the ids come from the database, the projects themselves come through
+// the same select Browse uses, so there is no second composition to drift.
+export async function getAdvisedProjects() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'accepted')
+      .map((r) => projects.find((p) => p.id === r.project_id))
+      .filter(Boolean)
+      .map((p) => buildProject(p, id));
+  }
+
+  const viewerId = requireViewerId(await getViewerId());
+  const { data: ids, error: idsErr } = await supabase.rpc('advised_project_ids');
+  if (idsErr) throw idsErr;
+  const projectIds = (ids ?? []).map((row) => (typeof row === 'string' ? row : row.advised_project_ids));
+  if (projectIds.length === 0) return [];
+
+  const [{ data: rows, error }, requestMap] = await Promise.all([
+    supabase.from('projects').select(PROJECT_SELECT).in('id', projectIds),
+    fetchViewerRequestMap(viewerId),
+  ]);
+  if (error) throw error;
+  const advisers = await fetchProjectAdvisers(viewerId, rows);
+  return rows.map((row) => composeProject(row, viewerId, requestMap, undefined, advisers));
+}
+
+// --- Weekly check-ins (#55) -------------------------------------------------
+// One per member per Monday–Sunday Central week, once the team is formed.
+// The team and its accepted adviser read them; a member writes only their
+// own, only this week. supabase/42_check_ins.sql holds every rule as RLS.
+
+const CHECK_IN_SELECT =
+  'id, project_id, user_id, week_start, did, doing_next, blockers, created_at, updated_at, users ( name )';
+
+function mockCanReadCheckIns(projectId, viewerId) {
+  const team = teams.find((t) => t.project_id === projectId);
+  const onTeam = Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === viewerId));
+  const advises = adviserRequests.some(
+    (r) => r.project_id === projectId && r.adviser_id === viewerId && r.status === 'accepted'
+  );
+  return onTeam || advises;
+}
+
+// What the database's refusals mean to the person who hit them.
+function checkInError(error) {
+  if (error?.code === '23505') {
+    return new Error("You've already checked in this week. Reload the page to edit it.");
+  }
+  if (error?.code === '42501') {
+    return new Error('Only members of a formed team can check in, and only for the current week.');
+  }
+  return error;
+}
+
+// The project's check-ins, every week, newest week first. Each row carries
+// user_name so the list doesn't need the roster to say who wrote it.
+export async function getCheckIns(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!mockCanReadCheckIns(projectId, id)) {
+      throw new Error("Only this team and its adviser can see the team's check-ins");
+    }
+    return checkIns
+      .filter((c) => c.project_id === projectId)
+      .map((c) => ({ ...c, user_name: users.find((u) => u.id === c.user_id)?.name ?? null }))
+      .sort((a, b) => b.week_start.localeCompare(a.week_start));
+  }
+
+  const { data, error } = await supabase
+    .from('check_ins')
+    .select(CHECK_IN_SELECT)
+    .eq('project_id', projectId)
+    .order('week_start', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(({ users: author, ...c }) => ({ ...c, user_name: author?.name ?? null }));
+}
+
+// Posts this week's check-in, or edits it if `checkInId` is the one already
+// posted this week. Returns the project's check-ins afterwards.
+export async function saveCheckIn(projectId, fields, checkInId = null) {
+  const { values, errors, isValid } = validateCheckIn(fields);
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const team = teams.find((t) => t.project_id === projectId);
+    const onTeam = Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === id));
+    if (!onTeam || !team.formed_at) throw checkInError({ code: '42501' });
+    const week = weekStart();
+    const existing = checkIns.find((c) => c.project_id === projectId && c.user_id === id && c.week_start === week);
+    const now = new Date().toISOString();
+    if (checkInId) {
+      if (!existing || existing.id !== checkInId) throw checkInError({ code: '42501' });
+      Object.assign(existing, values, { updated_at: now });
+    } else {
+      if (existing) throw checkInError({ code: '23505' });
+      checkIns.push({
+        id: `ci-${Date.now()}-${checkIns.length}`,
+        project_id: projectId,
+        user_id: id,
+        week_start: week,
+        ...values,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+    return getCheckIns(projectId);
+  }
+
+  // user_id and week_start come from the column defaults (auth.uid() and the
+  // current Central week), so the browser's clock never picks the week.
+  const { error } = checkInId
+    ? await supabase.from('check_ins').update(values).eq('id', checkInId).select('id').single()
+    : await supabase.from('check_ins').insert({ project_id: projectId, ...values }).select('id').single();
+  if (error) {
+    // An update of a row that's no longer editable (its week ended while the
+    // form was open) matches nothing, which .single() reports as PGRST116.
+    if (error.code === 'PGRST116') throw new Error('That week has ended, so its check-in can no longer be edited.');
+    throw checkInError(error);
+  }
+  return getCheckIns(projectId);
 }
 
 // Accepted advisers for a page of Browse cards, in one call — the same shape

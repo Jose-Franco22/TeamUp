@@ -16,12 +16,20 @@ export const LINKS = {
   // what /requests is. #54 builds the row that answers it there; until then
   // this is still where the person will go looking.
   adviser_invited: '/requests',
+  // All three go to the project's owner, and the adviser is shown on their
+  // team page — which is also where they would invite somebody else (#54).
+  adviser_accepted: '/team',
+  adviser_declined: '/team',
+  adviser_stepped_down: '/team',
   // Nothing of theirs left to open: an adviser holds no seat, so there is no
   // team page of theirs to send them to (#53).
   adviser_removed: '/browse',
   // Only sent to students who aren't on a full team (#43), so Browse is
   // where they'd go to find one.
   deadline_reminder: '/browse',
+  // Only sent to members of a formed team (#55), and the form is on their
+  // team page.
+  check_in_reminder: '/team',
   join_request: '/requests',
   member_left: '/team',
   member_removed: '/browse',
@@ -51,8 +59,20 @@ export function notificationText(n) {
     // "an adviser" means nothing to somebody who has never been asked before.
     case 'adviser_invited':
       return `${n.actor_name} asked you to advise ${project} — their team's contact, not a seat on it`;
+    // #54. Each says what to do next where there is something to do: a
+    // decline and a stepping-down both leave the owner needing somebody else.
+    case 'adviser_accepted':
+      return `${n.actor_name} accepted and is now advising ${project}`;
+    case 'adviser_declined':
+      return `${n.actor_name} turned down advising ${project} — you can ask someone else`;
+    case 'adviser_stepped_down':
+      return `${n.actor_name} stepped down as adviser for ${project} — you can ask someone else`;
     case 'adviser_removed':
       return `You are no longer the adviser for ${project}`;
+    // #55, from Friday evening Central to anyone on a formed team who hasn't
+    // posted this week's check-in.
+    case 'check_in_reminder':
+      return `You haven't checked in for ${project} this week — post a quick update before Sunday`;
     case 'join_request':
       return `${n.actor_name} asked to join ${project}`;
     case 'member_left':

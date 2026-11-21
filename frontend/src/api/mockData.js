@@ -5,6 +5,8 @@
 // only thing that changes is the fetch in client.js — no component has to
 // be touched, because the shapes already match.
 
+import { addWeeks, weekStart } from '../lib/checkIns.js';
+
 // --- ROLES -------------------------------------------------------------
 // roles: id, name, sort_order
 //
@@ -365,6 +367,33 @@ export function adviserFor(projectId) {
     });
   return rows[0] ?? null;
 }
+
+// --- CHECK_INS ----------------------------------------------------------
+// check_ins: id, project_id, user_id, week_start ('YYYY-MM-DD', a Monday in
+// Central time), did, doing_next, blockers (null when none), created_at,
+// updated_at. See supabase/42_check_ins.sql. One per member per project per
+// week. Seeded for the lab-scheduler team, the one formed team here: both
+// checked in last week (Priya with a blocker), and only Omar so far this week.
+const thisWeek = weekStart();
+const lastWeek = addWeeks(thisWeek, -1);
+export const checkIns = [
+  {
+    id: 'ci-1', project_id: 'p-lab', user_id: 'u-omar', week_start: lastWeek,
+    did: 'Set up the repo and the CI pipeline.', doing_next: 'Booking API endpoints.', blockers: null,
+    created_at: `${lastWeek}T20:00:00Z`, updated_at: `${lastWeek}T20:00:00Z`,
+  },
+  {
+    id: 'ci-2', project_id: 'p-lab', user_id: 'u-priya', week_start: lastWeek,
+    did: 'Wireframes for the booking flow.', doing_next: 'High-fidelity mockups.',
+    blockers: 'Still waiting on the lab manager for the room list.',
+    created_at: `${lastWeek}T21:00:00Z`, updated_at: `${lastWeek}T21:00:00Z`,
+  },
+  {
+    id: 'ci-3', project_id: 'p-lab', user_id: 'u-omar', week_start: thisWeek,
+    did: 'Booking endpoints, with tests.', doing_next: 'Conflict detection for double bookings.', blockers: null,
+    created_at: `${thisWeek}T18:00:00Z`, updated_at: `${thisWeek}T18:00:00Z`,
+  },
+];
 
 // --- MILESTONES / NOTIFICATIONS / ADMIN_ACTIONS -----------------------
 // See supabase/26_milestones.sql. milestones: id, name, due_at,
