@@ -624,13 +624,23 @@ select is((select contributors from public.repo_activity
 
 -- The control, without which the case above would pass just as well if the
 -- guard dropped everything.
+--
+-- Asserted on the table rather than on what the function returned, because
+-- `row is not null` is not the negation of `row is null` for a composite:
+-- it is true only when *every* field is, and a stored row with no
+-- last_commit_at and no error has two that are not. The two dropped-write
+-- cases can use `is null` safely — that one is true only for a whole null
+-- row — but the control cannot use its mirror image.
 set local role service_role;
-select ok((select public.save_repo_activity(current_setting('tests.project')::uuid,
-    'https://github.com/Jose-Franco22/TeamUp',
-    '[{"login":"GoldNicolas","commits":4,"pull_requests":0,"last_commit_at":null}]'::jsonb,
-    null, 14, null)) is not null,
-  'while one carrying the repository the project does point at is stored');
+select public.save_repo_activity(current_setting('tests.project')::uuid,
+  'https://github.com/Jose-Franco22/TeamUp',
+  '[{"login":"GoldNicolas","commits":4,"pull_requests":0,"last_commit_at":null}]'::jsonb,
+  null, 14, null);
 reset role;
+
+select is((select contributors -> 0 ->> 'commits' from public.repo_activity
+            where project_id = current_setting('tests.project')::uuid), '4',
+  'while one carrying the repository the project does point at is stored');
 
 -- Unlinking is the same event from the other side, and the one that made it
 -- worth guarding: set_project_repo('') deletes the row, and a refresh
