@@ -80,8 +80,9 @@ test('admin access is checked by the server without accepting a caller-supplied 
 test('a signed-in seeker sees other teams rosters without any count RPC', async () => {
   const [project] = await client.getProjects();
   expect(project.members).toEqual([
-    { user_id: 'owner', name: 'Owner', role_id: 'pm', role: 'Project Manager' },
-    { user_id: 'mate', name: 'Mate', role_id: 'fe', role: 'Frontend Developer' },
+    // joined_at is null because the fake's rows don't carry one (#55).
+    { user_id: 'owner', name: 'Owner', role_id: 'pm', role: 'Project Manager', joined_at: null },
+    { user_id: 'mate', name: 'Mate', role_id: 'fe', role: 'Frontend Developer', joined_at: null },
   ]);
   expect(project).toMatchObject({ member_count: 2, avg_availability_hours: 13 });
   // The roster came from RLS, not from a count function: that is the point of

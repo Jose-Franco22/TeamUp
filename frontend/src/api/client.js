@@ -297,7 +297,7 @@ function mockAssertOpenSeat(team, project) {
 // private.seat(): the membership, the role's seat taken, fill state, and
 // every request the student still has out declined.
 function mockSeat(userId, team, project, roleId) {
-  const membership = { team_id: team.id, user_id: userId, role_id: roleId };
+  const membership = { team_id: team.id, user_id: userId, role_id: roleId, joined_at: new Date().toISOString() };
   teamMembers.push(membership);
   const need = projectRolesNeeded.find((n) => n.project_id === project.id && n.role_id === roleId);
   if (need && need.quantity_needed > 0) need.quantity_needed -= 1;
@@ -804,7 +804,7 @@ const PROJECT_SELECT = `
   id, creator_id, title, description, team_size_target, status, created_at,
   creator:users!creator_id ( name ),
   project_roles_needed ( role_id, skill_id, quantity_needed, roles ( name ), skills ( name, category ) ),
-  teams ( id, formed_at, team_members ( user_id, role_id, roles ( name ), users ( name, availability_hours ) ) )
+  teams ( id, formed_at, team_members ( user_id, role_id, joined_at, roles ( name ), users ( name, availability_hours ) ) )
 `;
 
 function pickViewerStatus(rows) {
@@ -876,6 +876,9 @@ function composeProject(row, viewerId, viewerRequestsByProject, guestMemberCount
       name: tm.users.name,
       role_id: tm.role_id,
       role: tm.roles?.name ?? null,
+      // When they took the seat, so check-ins (#55) don't count them missing
+      // for weeks before they were on the team.
+      joined_at: tm.joined_at ?? null,
     }));
     member_count = members.length;
     avg_availability_hours = members.length
@@ -1032,7 +1035,7 @@ export async function createProject({
 
     const teamId = `t-${Date.now()}`;
     teams.push({ id: teamId, project_id: projectId, formed_at: null });
-    teamMembers.push({ team_id: teamId, user_id: id, role_id: creator_role_id });
+    teamMembers.push({ team_id: teamId, user_id: id, role_id: creator_role_id, joined_at: new Date().toISOString() });
 
     for (const r of roles_needed) {
       projectRolesNeeded.push({
@@ -1703,7 +1706,7 @@ export async function respondToRequest(requestId, status, roleId) {
     // Accepting adds the person to the roster, and fills the project once
     // it reaches team_size_target. The backend does this in a transaction.
     if (status === 'accepted') {
-      teamMembers.push({ team_id: team.id, user_id: r.user_id, role_id: roleId });
+      teamMembers.push({ team_id: team.id, user_id: r.user_id, role_id: roleId, joined_at: new Date().toISOString() });
       const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
       if (count >= project.team_size_target) {
         const previousStatus = project.status;
@@ -1805,7 +1808,7 @@ export async function getMyTeam() {
   // unlike the plain project views — see TODO-backend.md.
   const { data: memberRows, error: membersErr } = await supabase
     .from('team_members')
-    .select('user_id, role_id, roles ( name ), users ( name, availability_hours, user_skills ( skills ( name ) ) )')
+    .select('user_id, role_id, joined_at, roles ( name ), users ( name, availability_hours, user_skills ( skills ( name ) ) )')
     .eq('team_id', membership.team_id);
   if (membersErr) throw membersErr;
 
@@ -1817,6 +1820,7 @@ export async function getMyTeam() {
       name: tm.users.name,
       role_id: tm.role_id,
       role: tm.roles?.name ?? null,
+      joined_at: tm.joined_at ?? null,
       availability_hours: tm.users.availability_hours,
       skills: (tm.users.user_skills || []).map((us) => us.skills.name),
     })),

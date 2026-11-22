@@ -157,6 +157,32 @@ describe('groupCheckIns()', () => {
     expect(groups[1].missing).toEqual([]);
   });
 
+  // A replacement who took a seat mid-term: missing from the week they joined
+  // on, but not for the weeks before, when they weren't on the team.
+  test('a member is not missing for weeks before they joined', () => {
+    const roster = [
+      { user_id: 'u-a', name: 'Ana', joined_at: '2026-10-20T15:00:00Z' },
+      { user_id: 'u-d', name: 'Dee', joined_at: '2026-11-11T15:00:00Z' }, // Wed of the 11-09 week
+    ];
+    const groups = groupCheckIns([], roster, { currentWeek: '2026-11-16', formedAt: '2026-10-28T12:00:00Z' });
+    const missing = Object.fromEntries(groups.map((g) => [g.week, g.missing.map((m) => m.name)]));
+    expect(missing).toEqual({
+      '2026-11-16': ['Ana', 'Dee'],
+      '2026-11-09': ['Ana', 'Dee'], // the week they joined still counts
+      '2026-11-02': ['Ana'],
+      '2026-10-26': ['Ana'],
+    });
+  });
+
+  // Central time, like weekStart(): 00:30 Monday UTC is still Sunday evening
+  // in Chicago, so that join belongs to the week before.
+  test('the join week is the Central-time week', () => {
+    const roster = [{ user_id: 'u-d', name: 'Dee', joined_at: '2026-11-16T00:30:00Z' }];
+    const groups = groupCheckIns([], roster, { currentWeek: '2026-11-16', formedAt: '2026-11-02T12:00:00Z' });
+    expect(groups.find((g) => g.week === '2026-11-09').missing.map((m) => m.name)).toEqual(['Dee']);
+    expect(groups.find((g) => g.week === '2026-11-02').missing).toEqual([]);
+  });
+
   test('hasBlocker() is true only for a non-blank blocker', () => {
     expect(hasBlocker(ci('1', 'u-a', 'Ana', '2026-11-16', 'Waiting on access'))).toBe(true);
     expect(hasBlocker(ci('1', 'u-a', 'Ana', '2026-11-16', null))).toBe(false);

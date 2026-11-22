@@ -86,7 +86,11 @@ export const hasBlocker = (checkIn) => Boolean(checkIn?.blockers && checkIn.bloc
 // Every week from the team's formation to now gets a group, even an empty
 // one: a week nobody checked in is exactly what "who hasn't submitted"
 // should show. Missing is measured against today's roster, since that's the
-// roster the page has; weeks before the team formed list nobody as missing.
+// roster the page has; weeks before the team formed list nobody as missing,
+// and nor do a member's weeks before they joined (team_members.joined_at), so
+// a replacement who took a seat mid-term isn't shown as having skipped the
+// weeks before it. A member with no joined_at is counted from formation, as
+// before.
 export function groupCheckIns(checkIns, members, { currentWeek = weekStart(), formedAt = null } = {}) {
   const firstWeek = formedAt ? weekStart(formedAt) : currentWeek;
   const weeks = new Set();
@@ -100,7 +104,12 @@ export function groupCheckIns(checkIns, members, { currentWeek = weekStart(), fo
         .filter((c) => c.week_start === week)
         .sort((a, b) => String(a.user_name ?? '').localeCompare(String(b.user_name ?? '')));
       const postedBy = new Set(posted.map((c) => c.user_id));
-      const missing = week < firstWeek ? [] : members.filter((m) => !postedBy.has(m.user_id));
+      const missing =
+        week < firstWeek
+          ? []
+          : members.filter(
+              (m) => !postedBy.has(m.user_id) && (!m.joined_at || weekStart(m.joined_at) <= week)
+            );
       return { week, checkIns: posted, missing };
     });
 }

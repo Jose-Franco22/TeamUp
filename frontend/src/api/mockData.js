@@ -482,6 +482,7 @@ export function buildProject(project, viewerId = null) {
           name: userById[tm.user_id].name,
           role_id: tm.role_id,
           role: roleById[tm.role_id]?.name ?? null,
+          joined_at: tm.joined_at ?? null,
         }))
     : [];
   // Same rule as team_members RLS: any signed-in viewer sees the roster, guests
