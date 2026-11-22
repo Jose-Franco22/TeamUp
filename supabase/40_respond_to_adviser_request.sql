@@ -169,9 +169,18 @@ grant execute on function public.respond_to_adviser_request(uuid, boolean) to au
 -- "no" when they ask rather than the owner hitting a wall on accepting.
 --
 -- `for update` on the invitation is the other half of the pair described
--- above. Accepting locks that row and then reads the roster; this reads that
--- row under the same lock. Concurrent attempts serialize on it, so the
--- second one to commit always sees the first.
+-- above. Accepting locks that row and then reads the roster; this locks the
+-- same row and then reads its status. Concurrent attempts serialize on it,
+-- so the second one to commit always sees the first.
+--
+-- The lock is taken on *every* request between this user and this project,
+-- whatever its status, and the status is read afterwards in a statement of
+-- its own. Filtering on `status = 'accepted'` in the locking select would
+-- not serialize anything: while an accept is still in flight the row reads
+-- 'pending' in this statement's snapshot, so Postgres skips it without
+-- waiting, and both transactions commit (#90 review, second round). Locking
+-- first means this waits for the accept to finish, and the check after it
+-- starts with a fresh snapshot (read committed) that sees the result.
 --
 -- Scoped `of user_id, team_id` so the six statements that update a member's
 -- role_id don't pay for it. An adviser of *another* project is unaffected:
@@ -181,7 +190,6 @@ returns trigger language plpgsql security definer set search_path = ''
 as $$
 declare
   v_project uuid;
-  v_adviser uuid;
 begin
   if tg_table_name = 'join_requests' then
     v_project := new.project_id;
@@ -191,13 +199,20 @@ begin
      where t.id = new.team_id;
   end if;
 
-  select ar.adviser_id into v_adviser
+  -- Lock, without looking at the status: see the note above.
+  perform 1
     from public.adviser_requests ar
    where ar.project_id = v_project
      and ar.adviser_id = new.user_id
-     and ar.status = 'accepted'
      for update;
-  if found then
+
+  if exists (
+    select 1
+      from public.adviser_requests ar
+     where ar.project_id = v_project
+       and ar.adviser_id = new.user_id
+       and ar.status = 'accepted'
+  ) then
     raise exception 'The adviser of a project cannot also hold a seat on it'
       using errcode = '42501';
   end if;
