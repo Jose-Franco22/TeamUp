@@ -13,7 +13,7 @@
 -- functions already check the creator. Which is precisely why it needs
 -- testing, since nothing in #54's diff would break if it stopped being true.
 begin;
-select plan(60);
+select plan(67);
 
 select set_config('tests.owner',   tests.sign_in_with_microsoft('owner54@utrgv.edu', 'Olivia Owner')::text, true);
 select set_config('tests.member',  tests.sign_in_with_microsoft('member54@utrgv.edu', 'Mark Member')::text, true);
@@ -187,30 +187,36 @@ select is((select formed_at from public.teams
             where project_id = current_setting('tests.project')::uuid), null,
   'with the team still unformed');
 
--- "advising doesn't stop me from being on a team of my own" — the criterion
--- that makes no sense if advisers were admin accounts.
+-- REPLACES A CASE THAT ASSERTED THE OPPOSITE (#90 review). This block used to
+-- seat the adviser on project_b, the very project they advise, and called it
+-- allowed -- "invite_adviser() refuses somebody already on the team, but
+-- joining afterwards is a different order of events and not one to police."
+-- That was wrong. An adviser is the project's outside contact (#53: "so that
+-- my team has a faculty contact attached to the project"), and nobody is
+-- their own outside contact. The order it arrives in does not change what the
+-- end state is. What was missing was the rule, not the test.
+--
+-- #54's "advising doesn't stop me from being on a team of my own" is still
+-- true and still asserted -- further down, once this adviser has stepped down
+-- from one of the two and there is a project they do not advise to join. A
+-- team of their own is the point; the team they advise is not their own.
 select tests.authenticate_as(current_setting('tests.adviser')::uuid);
-select set_config('tests.req_adviser',
-  (select (public.create_join_request(current_setting('tests.project_b')::uuid)).id::text), true);
-select tests.authenticate_as(current_setting('tests.owner_b')::uuid);
-select lives_ok(
-  $$ select public.respond_to_join_request(
-       current_setting('tests.req_adviser')::uuid, 'accepted', current_setting('tests.r_be')::uuid) $$,
-  'somebody who advises two projects can still be accepted onto a team');
+select throws_ok(
+  $$ select public.create_join_request(current_setting('tests.project_b')::uuid) $$,
+  '42501',
+  null,
+  'somebody who advises a project cannot ask for a seat on it');
 
 select tests.clear_authentication();
 select is((select count(*)::int from public.team_members
-            where user_id = current_setting('tests.adviser')::uuid), 1,
-  'which gives them one roster row, as it would anybody');
+            where user_id = current_setting('tests.adviser')::uuid), 0,
+  'so they are still on no roster');
 select is((select count(*)::int from public.advised_project_ids()), 0,
   'advised_project_ids is per caller, and nobody is signed in here');
 
--- They now advise the very project they are a member of, which is allowed:
--- invite_adviser() refuses somebody already on the team, but joining
--- afterwards is a different order of events and not one to police.
 select tests.authenticate_as(current_setting('tests.adviser')::uuid);
 select is((select count(*)::int from public.advised_project_ids()), 2,
-  'and they still advise both');
+  'while they still advise both');
 
 -- --- what an adviser may not do -------------------------------------------
 -- The issue's "can't edit the project, accept join requests or manage
@@ -362,6 +368,75 @@ select public.cancel_adviser_request(current_setting('tests.project')::uuid);
 select tests.authenticate_as(current_setting('tests.other')::uuid);
 select is((select count(*)::int from public.my_adviser_requests()), 0,
   'a withdrawn invitation stops being offered');
+
+-- --- one person, not both (#90 review) ------------------------------------
+-- 39 checks at invite time that the invitee is not on the team, and that was
+-- the whole of the rule. It left both orders open: the adviser could ask to
+-- join the project afterwards, and nothing re-checked when they accepted.
+-- Each order gets a case here, and the table boundary gets one of its own.
+--
+-- tests.adviser advises tests.project_b at this point and nothing else.
+
+-- The order that goes through the roster. Unauthenticated, so RLS is out of
+-- the way and the trigger is the only thing left to answer -- which is the
+-- point: eight statements across seven migrations insert into team_members,
+-- and this asserts the rule where all eight of them land rather than at any
+-- one of the callers.
+select tests.clear_authentication();
+select throws_ok(
+  $$ insert into public.team_members (user_id, team_id, role_id)
+     values (current_setting('tests.adviser')::uuid,
+             (select id from public.teams
+               where project_id = current_setting('tests.project_b')::uuid),
+             current_setting('tests.r_be')::uuid) $$,
+  '42501',
+  null,
+  'the adviser of a project cannot be seated on it, however the insert arrives');
+
+-- Scoped to the project they advise, not to them. #54: "advising doesn't stop
+-- me from being on a team of my own."
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select lives_ok(
+  $$ select public.create_join_request(current_setting('tests.project')::uuid) $$,
+  'and they can still ask to join a project they do not advise');
+select throws_ok(
+  $$ select public.create_join_request(current_setting('tests.project_b')::uuid) $$,
+  '42501',
+  null,
+  'but not the one they do -- asked where they ask, not left to the owner');
+
+-- The other order: invited first, seated second, then answering. Getting into
+-- that state needs the invitation to come before the seat, since 39 refuses to
+-- invite somebody already on the team.
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select set_config('tests.invite_seeker',
+  (select (public.invite_adviser(current_setting('tests.project')::uuid,
+                                 current_setting('tests.seeker')::uuid)).id::text), true);
+
+-- tests.seeker's join request is the one made further up and never answered,
+-- rather than a second one: create_join_request refuses a duplicate while the
+-- first is still pending.
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select lives_ok(
+  $$ select public.respond_to_join_request(current_setting('tests.req_seeker')::uuid,
+       'accepted', current_setting('tests.r_be')::uuid) $$,
+  'a pending invitation is no bar to being seated -- nobody advises anything yet');
+
+select tests.authenticate_as(current_setting('tests.seeker')::uuid);
+select throws_like(
+  $$ select public.respond_to_adviser_request(
+       current_setting('tests.invite_seeker')::uuid, true) $$,
+  '%cannot also advise it%',
+  'but now on the team, they cannot accept the invitation they were holding');
+
+-- Only accepting is refused. Declining is how they get out of it.
+select lives_ok(
+  $$ select public.respond_to_adviser_request(
+       current_setting('tests.invite_seeker')::uuid, false) $$,
+  'they can still decline it, which is the way out');
+select is((select status from public.adviser_requests
+            where id = current_setting('tests.invite_seeker')::uuid), 'declined',
+  'and the invitation lands on declined like any other');
 
 -- --- guests get none of it -------------------------------------------------
 
