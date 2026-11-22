@@ -1879,9 +1879,16 @@ export async function getRepoActivity(projectId) {
     await delay();
     const id = requireSessionUserId();
     // The select policy, restated: who committed how much is the team's
-    // business. Returning null rather than throwing matches what the real
-    // query does for a row RLS hides.
-    if (!mockOnRepoTeam(projectId, id)) return null;
+    // business, and its accepted adviser's. Returning null rather than
+    // throwing matches what the real query does for a row RLS hides.
+    //
+    // The adviser check is inline rather than a named helper on purpose: #90
+    // adds a top-level mockAdvisesProject(), and a second declaration of that
+    // name here would merge cleanly and break the module.
+    const advises = adviserRequests.some(
+      (r) => r.project_id === projectId && r.adviser_id === id && r.status === 'accepted'
+    );
+    if (!mockOnRepoTeam(projectId, id) && !advises) return null;
     const row = repoActivityFor(projectId);
     return row ? { ...row, contributors: row.contributors.map((c) => ({ ...c })) } : null;
   }
