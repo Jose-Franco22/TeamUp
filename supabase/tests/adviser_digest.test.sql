@@ -1,7 +1,8 @@
 -- Weekly adviser digest (issue #59): 38_adviser_digest.sql.
 --
--- Nothing links an adviser to a team until #53/#54, so the first tests check
--- the stub sends nobody anything. The rest swap private.advised_teams() for
+-- Nobody advises a team until an invitation is accepted, so the first tests
+-- check that nobody is sent anything. (43_advised_teams.sql's own body is
+-- tested in advised_teams.test.sql.) The rest swap private.advised_teams() for
 -- one that reads a table of this test's own (all rolled back at the end), the
 -- way #53/#54's real version will answer, and check everything built on it.
 begin;
@@ -41,9 +42,9 @@ select is((select adviser_digest from public.users where id = current_setting('t
 select is((select adviser_digest from public.users where id = current_setting('tests.adv')::uuid), true,
   'but not someone else''s');
 
--- --- until #53/#54: nobody advises anything, so nobody gets one --------------
+-- --- before anyone accepts: nobody advises anything, so nobody gets one -------
 select is((select count(*)::int from private.advised_teams(current_setting('tests.adv')::uuid)), 0,
-  'the stub says an adviser advises no teams');
+  'with no accepted invitation, an adviser advises no teams');
 select is((select count(*)::int from private.adviser_digest_recipients()), 0,
   'so the send list is empty');
 -- Monday 2026-11-16, 8:00 AM CST = 14:00 UTC.

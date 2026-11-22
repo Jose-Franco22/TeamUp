@@ -11,7 +11,7 @@
 -- THIS IS THE SHELL. The digest reports on things other stories add, none of
 -- which exist yet:
 --
---   * which teams an adviser advises        #53 / #54
+--   * which teams an adviser advises        #53 / #54 (43_advised_teams.sql)
 --   * weekly check-ins and blockers         #55
 --   * the "flagged team" rules              #56
 --   * deliverables waiting for review       #57
@@ -35,9 +35,11 @@
 -- What this adds:
 --
 --   * users.adviser_digest, on by default, set from the Profile page;
---   * private.advised_teams(adviser), the stub #54 replaces, in a migration
---     merged after this one (merge order, not file number, decides which
---     body wins on the live database);
+--   * private.advised_teams(adviser), a stub here; 43_advised_teams.sql
+--     gives it the real body from accepted adviser_requests rows. It is a
+--     separate, later file because adviser_requests only exists from 39_,
+--     and on the live database merge order, not file number, decides which
+--     body wins;
 --   * private.adviser_digest_data(adviser, now), one adviser's digest;
 --   * private.adviser_digest_recipients(), the send list;
 --   * public.adviser_digests, what's been sent;
@@ -55,9 +57,9 @@ comment on column public.users.adviser_digest is
   '(issue #59). Only read for advisers. Set from the Profile page.';
 
 -- --- which teams an adviser advises (stub) ----------------------------------
--- #53 / #54 replace this body once advisers can be asked to advise a team
--- and accept. Everything below reads the adviser-to-team link only through
--- this function, so that's the one place that changes.
+-- 43_advised_teams.sql replaces this body with the real one (accepted
+-- adviser_requests rows, #53/#54). Everything below reads the adviser-to-team
+-- link only through this function, so that's the one place that changes.
 create or replace function private.advised_teams(p_adviser uuid)
 returns setof uuid
 language sql

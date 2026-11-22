@@ -405,8 +405,8 @@ Email goes out from the `notify-email` Edge Function (`supabase/functions/notify
 - **every new `adviser_digests` row** — it emails that adviser their weekly digest (#59,
   `digest.js`). The rows come from `private.send_adviser_digests()`, which pg_cron runs Mondays at
   13:00 and 14:00 UTC and which only acts at 8:00 AM Central (`38_adviser_digest.sql`). Advisers
-  turn it off on their profile (`users.adviser_digest`). Until #53/#54 link advisers to teams,
-  `private.advised_teams()` is a stub that returns nothing, so no digest is sent.
+  turn it off on their profile (`users.adviser_digest`). It goes to everyone with an accepted
+  adviser request (`private.advised_teams()`, `43_advised_teams.sql`) who advises at least one team.
 
 Students can turn off the non-essential ones on their profile (`users.email_notifications`, from
 `36_email_preferences.sql`). Deadline reminders and announcements ignore that flag
