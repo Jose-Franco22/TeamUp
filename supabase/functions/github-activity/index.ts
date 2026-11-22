@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
     // The database's floor under forced refreshes: one a minute per
     // project, claimed before any GitHub request is spent rather than
     // stamped after one comes back. See touch_repo_activity() in
-    // supabase/42_github_activity.sql for why the stamp lives on `projects`.
+    // supabase/41_github_activity.sql for why the stamp lives on `projects`.
     claimForce: async () => {
       const { data, error } = await admin.rpc('touch_repo_activity', {
         p_project_id: projectId,

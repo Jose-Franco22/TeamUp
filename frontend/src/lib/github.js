@@ -3,7 +3,7 @@
 // Three rules live in this file, and all three are mirrored elsewhere:
 //
 //   - What counts as a repo URL. Mirrored by projects_github_repo_format_check
-//     and the raise in set_project_repo() (supabase/42_github_activity.sql),
+//     and the raise in set_project_repo() (supabase/41_github_activity.sql),
 //     which is the real boundary — anyone signed in can call Supabase
 //     directly and skip this file.
 //   - What the stored value looks like. Exactly CANONICAL_REPO_PATTERN, which
