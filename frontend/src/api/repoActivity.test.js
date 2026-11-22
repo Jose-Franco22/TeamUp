@@ -267,6 +267,62 @@ describe('refreshRepoActivity', () => {
     );
   });
 
+  // JOSE'S #91 REVIEW, POINT 1. Pressing the button skipped the window with
+  // nothing limiting it, while the Edge Function's comment claimed the
+  // database limited it. It does now, through touch_repo_activity(), and
+  // these say the mock honours the same minute.
+  describe('and only once a minute', () => {
+    test('a second press inside the minute is answered from the cache', async () => {
+      setSessionUserId('u-nicolas');
+
+      const first = await refreshRepoActivity(PARKING, { force: true });
+      const second = await refreshRepoActivity(PARKING, { force: true });
+
+      expect(first).toMatchObject({ ok: true, cached: false });
+      expect(second).toMatchObject({ ok: true, cached: true });
+      expect(second.activity.fetched_at).toBe(first.activity.fetched_at);
+    });
+
+    test('and once the minute has passed it is let through again', async () => {
+      setSessionUserId('u-nicolas');
+      await refreshRepoActivity(PARKING, { force: true });
+      // Rewound rather than waited out, the same way the pgTAP case does it.
+      projects.find((p) => p.id === PARKING).github_forced_at = new Date(
+        Date.now() - 61 * 1000
+      ).toISOString();
+
+      await expect(refreshRepoActivity(PARKING, { force: true })).resolves.toMatchObject({
+        ok: true,
+        cached: false,
+      });
+    });
+
+    test('an ordinary refresh does not claim the slot', async () => {
+      setSessionUserId('u-nicolas');
+
+      await refreshRepoActivity(PARKING);
+
+      expect(projects.find((p) => p.id === PARKING).github_forced_at).toBeUndefined();
+      await expect(refreshRepoActivity(PARKING, { force: true })).resolves.toMatchObject({
+        cached: false,
+      });
+    });
+
+    // Falling back to the window is not bypassing the window: a refused
+    // press on a project with nothing cached still has to fetch, because
+    // there is no answer to serve in its place.
+    test('a refused press with nothing cached still fetches', async () => {
+      setSessionUserId('u-alexis');
+      await setProjectRepo(DEGREE, 'https://github.com/utrgv/degree-plan');
+      projects.find((p) => p.id === DEGREE).github_forced_at = new Date().toISOString();
+
+      await expect(refreshRepoActivity(DEGREE, { force: true })).resolves.toMatchObject({
+        ok: true,
+        cached: false,
+      });
+    });
+  });
+
   test('and an answer past the window is not reused', async () => {
     setSessionUserId('u-nicolas');
     repoActivityFor(PARKING).fetched_at = new Date(Date.now() - 60 * 60 * 1000).toISOString();

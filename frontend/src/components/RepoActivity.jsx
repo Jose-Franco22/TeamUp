@@ -227,6 +227,18 @@ export default function RepoActivity({ projectId, isOwner, members = [], repo = 
       {linked && (
         <>
           <h3>Last {windowDays} days</h3>
+          {/* GitHub's /repos/{owner}/{repo}/commits lists the default branch
+              and nothing else, so work sitting on a feature branch does not
+              appear here until it is merged. Said out loud because the
+              alternative is a student reading a teammate's empty row as "did
+              nothing" — the minor note on Jose's #91 review. It is
+              unconditional: the surprise lands hardest on the team whose
+              numbers look wrong, and they have no reason to come looking for
+              an explanation. */}
+          <p className="sub">
+            Counts the default branch only, so work on a feature branch shows up once it is
+            merged.
+          </p>
           {loading && !activity ? (
             <p className="hint">Checking GitHub…</p>
           ) : (

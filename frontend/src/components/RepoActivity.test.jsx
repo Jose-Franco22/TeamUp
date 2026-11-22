@@ -224,6 +224,17 @@ describe('the activity table', () => {
     expect(link).toHaveAttribute('href', REPO);
   });
 
+  // The minor note on Jose's #91 review. A team reading an empty row as
+  // "did nothing" when the work is really on an unmerged branch is the one
+  // way this panel can mislead rather than merely disappoint.
+  test('says that only the default branch is counted', async () => {
+    renderPanel();
+
+    expect(
+      await within(panel()).findByText(/default branch only/i)
+    ).toBeInTheDocument();
+  });
+
   test('a member with commits gets their counts', async () => {
     renderPanel();
 

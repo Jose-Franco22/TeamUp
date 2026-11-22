@@ -1,17 +1,27 @@
 -- Link our GitHub repo and show each member's activity (issue #58). Run
--- after 37_deadline_reminders.sql. Nothing here depends on 38, 39 or 40,
--- and 41 is taken rather than 38 so it stays clear of the three migrations
--- open in PRs #87, #88 and #90 at the time of writing.
+-- after 39_project_advisers.sql, which the select policy below now reads:
+-- the adviser half of the issue's "team members and the adviser only" is
+-- the one thing #58 could not state until #88 had merged, and it has.
+-- Nothing here depends on 40 or above.
+--
+-- 42 RATHER THAN 41, which #93 (`41_check_ins.sql`) also claimed. Jose's
+-- #91 review asked for one of the two to move; this is the one that was
+-- blocked on conflicts, so this is the one that moves. A number is only an
+-- ordering and gaps are already normal here — 25 and 38 are both absent
+-- from Testing — so moving costs nothing, while waiting to agree costs a
+-- round trip.
 --
 -- Three pieces:
 --
---   1. `projects.github_repo` — the link itself, the owner's to set.
+--   1. `projects.github_repo` — the link itself, the owner's to set — and
+--      `projects.github_forced_at`, the clock that puts a floor under how
+--      often the refresh button may reach GitHub.
 --   2. `public.repo_activity` — one row per project, holding what GitHub
 --      last told us. A cache, not a record: it can be deleted at any time
 --      and the next page view refills it.
---   3. Three functions, one per direction: the owner writes the link, a
---      member asks what to refresh, and the Edge Function (and only it)
---      writes the answer back.
+--   3. Four functions: the owner writes the link, a member asks what to
+--      refresh, a member claims a forced refresh, and the Edge Function
+--      (and only it) writes the answer back.
 --
 -- WHO SEES WHAT, and why the two halves differ:
 --
@@ -25,8 +35,9 @@
 --   The *activity* is not. Who committed how much is the team's business,
 --   so `repo_activity` gets its own policy and its own table. The issue is
 --   explicit about this ("readable by team members and the adviser only"),
---   and the adviser half of that sentence is the one thing in #58 that
---   cannot be written yet — see the policy below.
+--   and both halves are written now: #88 brought `adviser_requests`, so the
+--   policy below names the accepted adviser as well as the team. Reading is
+--   not refreshing, though — see project_repo_for_refresh().
 --
 -- WHAT IS NOT HERE: no fetching. Postgres never talks to GitHub; the token
 -- would have to live in the database to do it. supabase/functions/github-activity/
@@ -72,6 +83,42 @@ alter table public.projects
 comment on column public.projects.github_repo is
   'The team''s repository, canonical form only: https://github.com/owner/repo. '
   'Empty when nothing is linked. As public as the rest of the project row.';
+
+-- --- the floor under forced refreshes -------------------------------------
+-- The refresh button passes `force`, which skips the 15-minute cache, and
+-- until now nothing limited it. activity.js promised a touch_repo_activity()
+-- that was never written, so the comment was the whole of the rule: any
+-- member, or a script with their token, could spend up to six GitHub calls
+-- per press against the 5,000-an-hour budget the entire course shares
+-- through one token. Jose's #91 review, point 1.
+--
+-- WHY THE STAMP IS HERE AND NOT ON repo_activity. Two reasons, and the
+-- second is the one that decided it:
+--
+--   * `repo_activity` is documented one screen below as safe to delete. A
+--     limiter you can reset by clearing the cache is not a limiter.
+--   * The slot has to be claimed BEFORE the GitHub requests are spent, not
+--     after them. `repo_activity.fetched_at` is written by
+--     save_repo_activity() once the fetch has come back, so a caller that
+--     hangs up mid-fetch stamps nothing and may press again immediately —
+--     which is precisely the path a loop would take. Stamping up front
+--     needs a row that is already there, and a project that has never been
+--     fetched has no `repo_activity` row at all. Inserting a stub one is
+--     not available either: the client selects from that table directly and
+--     reads "no row" as "never asked" (getRepoActivity in client.js), so a
+--     stub would show an empty contributors table where the page should be
+--     offering to fetch. `projects` always has a row, and
+--     project_repo_for_refresh() has already proved the caller may use it.
+--
+-- Null means "never forced", which is why the first press is free.
+
+alter table public.projects
+  add column if not exists github_forced_at timestamptz;
+
+comment on column public.projects.github_forced_at is
+  'When a forced repository refresh was last let through, or null if never. '
+  'Written only by touch_repo_activity(), which is also where the reason it '
+  'is not on repo_activity is written down.';
 
 -- --- the cache ------------------------------------------------------------
 -- One row per project, replaced whole. Nothing here is a source of truth:
@@ -121,14 +168,27 @@ comment on table public.repo_activity is
 -- the only way in is save_repo_activity() below, which only the Edge
 -- Function may call, so a student cannot write themselves a hundred commits.
 --
--- THE ADVISER IS MISSING FROM THIS POLICY, and that is deliberate rather
--- than forgotten. The issue asks for "team members and the adviser only",
--- but `adviser_requests` does not exist on this branch — it arrives with
--- #53 (PR #88) and #54 (PR #90), both open. A policy naming a table that is
--- not there would fail every pgTAP run from scratch, and guarding it with
--- a to_regclass() check would hide a rule the whole point of which is to be
--- readable. It follows in its own migration once #88 has merged, which is
--- also when there is an adviser to test it with.
+-- THE ADVISER IS IN IT NOW. The first version of this file left the clause
+-- out for a concrete reason — `adviser_requests` did not exist on the
+-- branch, and a policy naming a table that is not there fails every pgTAP
+-- run from scratch — and that reason has expired: #53 (PR #88) merged into
+-- Testing on 2026-11-20, so 39_project_advisers.sql runs before this file.
+--
+-- It is written here rather than in a migration of its own, which is what
+-- the old comment promised. A select policy is replaced whole, so two files
+-- both running `create policy repo_activity_select_team` would let merge
+-- order decide which of the two rules the live database ends up with — the
+-- trap 40_respond_to_adviser_request.sql documents at length. One file, one
+-- policy, no ordering to get wrong.
+--
+-- `status = 'accepted'` and nothing else: an invitation still out is not an
+-- adviser, and a declined or cancelled one never was. Accepting is #54's to
+-- write and #54 is still open, which this does not wait for — the policy
+-- reads a status column 39 already defines, and the pgTAP case sets it by
+-- hand exactly as 39's own tests do.
+--
+-- Reading is not refreshing. An adviser sees the table; spending the shared
+-- GitHub budget stays with the team. project_repo_for_refresh() says why.
 
 alter table public.repo_activity enable row level security;
 
@@ -143,6 +203,13 @@ create policy repo_activity_select_team
         join public.team_members tm on tm.team_id = t.id
        where t.project_id = repo_activity.project_id
          and tm.user_id = auth.uid()
+    )
+    or exists (
+      select 1
+        from public.adviser_requests ar
+       where ar.project_id = repo_activity.project_id
+         and ar.adviser_id = auth.uid()
+         and ar.status = 'accepted'
     )
   );
 
@@ -223,6 +290,15 @@ grant execute on function public.set_project_repo(uuid, text) to authenticated;
 -- stranger may not — GitHub's limit is 5,000 requests an hour for the whole
 -- course, and an endpoint any signed-in student could spin would be the
 -- easiest way to exhaust it.
+--
+-- NOR THE ADVISER, who the select policy above does let read. The two are
+-- different questions: reading costs nothing, and refreshing spends a
+-- budget shared by every team in the course. The issue asks for the adviser
+-- to *see* the activity and says nothing about fetching it, an adviser can
+-- advise several projects at once (#54), and whoever is actually pushing
+-- commits is on the team and can press the button. If an advising dashboard
+-- later wants its own refresh, that is its own decision to argue, with its
+-- own test — not a side effect of this one.
 
 create or replace function public.project_repo_for_refresh(p_project_id uuid)
 returns text
@@ -266,6 +342,63 @@ $$;
 revoke all on function public.project_repo_for_refresh(uuid) from public, anon;
 grant execute on function public.project_repo_for_refresh(uuid) to authenticated;
 
+-- --- touch_repo_activity --------------------------------------------------
+-- "May I spend GitHub requests on this project right now?" Asked by the
+-- Edge Function before a forced refresh, and by nothing else. The function
+-- activity.js has been claiming exists since the first commit on this
+-- branch; Jose's #91 review noticed it did not.
+--
+-- ONE STATEMENT, because the check and the claim have to be the same act.
+-- An `if last < now() - gap then update` would let two presses arriving
+-- together both read the same old stamp and both pass, which is the shape
+-- of race this is meant to stop. The UPDATE's WHERE clause *is* the check,
+-- and `found` is the answer to it.
+--
+-- Returns true when the caller may fetch, with the next sixty seconds now
+-- claimed; false when it may not. False is not an error: index.ts serves
+-- the cached row and reports `cached: true`, which is byte for byte what it
+-- already does for an ordinary cache hit, so neither the client nor the
+-- page needs to learn a new state for this.
+--
+-- A project id that matches no row also returns false. Unreachable in
+-- practice — project_repo_for_refresh() has already raised 'Project not
+-- found' by then — but "I could not claim the slot" is the right answer to
+-- give when the row is not there, rather than the permissive one.
+--
+-- SIXTY SECONDS is Jose's suggested figure and it is the right order of
+-- magnitude: long enough that leaning on the button costs one fetch instead
+-- of twenty, short enough that "I just pushed, show me now" works on a
+-- second try rather than feeling broken. It is written here as an interval
+-- literal rather than a settable constant on purpose — a rate limit a
+-- caller can pass in is a rate limit a caller can widen.
+--
+-- service_role only, like save_repo_activity() below. Authorization is
+-- already settled by the time this is called: index.ts asks
+-- project_repo_for_refresh() with the caller's own token first and only
+-- gets here if that allowed it. Granting this to `authenticated` would also
+-- hand any one member a way to burn the gap for the rest of their team by
+-- calling it in a loop directly.
+
+create or replace function public.touch_repo_activity(p_project_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.projects
+     set github_forced_at = now()
+   where id = p_project_id
+     and (github_forced_at is null
+          or github_forced_at < now() - interval '60 seconds');
+
+  return found;
+end;
+$$;
+
+revoke all on function public.touch_repo_activity(uuid) from public, anon, authenticated;
+grant execute on function public.touch_repo_activity(uuid) to service_role;
+
 -- --- save_repo_activity ---------------------------------------------------
 -- The Edge Function writing back what GitHub said. Granted to service_role
 -- and nothing else, which is the whole security story of this table: a
@@ -304,6 +437,31 @@ declare
 begin
   if not exists (select 1 from public.projects where id = p_project_id) then
     raise exception 'Project not found';
+  end if;
+
+  -- The link can change while a refresh is in flight. The owner fixes a
+  -- typo in the URL, or unlinks altogether, and this call arrives a second
+  -- later still carrying the old repository's counts — so the team is shown
+  -- somebody else's commits, and set_project_repo() having cleared the row
+  -- is quietly undone. Jose's #91 review, point 3.
+  --
+  -- Returning null rather than raising, because nothing went wrong: the
+  -- Edge Function did everything right and the world moved under it. The
+  -- call site in index.ts already ignores what comes back — write() logs a
+  -- failure and hands the caller the answer either way — so this needs no
+  -- change on that side and cannot turn a stale write into a failed
+  -- request.
+  --
+  -- `is distinct from` rather than `<>` so that the unlinked case is caught
+  -- too: github_repo is '' and never null, but p_repo arrives from JSON and
+  -- a null there would make `<>` yield null and fall straight through.
+  --
+  -- Before the CHECK constraints rather than after, since a payload aimed
+  -- at a repository nobody is looking at any more is not worth validating.
+  if p_repo is distinct from (
+    select github_repo from public.projects where id = p_project_id
+  ) then
+    return null;
   end if;
 
   insert into public.repo_activity

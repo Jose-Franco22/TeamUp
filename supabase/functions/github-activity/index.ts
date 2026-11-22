@@ -126,6 +126,23 @@ Deno.serve(async (req) => {
         .maybeSingle();
       return data ?? null;
     },
+    // The database's floor under forced refreshes: one a minute per
+    // project, claimed before any GitHub request is spent rather than
+    // stamped after one comes back. See touch_repo_activity() in
+    // supabase/42_github_activity.sql for why the stamp lives on `projects`.
+    claimForce: async () => {
+      const { data, error } = await admin.rpc('touch_repo_activity', {
+        p_project_id: projectId,
+      });
+      // Refusing is the safe answer to a limiter we could not reach: the
+      // caller still gets whatever was cached, and a press a minute later
+      // asks again. Allowing it would mean an outage here lifted the limit.
+      if (error) {
+        console.error('github-activity: could not claim a forced refresh:', error.message);
+        return false;
+      }
+      return data === true;
+    },
     write: async (row: Record<string, unknown>) => {
       const { error } = await admin.rpc('save_repo_activity', {
         p_project_id: projectId,

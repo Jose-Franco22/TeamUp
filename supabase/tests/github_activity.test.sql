@@ -19,16 +19,20 @@
 --      security properties rather than typos: a host that merely contains
 --      github.com, and a name of dots that would walk the API path.
 --
--- The adviser is absent on purpose. #58 asks for "team members and the
--- adviser only", and `adviser_requests` is not on this branch — it arrives
--- with PR #88. supabase/41_github_activity.sql says so where the policy is,
--- and the adviser clause and its cases follow in their own migration.
+-- THE ADVISER IS HERE NOW. #58 asks for "team members and the adviser
+-- only", and the second half of that waited on `adviser_requests`, which
+-- #88 merged into Testing on 2026-11-20. The cases are under "who can read
+-- it", and they are about the status rather than the row: an invitation
+-- still out is not an adviser, and advising one project is not a key to
+-- another. Accepting is #54's to write and #54 is still open, so the status
+-- is set by hand here exactly as adviser_requests.test.sql does it.
 begin;
-select plan(61);
+select plan(80);
 
 select set_config('tests.owner',    tests.sign_in_with_microsoft('owner58@utrgv.edu', 'Olivia Owner')::text, true);
 select set_config('tests.member',   tests.sign_in_with_microsoft('member58@utrgv.edu', 'Mark Member')::text, true);
 select set_config('tests.outsider', tests.sign_in_with_microsoft('outsider58@utrgv.edu', 'Otto Outside')::text, true);
+select set_config('tests.adviser',  tests.sign_in_with_microsoft('adviser58@utrgv.edu', 'Dr Avery Adviser')::text, true);
 select set_config('tests.owner_b',  tests.sign_in_with_microsoft('owner58b@utrgv.edu', 'Bea Builder')::text, true);
 select set_config('tests.admin',    tests.sign_in_with_microsoft('instructor58@utrgv.edu', 'Instructor')::text, true);
 
@@ -333,16 +337,23 @@ select throws_ok(
   'P0001', 'Project not found',
   'activity for a project that does not exist is refused');
 
+-- Both of these carry the repository the project actually points at, which
+-- they did not have to before: save_repo_activity() now drops a write whose
+-- repository is no longer the project's, and a dropped write never reaches
+-- a CHECK. The constraint is what is under test here, so the write has to
+-- get as far as the insert.
 select throws_ok(
   $$ select public.save_repo_activity(current_setting('tests.project')::uuid,
-       'https://github.com/a/b', '{"login":"not a list"}'::jsonb, null, 14, null) $$,
+       'https://github.com/Jose-Franco22/TeamUp',
+       '{"login":"not a list"}'::jsonb, null, 14, null) $$,
   '23514', null,
   'contributors has to be an array');
 
 -- A code the page has no sentence for would render as nothing at all.
 select throws_ok(
   $$ select public.save_repo_activity(current_setting('tests.project')::uuid,
-       'https://github.com/a/b', '[]'::jsonb, null, 14, 'something new') $$,
+       'https://github.com/Jose-Franco22/TeamUp',
+       '[]'::jsonb, null, 14, 'something new') $$,
   '23514', null,
   'and an error code the page cannot explain is refused');
 
@@ -386,6 +397,57 @@ select is((select count(*)::int from public.repo_activity
             where project_id = current_setting('tests.project')::uuid), 0,
   'and a guest sees nothing, though the link itself is public');
 reset role;
+
+-- THE ADVISER, which is the half of "team members and the adviser only"
+-- that #58 could not state until #88 had merged. Invited through 39's own
+-- function, so the row is shaped the way the application shapes it; the
+-- status is then moved by hand, because respond_to_adviser_request() is
+-- #54's and #54 is still open.
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select public.invite_adviser(current_setting('tests.project')::uuid,
+                             current_setting('tests.adviser')::uuid);
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select is((select count(*)::int from public.repo_activity
+            where project_id = current_setting('tests.project')::uuid), 0,
+  'somebody holding an invitation that is still out is not the adviser yet');
+
+select tests.clear_authentication();
+update public.adviser_requests set status = 'accepted'
+ where project_id = current_setting('tests.project')::uuid
+   and adviser_id = current_setting('tests.adviser')::uuid;
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select is((select count(*)::int from public.repo_activity
+            where project_id = current_setting('tests.project')::uuid), 1,
+  'and once they have accepted they read the team''s activity');
+
+-- The case that says the policy reads the status and not merely the row.
+select tests.clear_authentication();
+update public.adviser_requests set status = 'declined'
+ where project_id = current_setting('tests.project')::uuid
+   and adviser_id = current_setting('tests.adviser')::uuid;
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select is((select count(*)::int from public.repo_activity
+            where project_id = current_setting('tests.project')::uuid), 0,
+  'while somebody who declined reads nothing');
+
+-- Advising one project is not a key to another. #54 lets one person advise
+-- several at once, which makes this the case that would break first if the
+-- clause were ever written as "is an adviser" rather than "advises this
+-- project".
+select tests.clear_authentication();
+insert into public.adviser_requests (project_id, adviser_id, invited_by, status)
+values (current_setting('tests.project_b')::uuid,
+        current_setting('tests.adviser')::uuid,
+        current_setting('tests.owner_b')::uuid,
+        'accepted');
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select is((select count(*)::int from public.repo_activity
+            where project_id = current_setting('tests.project')::uuid), 0,
+  'and the adviser of a different project still reads nothing here');
 
 -- The link is public on purpose: it is a column on `projects`, which guests
 -- browse. Asserted rather than left implied, so a future reader knows the
@@ -459,6 +521,134 @@ select lives_ok(
 select tests.clear_authentication();
 select is((select github_repo from public.projects where id = current_setting('tests.project_b')::uuid),
   'https://github.com/utrgv/degree-plan', 'and it is stored');
+
+-- --- the floor under forced refreshes -------------------------------------
+-- Jose's #91 review, point 1. `force` on the refresh button skips the
+-- fifteen-minute window, and nothing limited how often it could be pressed
+-- --- while activity.js said in a comment that the database limited it
+-- through this very function, which did not exist. Six GitHub calls a
+-- press, against the 5,000 an hour the whole course shares.
+--
+-- The stamp is on `projects` rather than on `repo_activity` for the reasons
+-- written where the column is declared. The shorter one is asserted here:
+-- `repo_activity` is documented as safe to delete, and a limiter you can
+-- reset by clearing a cache is not a limiter.
+
+select tests.clear_authentication();
+select is((select github_forced_at from public.projects
+            where id = current_setting('tests.project')::uuid), null,
+  'a project nobody has forced a refresh on carries no stamp');
+
+set local role service_role;
+select is(public.touch_repo_activity(current_setting('tests.project')::uuid), true,
+  'so the first forced refresh is let through');
+select is(public.touch_repo_activity(current_setting('tests.project')::uuid), false,
+  'and a second one in the same second is not');
+reset role;
+
+select tests.clear_authentication();
+select ok((select github_forced_at from public.projects
+            where id = current_setting('tests.project')::uuid) is not null,
+  'because the first one claimed the slot on the way past');
+
+-- Rewound rather than waited out: the gap is sixty seconds, and a test that
+-- sleeps for sixty seconds is a test nobody runs.
+update public.projects set github_forced_at = now() - interval '61 seconds'
+ where id = current_setting('tests.project')::uuid;
+
+set local role service_role;
+select is(public.touch_repo_activity(current_setting('tests.project')::uuid), true,
+  'once the gap has passed, the next press is let through again');
+reset role;
+
+-- THE REASON THE STAMP IS NOT IN THE CACHE.
+select tests.clear_authentication();
+delete from public.repo_activity where project_id = current_setting('tests.project')::uuid;
+
+set local role service_role;
+select is(public.touch_repo_activity(current_setting('tests.project')::uuid), false,
+  'and clearing the cache does not clear the slot');
+
+-- Not a raise: project_repo_for_refresh() has already said 'Project not
+-- found' by the time the Edge Function gets here, and "I could not claim
+-- the slot" is the safe answer to give for a row that is not there.
+select is(public.touch_repo_activity(gen_random_uuid()), false,
+  'a project that does not exist cannot claim a slot either');
+
+-- Put the cached row back, so the sections below see the file's state
+-- rather than this one's leftovers.
+select public.save_repo_activity(current_setting('tests.project')::uuid,
+  'https://github.com/Jose-Franco22/TeamUp', '[]'::jsonb, null, 14, null);
+reset role;
+
+-- THE RULE: only the Edge Function. A member who could call this directly
+-- could burn the gap for the rest of their team.
+select tests.authenticate_as(current_setting('tests.owner')::uuid);
+select throws_ok(
+  $$ select public.touch_repo_activity(current_setting('tests.project')::uuid) $$,
+  '42501', null,
+  'the owner cannot claim a forced refresh directly');
+
+select tests.authenticate_as(current_setting('tests.member')::uuid);
+select throws_ok(
+  $$ select public.touch_repo_activity(current_setting('tests.project')::uuid) $$,
+  '42501', null,
+  'nor can a member');
+
+select tests.clear_authentication();
+set local role anon;
+select throws_ok(
+  $$ select public.touch_repo_activity(current_setting('tests.project')::uuid) $$,
+  '42501', null,
+  'nor a guest');
+reset role;
+
+-- --- a refresh that arrives after the link changed ------------------------
+-- Jose's #91 review, point 3. set_project_repo() throws the cached answer
+-- away when the link changes, which the section below asserts --- but a
+-- refresh already in flight would write it straight back: the old
+-- repository's counts, filed under the new link's name.
+
+select tests.clear_authentication();
+set local role service_role;
+select ok((select public.save_repo_activity(current_setting('tests.project')::uuid,
+    'https://github.com/someone/else',
+    '[{"login":"Ghost","commits":99,"pull_requests":0,"last_commit_at":null}]'::jsonb,
+    null, 14, null)) is null,
+  'a refresh carrying a repository the project no longer points at is dropped');
+reset role;
+
+select is((select contributors from public.repo_activity
+            where project_id = current_setting('tests.project')::uuid), '[]'::jsonb,
+  'and the row it would have overwritten is untouched');
+
+-- The control, without which the case above would pass just as well if the
+-- guard dropped everything.
+set local role service_role;
+select ok((select public.save_repo_activity(current_setting('tests.project')::uuid,
+    'https://github.com/Jose-Franco22/TeamUp',
+    '[{"login":"GoldNicolas","commits":4,"pull_requests":0,"last_commit_at":null}]'::jsonb,
+    null, 14, null)) is not null,
+  'while one carrying the repository the project does point at is stored');
+reset role;
+
+-- Unlinking is the same event from the other side, and the one that made it
+-- worth guarding: set_project_repo('') deletes the row, and a refresh
+-- landing afterwards would put it back. Done on project B, so the main
+-- project's link is left as the section below expects it.
+select tests.authenticate_as(current_setting('tests.owner_b')::uuid);
+select public.set_project_repo(current_setting('tests.project_b')::uuid, '');
+
+select tests.clear_authentication();
+set local role service_role;
+select ok((select public.save_repo_activity(current_setting('tests.project_b')::uuid,
+    'https://github.com/utrgv/degree-plan', '[]'::jsonb, null, 14, null)) is null,
+  'a refresh landing after the owner unlinked is dropped as well');
+reset role;
+
+select is((select count(*)::int from public.repo_activity
+            where project_id = current_setting('tests.project_b')::uuid), 0,
+  'so unlinking stays unlinked');
 
 -- --- changing the link throws the old answer away -------------------------
 -- Otherwise a team that has just fixed a typo spends up to fifteen minutes

@@ -440,11 +440,19 @@ describe('collectActivity', () => {
 
 // --- the cache -----------------------------------------------------------
 
-function fakeStore(initial = null) {
+function fakeStore(initial = null, { allowForce = true } = {}) {
   const store = {
     row: initial,
     writes: 0,
+    forceClaims: 0,
     read: async () => store.row,
+    // touch_repo_activity() in the real one: the sixty-second floor under
+    // forced refreshes. Counted as well as answered, so a test can assert
+    // that an ordinary call never asks for the slot at all.
+    claimForce: async () => {
+      store.forceClaims += 1;
+      return allowForce;
+    },
     write: async (row) => {
       store.writes += 1;
       store.row = row;
@@ -530,6 +538,77 @@ describe('the cache', () => {
     });
     assert.equal(cached, false);
     assert.deepEqual(row.contributors, []);
+  });
+
+  // JOSE'S #91 REVIEW, POINT 1. `force` skipped the fifteen-minute window
+  // with nothing limiting it, while the comment above getActivity claimed
+  // the database rate-limited it through a touch_repo_activity() that was
+  // never written. It exists now, and these are the cases that say so.
+  describe('the floor under forced refreshes', () => {
+    test('a forced press asks the database for the slot first', async () => {
+      const store = fakeStore(fresh);
+      await getActivity({
+        store,
+        repo: REPO,
+        now: NOW,
+        force: true,
+        fetchImpl: fakeFetch({ '/commits': { body: [] }, '/pulls': { body: [] } }),
+      });
+      assert.equal(store.forceClaims, 1);
+    });
+
+    test('and an ordinary call does not, so reading the page cannot burn it', async () => {
+      const store = fakeStore(fresh);
+      await getActivity({ store, repo: REPO, now: NOW, fetchImpl: never });
+      assert.equal(store.forceClaims, 0);
+    });
+
+    // THE CRITERION: a second press inside the minute costs no GitHub
+    // requests, and gives the same answer an unforced call would have.
+    test('a refused claim serves the cached row and never calls GitHub', async () => {
+      const store = fakeStore(fresh, { allowForce: false });
+      const { row, cached } = await getActivity({
+        store,
+        repo: REPO,
+        now: NOW,
+        force: true,
+        fetchImpl: never,
+      });
+      assert.equal(cached, true);
+      assert.equal(row.contributors[0].commits, 7);
+      assert.equal(store.writes, 0, 'and nothing is written either');
+    });
+
+    // Falling back to the window is not bypassing the window. A refused
+    // press on a project with nothing cached still has to fetch, because
+    // there is no answer to serve in its place.
+    test('a refused claim with nothing cached still fetches', async () => {
+      const store = fakeStore(null, { allowForce: false });
+      const { cached } = await getActivity({
+        store,
+        repo: REPO,
+        now: NOW,
+        force: true,
+        fetchImpl: fakeFetch({ '/commits': { body: [] }, '/pulls': { body: [] } }),
+      });
+      assert.equal(cached, false);
+      assert.equal(store.writes, 1);
+    });
+
+    test('nor does a refused claim resurrect a row that is past the window', async () => {
+      const store = fakeStore(
+        { ...fresh, fetched_at: new Date(NOW.getTime() - 20 * 60 * 1000).toISOString() },
+        { allowForce: false },
+      );
+      const { cached } = await getActivity({
+        store,
+        repo: REPO,
+        now: NOW,
+        force: true,
+        fetchImpl: fakeFetch({ '/commits': { body: [] }, '/pulls': { body: [] } }),
+      });
+      assert.equal(cached, false);
+    });
   });
 
   describe('a failed refresh', () => {

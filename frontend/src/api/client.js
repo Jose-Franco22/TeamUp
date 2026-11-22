@@ -1923,13 +1923,32 @@ export async function refreshRepoActivity(projectId, { force = false } = {}) {
     if (!(project.github_repo ?? '')) return { ok: false, reason: 'no_repo' };
 
     // There is no GitHub in mock mode, so a "refresh" re-stamps whatever the
-    // fixtures hold. The one thing worth keeping honest is the cache
-    // decision itself: an answer from the last 15 minutes is returned as
-    // cached, exactly as getActivity() would.
+    // fixtures hold. Two things are worth keeping honest, because the button
+    // that drives both is on screen: the cache decision, and the floor the
+    // database puts under forced refreshes.
     const existing = repoActivityFor(projectId);
     const fresh =
       existing && Date.now() - new Date(existing.fetched_at).getTime() < 15 * 60 * 1000;
-    if (existing && fresh && !force) {
+
+    // touch_repo_activity(), restated: one forced refresh a minute per
+    // project, claimed rather than merely checked. A mock that always
+    // honoured `force` would make the second press look instant here and
+    // throttled in production, which is #58's "not on the team" versus "not
+    // found" all over again in the other direction. The stamp sits on the
+    // project because the column does.
+    //
+    // A refusal is not an error: it demotes the press to an ordinary call
+    // and the 15-minute window below decides, so a project with nothing
+    // cached still fetches. Nothing here mirrors save_repo_activity()'s
+    // stale-repo guard — that one is about a write landing after the link
+    // changed, and a mock has no in-flight window for it to land in.
+    const forcedRecently =
+      project.github_forced_at &&
+      Date.now() - new Date(project.github_forced_at).getTime() < 60 * 1000;
+    const forcing = force && !forcedRecently;
+    if (forcing) project.github_forced_at = new Date().toISOString();
+
+    if (existing && fresh && !forcing) {
       return { ok: true, cached: true, activity: { ...existing } };
     }
     const row = {

@@ -36,7 +36,7 @@ const PER_PAGE = 100;
 const API = 'https://api.github.com';
 
 // Mirrors CANONICAL_REPO_PATTERN in frontend/src/lib/github.js, and
-// projects_github_repo_format_check in supabase/41_github_activity.sql.
+// projects_github_repo_format_check in supabase/42_github_activity.sql.
 //
 // Strict on purpose. The lenient reading of whatever somebody pasted happens
 // once, in the browser, and set_project_repo() stores only the canonical
@@ -265,8 +265,9 @@ export async function collectActivity({
  *     owner fixing a typo in the URL must not be shown the old repo's
  *     commits);
  *   - `force`, which the refresh button passes, and which the *database*
- *     rate-limits rather than this function (set_project_repo's companion,
- *     touch_repo_activity, is what the button goes through).
+ *     rate-limits rather than this function: store.claimForce() is
+ *     touch_repo_activity(), which hands out one forced fetch a minute per
+ *     project. Refused, the press falls back to the window above.
  *
  * A failed fetch keeps whatever was last known and records the reason beside
  * it. Two reasons: a transient blip should not blank a working page, and
@@ -285,10 +286,28 @@ export async function getActivity({
 } = {}) {
   const cached = await store.read();
 
+  // `force` is the refresh button, and what it skips is the fifteen-minute
+  // window — so the database, not this function, decides whether the press
+  // gets to skip it. touch_repo_activity() claims a sixty-second slot and
+  // says whether we got it.
+  //
+  // A refusal is not a failure. It demotes this call to an ordinary one, so
+  // the window below applies again and the caller gets `cached: true`: the
+  // same answer they would have had if they had never pressed the button,
+  // and no new state for the page to render. It also means a refused press
+  // on a project with nothing cached still fetches — what the limiter
+  // protects is the window, and falling back to the window bypasses
+  // nothing.
+  //
+  // store.claimForce is required rather than optional. A store that forgot
+  // it would silently have no rate limit at all, which is the bug this
+  // whole section exists to fix.
+  const forcing = force && (await store.claimForce());
+
   if (
     cached &&
     cached.repo === repo &&
-    !force &&
+    !forcing &&
     isFresh(cached.fetched_at, now)
   ) {
     return { row: cached, cached: true };
