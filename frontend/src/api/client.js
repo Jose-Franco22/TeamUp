@@ -1814,7 +1814,13 @@ async function fetchLeaveRules() {
 
 // Mock-mode only: the membership test that `repo_activity`'s select policy
 // and project_repo_for_refresh() both make server-side.
-function mockOnProjectTeam(projectId, userId) {
+//
+// Named apart from #90's mockOnProjectTeam() on purpose. The two are added
+// far apart in this file, so git merges them without a conflict, and two
+// top-level declarations of one name are a SyntaxError in an ES module —
+// the build would break silently on whichever PR merged second. Once both
+// have landed, either one can be folded into the other.
+function mockOnRepoTeam(projectId, userId) {
   const team = teams.find((t) => t.project_id === projectId);
   return Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === userId));
 }
@@ -1875,7 +1881,7 @@ export async function getRepoActivity(projectId) {
     // The select policy, restated: who committed how much is the team's
     // business. Returning null rather than throwing matches what the real
     // query does for a row RLS hides.
-    if (!mockOnProjectTeam(projectId, id)) return null;
+    if (!mockOnRepoTeam(projectId, id)) return null;
     const row = repoActivityFor(projectId);
     return row ? { ...row, contributors: row.contributors.map((c) => ({ ...c })) } : null;
   }
@@ -1919,7 +1925,7 @@ export async function refreshRepoActivity(projectId, { force = false } = {}) {
     if (!id) return { ok: false, reason: 'signed_out' };
     const project = projects.find((p) => p.id === projectId);
     if (!project) return { ok: false, reason: 'no_project' };
-    if (!mockOnProjectTeam(projectId, id)) return { ok: false, reason: 'not_on_team' };
+    if (!mockOnRepoTeam(projectId, id)) return { ok: false, reason: 'not_on_team' };
     if (!(project.github_repo ?? '')) return { ok: false, reason: 'no_repo' };
 
     // There is no GitHub in mock mode, so a "refresh" re-stamps whatever the
