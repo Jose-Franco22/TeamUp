@@ -279,6 +279,12 @@ export default function Browse() {
                   isAuthenticated={isAuthenticated}
                 />
 
+                {/* Only an adviser who accepted (issue #53). Not shown to
+                    guests, who see no identities on a card at all, and never
+                    counted among the members above — an adviser holds no
+                    seat. */}
+                {p.adviser_name && <p className="hint">Adviser: {p.adviser_name}</p>}
+
                 <div className="foot">
                   {!isAuthenticated ? (
                     <button className="btn" onClick={() => openComposer(p.id)}>

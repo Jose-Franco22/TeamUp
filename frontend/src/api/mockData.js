@@ -346,6 +346,68 @@ export const joinRequests = [
   { id: 'jr-4', project_id: 'p-lab', user_id: 'u-adan', status: 'declined', message: null, created_at: '2026-08-26T11:00:00Z' },
 ];
 
+// --- ADVISER_REQUESTS --------------------------------------------------
+// adviser_requests: id, project_id, adviser_id, invited_by, status
+// ('pending' | 'accepted' | 'declined' | 'cancelled'), created_at,
+// responded_at. See supabase/39_project_advisers.sql.
+//
+// A project has at most one adviser and at most one unanswered invitation —
+// one row per project across 'pending' and 'accepted', which the database
+// holds with a partial unique index. Answered rows are kept, so the owner can
+// see a decline and ask again.
+//
+// AN ADVISER IS NOT A TEAM MEMBER. Nothing here appears in teamMembers, and
+// nothing here is counted by buildProject()'s member_count. The invariant on
+// teamMembers above is untouched by these rows on purpose: Dana advises the
+// parking project while sitting on the scam-detector team, which is a normal
+// state and not a conflict.
+export const adviserRequests = [
+  {
+    id: 'ar-1',
+    project_id: 'p-parking',
+    adviser_id: 'u-dana',
+    invited_by: 'u-nicolas',
+    status: 'accepted',
+    created_at: '2026-09-02T15:00:00Z',
+    responded_at: '2026-09-03T09:30:00Z',
+  },
+  // An unanswered invitation, so the pending state has something to show.
+  {
+    id: 'ar-2',
+    project_id: 'p-degree',
+    adviser_id: 'u-luis',
+    invited_by: 'u-alexis',
+    status: 'pending',
+    created_at: '2026-09-04T11:00:00Z',
+    responded_at: null,
+  },
+  // Turned down. Kept, and re-invitable: a decline is an answer, not a ban.
+  {
+    id: 'ar-3',
+    project_id: 'p-scam',
+    adviser_id: 'u-priya',
+    invited_by: 'u-maria',
+    status: 'declined',
+    created_at: '2026-09-01T10:00:00Z',
+    responded_at: '2026-09-02T08:00:00Z',
+  },
+];
+
+// The open invitation or adviser for a project, if it has one. 'cancelled' is
+// left out the way project_adviser() leaves it out: the owner undid it, so
+// the panel should read as empty rather than naming whoever they dropped.
+export function adviserFor(projectId) {
+  const rows = adviserRequests
+    .filter((r) => r.project_id === projectId && r.status !== 'cancelled')
+    .sort((a, b) => {
+      const aOpen = a.status === 'pending' || a.status === 'accepted';
+      const bOpen = b.status === 'pending' || b.status === 'accepted';
+      if (aOpen !== bOpen) return aOpen ? -1 : 1;
+      return b.created_at.localeCompare(a.created_at);
+    });
+  return rows[0] ?? null;
+}
+
 // --- MILESTONES / NOTIFICATIONS / ADMIN_ACTIONS -----------------------
 // See supabase/26_milestones.sql. milestones: id, name, due_at,
 // is_formation_deadline, message — at most one has the flag, and its due_at is when
@@ -459,9 +521,20 @@ export function buildProject(project, viewerId = null) {
     ? Math.round(allMembers.reduce((sum, m) => sum + userById[m.user_id].availability_hours, 0) / allMembers.length)
     : 0;
 
+  // Accepted advisers only, the same as project_advisers() in
+  // supabase/39_project_advisers.sql: a card names an adviser who said yes,
+  // never an invitation still out. An adviser is an identity, so guests get
+  // null here like they do for members and average availability.
+  const settledAdviser = (() => {
+    const row = adviserFor(project.id);
+    return row && row.status === 'accepted' ? row : null;
+  })();
+
   return {
     ...project,
     creator_name: userById[project.creator_id].name,
+    adviser_id: viewerId && settledAdviser ? settledAdviser.adviser_id : null,
+    adviser_name: viewerId && settledAdviser ? userById[settledAdviser.adviser_id].name : null,
     // Always a string, never undefined: composeProject() in the real client
     // returns '' for a project with nothing linked, and a mock shape that
     // differs from the real one is how #47 shipped a broken query (#58).

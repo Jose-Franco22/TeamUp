@@ -1034,3 +1034,39 @@ button:disabled { opacity: 0.45; cursor: default; }
 @media (max-width: 620px) {
   .tour-choices { grid-template-columns: 1fr; }
 }
+
+/* ---------- adviser panel (issue #53) ---------- */
+/* The adviser row is not a roster row: it has three columns, not the four
+   .row lays out for members, and no availability or role to show. */
+.row.adviser { grid-template-columns: 44px 1fr auto; }
+
+.adviser-search { margin-top: 14px; }
+.adviser-search label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 5px; }
+.adviser-search input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.adviser-search input:focus-visible { outline: 2px solid var(--open-line); outline-offset: 1px; }
+.adviser-search .hint,
+.adviser-search .state { margin: 7px 2px 0; font-size: 12.5px; }
+
+.adviser-results { list-style: none; margin: 10px 0 0; padding: 0; }
+.adviser-results li {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.adviser-results li:last-child { border-bottom: 0; }
+.adviser-results li > span { display: flex; flex-direction: column; min-width: 0; }
+.adviser-results .nm { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.adviser-results .sub { font-size: 12.5px; color: var(--slate); overflow-wrap: anywhere; }
+.adviser-results button { padding: 6px 12px; font-size: 13px; border-radius: 6px; }

@@ -28,6 +28,8 @@ import {
   skillsForUser,
   profileEvidence,
   evidenceForUser,
+  adviserRequests,
+  adviserFor,
   repoActivity,
   repoActivityFor,
 } from './mockData';
@@ -807,7 +809,7 @@ async function fetchGuestMemberCounts(viewerId, rows) {
 
 // Shapes one `projects` row (as fetched via PROJECT_SELECT) into the same
 // object buildProject() produces from the mocks.
-function composeProject(row, viewerId, viewerRequestsByProject, guestMemberCounts) {
+function composeProject(row, viewerId, viewerRequestsByProject, guestMemberCounts, advisersByProject) {
   // `skills` embeds as null when skill_id is null — a role listed without a
   // specific skill attached, which the schema allows on purpose.
   // A role whose seats have all been filled sits at quantity_needed = 0
@@ -860,6 +862,10 @@ function composeProject(row, viewerId, viewerRequestsByProject, guestMemberCount
     // it is a column on `projects`, which guests browse.
     github_repo: row.github_repo ?? '',
     creator_name: row.creator?.name ?? null,
+    // Accepted advisers only (project_advisers() returns no others), and
+    // null for a guest, who gets no identities anywhere on the card.
+    adviser_id: advisersByProject?.[row.id]?.adviser_id ?? null,
+    adviser_name: advisersByProject?.[row.id]?.adviser_name ?? null,
     team_id: team?.id ?? null,
     formed_at: team?.formed_at ?? null,
     members,
@@ -914,8 +920,11 @@ export async function getProjects({ onlyOpen = true } = {}) {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw error;
-  const guestCounts = await fetchGuestMemberCounts(viewerId, rows);
-  return keep(rows.map((row) => composeProject(row, viewerId, requestMap, guestCounts)));
+  const [guestCounts, advisers] = await Promise.all([
+    fetchGuestMemberCounts(viewerId, rows),
+    fetchProjectAdvisers(viewerId, rows),
+  ]);
+  return keep(rows.map((row) => composeProject(row, viewerId, requestMap, guestCounts, advisers)));
 }
 
 export async function getProject(id) {
@@ -931,7 +940,11 @@ export async function getProject(id) {
     fetchViewerRequestMap(viewerId),
   ]);
   if (error) throw new Error('Project not found');
-  return composeProject(row, viewerId, requestMap, await fetchGuestMemberCounts(viewerId, [row]));
+  const [guestCounts, advisers] = await Promise.all([
+    fetchGuestMemberCounts(viewerId, [row]),
+    fetchProjectAdvisers(viewerId, [row]),
+  ]);
+  return composeProject(row, viewerId, requestMap, guestCounts, advisers);
 }
 
 // `roles_needed` is an array of { role_id, skill_id, quantity_needed }, where
@@ -1744,7 +1757,12 @@ export async function getMyTeam() {
     fetchLeaveRules(),
   ]);
   if (projErr) throw projErr;
-  const project = composeProject(projectRow, viewerId, requestMap);
+  // Fetched here too, even though the adviser panel reads getProjectAdviser()
+  // for the pending and declined states this cannot show: without it
+  // `adviser_name` would be set in mock mode and null in real mode, and a
+  // shape that differs between the two is how #47 shipped broken.
+  const advisers = await fetchProjectAdvisers(viewerId, [projectRow]);
+  const project = composeProject(projectRow, viewerId, requestMap, undefined, advisers);
 
   // GET /api/me/team enriches each teammate with availability_hours/skills,
   // unlike the plain project views — see TODO-backend.md.
@@ -2149,6 +2167,238 @@ export async function setMemberRole(userId, roleId) {
   });
   if (error) throw error;
   return data;
+}
+
+// --- Advisers (issue #53) ------------------------------------------------
+//
+// A project may have one adviser: somebody the owner asks to be the team's
+// contact. The owner sends, cancels and removes; the rest of the team sees
+// who it is and can change nothing. Answering an invitation is #54.
+//
+// AN ADVISER IS NOT A MEMBER. Nothing in this section touches teamMembers,
+// member_count, or whether a project is full, and that is the whole design:
+// supabase/39_project_advisers.sql keeps advisers in their own table so the
+// roster code never has to know about them.
+//
+// Every refusal below is spelled the same way the SQL spells it, because
+// these messages are what the panel shows and what its tests assert. The
+// database re-checks all of them — a check in this file is a convenience,
+// never the boundary.
+
+// Mock-mode shared guard: the project exists and the caller created it.
+function requireProjectOwner(projectId, callerId, refusal) {
+  const project = projects.find((p) => p.id === projectId);
+  if (!project) throw new Error('Project not found');
+  if (project.creator_id !== callerId) throw new Error(refusal);
+  return project;
+}
+
+function mockOpenAdviserRow(projectId) {
+  return adviserRequests.find(
+    (r) => r.project_id === projectId && (r.status === 'pending' || r.status === 'accepted')
+  );
+}
+
+function mockIsOnProjectTeam(projectId, userId) {
+  const team = teams.find((t) => t.project_id === projectId);
+  return Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === userId));
+}
+
+// Who the owner may ask, by name or email. Two characters minimum, so an
+// empty box doesn't return the student body; ten at most, ordered by name.
+// Excluded: the owner, the team, admin accounts (18_admin_access.sql keeps
+// them out of student teams), and whoever already holds an open invitation.
+// Somebody who declined earlier is still listed — asking again is allowed.
+export async function searchAdvisers(projectId, query) {
+  const trimmed = (query ?? '').trim();
+
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    requireProjectOwner(projectId, id, 'Only the project creator can look for an adviser');
+    if (trimmed.length < 2) return [];
+    const needle = trimmed.toLowerCase();
+    const open = mockOpenAdviserRow(projectId);
+    return users
+      .filter(
+        (u) =>
+          !u.is_admin &&
+          u.id !== id &&
+          (u.name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle)) &&
+          !mockIsOnProjectTeam(projectId, u.id) &&
+          !(open && open.adviser_id === u.id)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, 10)
+      .map((u) => ({ id: u.id, name: u.name, email: u.email }));
+  }
+
+  const { data, error } = await supabase.rpc('search_advisers', {
+    p_project_id: projectId,
+    p_query: trimmed,
+  });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// The project's adviser as the team page shows it: the open invitation if
+// there is one, otherwise the most recent answered one, so a decline stays
+// visible instead of the panel silently emptying. null when nobody has been
+// asked.
+//
+// Who sees what, matching project_adviser() in the migration:
+//   accepted          → anyone signed in, the same as a Browse card
+//   pending, declined → the project's team, and the person asked
+//   the email         → the owner only
+//
+// The second line is not a nicety. The first version of the function filtered
+// on nothing but the project id, which handed every signed-in student the name
+// on any unanswered invitation and, after a decline, who had turned down which
+// project (caught in review on PR #88). Mock mode has to refuse it too, or the
+// panel's tests would be passing against a rule the database no longer has.
+export async function getProjectAdviser(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+    const row = adviserFor(projectId);
+    if (!row) return null;
+
+    const maySee =
+      row.status === 'accepted' ||
+      project.creator_id === id ||
+      row.adviser_id === id ||
+      mockIsOnProjectTeam(projectId, id);
+    if (!maySee) return null;
+
+    const adviser = users.find((u) => u.id === row.adviser_id);
+    return {
+      status: row.status,
+      adviser_id: row.adviser_id,
+      adviser_name: adviser.name,
+      adviser_email: project.creator_id === id ? adviser.email : null,
+      created_at: row.created_at,
+      responded_at: row.responded_at,
+    };
+  }
+
+  const { data, error } = await supabase.rpc('project_adviser', { p_project_id: projectId });
+  if (error) throw error;
+  // A set-returning function comes back as an array of rows, and "no adviser"
+  // is zero rows rather than a row of nulls.
+  return data?.[0] ?? null;
+}
+
+export async function inviteAdviser(projectId, adviserId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    requireProjectOwner(projectId, id, 'Only the project creator can invite an adviser');
+
+    const adviser = users.find((u) => u.id === adviserId);
+    if (!adviser) throw new Error('That account does not exist');
+    // `adviser.is_admin` is deliberately not checked: advising is not tied to
+    // the flag (39_project_advisers.sql, decision 1). searchAdvisers() above
+    // still leaves admins out, so the only way here is by id.
+    if (adviserId === id) throw new Error('You cannot invite yourself to advise your own project');
+    if (mockIsOnProjectTeam(projectId, adviserId)) {
+      throw new Error('They are already on this team, so they cannot advise it');
+    }
+
+    const open = mockOpenAdviserRow(projectId);
+    if (open) {
+      throw new Error(
+        open.status === 'accepted'
+          ? 'This project already has an adviser'
+          : 'This project already has a pending adviser request'
+      );
+    }
+
+    const row = {
+      id: `ar-${Date.now()}-${adviserRequests.length}`,
+      project_id: projectId,
+      adviser_id: adviserId,
+      invited_by: id,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      responded_at: null,
+    };
+    adviserRequests.push(row);
+    mockNotify({ user_id: adviserId, kind: 'adviser_invited', project_id: projectId, actor_id: id });
+    return row;
+  }
+
+  const { data, error } = await supabase.rpc('invite_adviser', {
+    p_project_id: projectId,
+    p_adviser_id: adviserId,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// Withdraws an invitation nobody has answered. Nothing is deleted — the row
+// goes to 'cancelled' so the owner can still see what happened — and nobody
+// is notified: the invitation is gone before they acted on it.
+export async function cancelAdviserRequest(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    requireProjectOwner(projectId, id, 'Only the project creator can cancel an adviser request');
+    const row = adviserRequests.find((r) => r.project_id === projectId && r.status === 'pending');
+    if (!row) throw new Error('There is no pending adviser request to cancel');
+    row.status = 'cancelled';
+    row.responded_at = new Date().toISOString();
+    return;
+  }
+
+  const { error } = await supabase.rpc('cancel_adviser_request', { p_project_id: projectId });
+  if (error) throw error;
+}
+
+// Drops an adviser who had accepted. Unlike a cancellation this one is told:
+// they said yes to something that is now being taken away.
+export async function removeAdviser(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    requireProjectOwner(projectId, id, 'Only the project creator can remove the adviser');
+    const row = adviserRequests.find((r) => r.project_id === projectId && r.status === 'accepted');
+    if (!row) throw new Error('This project has no adviser to remove');
+    row.status = 'cancelled';
+    row.responded_at = new Date().toISOString();
+    mockNotify({
+      user_id: row.adviser_id,
+      kind: 'adviser_removed',
+      project_id: projectId,
+      actor_id: id,
+    });
+    return;
+  }
+
+  const { error } = await supabase.rpc('remove_adviser', { p_project_id: projectId });
+  if (error) throw error;
+}
+
+// Accepted advisers for a page of Browse cards, in one call — the same shape
+// and the same reason as fetchGuestMemberCounts() above: one round trip for
+// the list instead of one per card.
+//
+// Deliberately an RPC and not a PostgREST embed. adviser_requests has two
+// foreign keys to `users` (adviser_id, invited_by), so embedding it under a
+// project needs `!constraint_name` disambiguation — the same shape of query
+// that shipped broken in #47 and answered PGRST200 in production because
+// mock mode could not see it. Guests get nothing: an adviser is an identity,
+// and guests see no identities anywhere else either.
+async function fetchProjectAdvisers(viewerId, rows) {
+  if (!viewerId || rows.length === 0) return {};
+  const { data, error } = await supabase.rpc('project_advisers', {
+    p_project_ids: rows.map((row) => row.id),
+  });
+  if (error) throw error;
+  return Object.fromEntries(
+    (data ?? []).map((r) => [r.project_id, { adviser_id: r.adviser_id, adviser_name: r.adviser_name }])
+  );
 }
 
 // --- Notifications -------------------------------------------------------
