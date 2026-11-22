@@ -177,7 +177,9 @@ Deno.serve(async (req) => {
   } catch (error) {
     // Only a code goes back; the details stay in the log, and nothing that
     // could be quoting the Authorization header is returned at all.
-    const aborted = error instanceof DOMException && error.name === 'AbortError';
+    // Asked of the signal, not the error: activity.js rethrows whatever the
+    // abort surfaced as, which is not always a DOMException.
+    const aborted = controller.signal.aborted;
     console.error('github-activity:', aborted ? 'timed out' : error);
     return json({ error: aborted ? 'timeout' : 'unreachable' }, 502);
   } finally {

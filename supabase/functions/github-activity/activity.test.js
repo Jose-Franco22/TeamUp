@@ -396,6 +396,45 @@ describe('collectActivity', () => {
       assert.ok(!JSON.stringify(result).includes('ghp_secret'));
     });
 
+    // index.ts aborts after 20 s. That is the caller giving up, not GitHub
+    // answering, so it must reach index.ts as a throw (which it reports as
+    // 'timeout'), not come back as a stored 'unreachable'.
+    test('an abort from the caller is rethrown, not reported as unreachable', async () => {
+      const controller = new AbortController();
+      const result = collectActivity({
+        repo: REPO,
+        now: NOW,
+        signal: controller.signal,
+        fetchImpl: (url, { signal }) =>
+          new Promise((_, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('The operation was aborted')));
+          }),
+      });
+      controller.abort();
+      await assert.rejects(result, /aborted/);
+    });
+
+    test('an abort while reading the body is rethrown too', async () => {
+      const controller = new AbortController();
+      await assert.rejects(
+        collectActivity({
+          repo: REPO,
+          now: NOW,
+          signal: controller.signal,
+          fetchImpl: async () => ({
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+            json: async () => {
+              controller.abort();
+              throw new TypeError('body stream aborted');
+            },
+          }),
+        }),
+        TypeError
+      );
+    });
+
     test('a body that is not a list is refused rather than counted', async () => {
       const result = await collectActivity({
         repo: REPO,
@@ -640,6 +679,29 @@ describe('the cache', () => {
       assert.deepEqual(row.contributors, []);
       assert.equal(row.last_commit_at, null);
       assert.equal(row.error, 'upstream_error');
+    });
+
+    // A timeout says nothing about the repository: nothing is written, so the
+    // last good row keeps its old fetched_at and the next visit asks again
+    // instead of serving the failure for CACHE_MINUTES.
+    test('a timeout writes nothing and leaves the cached row as it was', async () => {
+      const stale = { ...fresh, fetched_at: new Date(NOW.getTime() - 60 * 60 * 1000).toISOString() };
+      const store = fakeStore(stale);
+      const controller = new AbortController();
+      controller.abort();
+      await assert.rejects(
+        getActivity({
+          store,
+          repo: REPO,
+          now: NOW,
+          signal: controller.signal,
+          fetchImpl: async () => {
+            throw new Error('The operation was aborted');
+          },
+        })
+      );
+      assert.equal(store.writes, 0);
+      assert.equal(store.row, stale);
     });
 
     test('a 404 is stored as not_found, which is what the page explains', async () => {
