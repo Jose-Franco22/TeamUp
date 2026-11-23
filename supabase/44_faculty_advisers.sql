@@ -22,19 +22,23 @@
 --   * invite_adviser() refuses anyone whose email is not in the directory.
 --     The check runs after the self/team checks, so those keep their more
 --     specific messages.
---   * search_advisers() only offers faculty, and still leaves admin accounts
---     out, as 39 did. The function is SECURITY DEFINER, so listing an admin
---     would hand a student a users row that `users_select_students_or_admin`
---     hides from them — and with it the fact that this faculty member holds
---     admin rights in TeamUp, which the public directory does not say. An
---     admin who is faculty can still be invited by id; being findable is
---     what #60's "Available to advise" switch should decide.
+--   * search_advisers() only offers faculty. It no longer hides admin
+--     accounts: an admin on the faculty list has their name and email on a
+--     public university page already, and an instructor is the most likely
+--     adviser there is. The panel only invites from search results, so hiding
+--     them would make instructors impossible to pick at all. The trade-off,
+--     accepted on purpose: a student who finds one in search can infer that
+--     this faculty member is a TeamUp admin, which `users_select_students_or_admin`
+--     otherwise keeps to itself. An admin who is NOT faculty is not listed,
+--     same as any other non-faculty account.
 --   * Accepted adviser_requests are left alone. Someone who leaves the
 --     directory keeps the teams they already advise; they just cannot be
 --     asked again. Dropping an accepted adviser behind the owner's back would
 --     be a surprise nobody asked for.
---   * Pending invitations to anyone not on the directory are cancelled. They
---     were sent under 39's open rule, and accepting one would make a
+--   * Pending invitations to anyone not on the directory are cancelled: once
+--     here for the ones sent under 39's open rule, and by every sync for
+--     anyone it removes. Accepting (40_respond_to_adviser_request.sql) checks
+--     only that the invitation is pending, so a leftover one would make a
 --     non-faculty account the adviser after all.
 --   * Faculty must still have signed in to TeamUp once before they can be
 --     found or asked, because an invitation points at a users row.
@@ -132,6 +136,18 @@ begin
 
   delete from public.faculty_directory where email <> all (v_emails);
 
+  -- Whoever just left the list can't be asked any more, so an invitation
+  -- they haven't answered yet goes too, the same way the one-off cleanup at
+  -- the bottom of this file does it. Accepting checks only that the
+  -- invitation is pending, so leaving it would let them advise anyway.
+  -- Accepted advisers stay (see the header).
+  update public.adviser_requests ar
+     set status = 'cancelled', responded_at = now()
+    from public.users u
+   where u.id = ar.adviser_id
+     and ar.status = 'pending'
+     and lower(u.email) <> all (v_emails);
+
   insert into public.faculty_directory (email, synced_at)
   select e, now() from unnest(v_emails) e
   on conflict (email) do update set synced_at = excluded.synced_at;
@@ -223,8 +239,8 @@ revoke all on function public.invite_adviser(uuid, uuid) from public, anon;
 grant execute on function public.invite_adviser(uuid, uuid) to authenticated;
 
 -- --- search_advisers ------------------------------------------------------
--- 39's function, offering faculty only. 39's admin filter stays; see the
--- header for why.
+-- 39's function, offering faculty only. The admin filter is replaced by the
+-- faculty one; see the header for why.
 
 create or replace function public.search_advisers(p_project_id uuid, p_query text)
 returns table (id uuid, name text, email text)
@@ -261,8 +277,7 @@ begin
     select u.id, u.name, u.email
       from public.users u
       join public.faculty_directory f on f.email = lower(u.email)
-     where not u.is_admin
-       and u.id <> caller
+     where u.id <> caller
        and (u.name ilike '%' || v_query || '%' or u.email ilike '%' || v_query || '%')
        and not exists (
          select 1

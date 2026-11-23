@@ -73,6 +73,13 @@ Deno.serve(async (req) => {
   });
   const { data, error } = await db.rpc('sync_faculty_directory', { p_emails: emails });
   if (error) {
+    // The shrink guard is a judgement, not a fault: the directory answered,
+    // just with far fewer people than are on file. Said apart from a real
+    // failure so the Cron history shows which one happened.
+    if (String(error.message ?? '').includes('Refusing to shrink')) {
+      console.error(`sync-faculty: ${error.message}; keeping the current list`);
+      return reply(`Kept the current list: ${error.message}`, 409);
+    }
     console.error('sync-faculty: sync_faculty_directory failed:', error);
     return reply('Could not save the faculty list', 500);
   }

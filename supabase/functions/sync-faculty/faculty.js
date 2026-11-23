@@ -33,7 +33,11 @@ function departmentsOf(record) {
 // Sorted, lowercased, unique emails of the records in `department`. The
 // search parameter already narrows the response, but it is a text search, so
 // the department is checked again on each record rather than trusted.
-export function facultyEmails(body, department = DEPARTMENT) {
+//
+// A department record whose username can't be stored (anything outside
+// USERNAME, which matches faculty_directory's check) is left out and logged,
+// so a faculty member who silently can't be invited shows up in the logs.
+export function facultyEmails(body, department = DEPARTMENT, { log = console.warn } = {}) {
   const data = unwrap(body);
   const records = data?.Data?.Record;
   if (records === undefined) throw new Error('The faculty directory response has no Data.Record');
@@ -41,8 +45,11 @@ export function facultyEmails(body, department = DEPARTMENT) {
   const emails = new Set();
   for (const record of asArray(records)) {
     const username = String(record?.['@username'] ?? '').trim();
-    if (!USERNAME.test(username)) continue;
     if (!departmentsOf(record).includes(department)) continue;
+    if (!USERNAME.test(username)) {
+      log(`sync-faculty: skipped a ${department} record whose username can't be stored: ${JSON.stringify(username)}`);
+      continue;
+    }
     emails.add(`${username.toLowerCase()}@utrgv.edu`);
   }
   return [...emails].sort();

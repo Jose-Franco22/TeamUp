@@ -48,7 +48,17 @@ test('duplicates and unusable usernames are dropped', () => {
   const body = {
     Data: { Record: [record('ada', CS), record('ADA', CS), record('', CS), record('a b', CS), record('x@y', CS)] },
   };
-  assert.deepEqual(facultyEmails(body), ['ada@utrgv.edu']);
+  const logged = [];
+  assert.deepEqual(facultyEmails(body, CS, { log: (m) => logged.push(m) }), ['ada@utrgv.edu']);
+  assert.equal(logged.length, 3, 'each unusable username is logged, so a missing faculty member is noticed');
+  assert.match(logged[1], /"a b"/);
+});
+
+test('records from other departments are skipped without a log line', () => {
+  const logged = [];
+  const body = { Data: { Record: [record('ee prof', 'Department of Mathematics')] } };
+  assert.deepEqual(facultyEmails(body, CS, { log: (m) => logged.push(m) }), []);
+  assert.deepEqual(logged, []);
 });
 
 test('a response without Data.Record is an error, not an empty list', () => {

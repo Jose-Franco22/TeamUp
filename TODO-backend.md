@@ -446,11 +446,12 @@ Science`) and shows each one as `<username>@utrgv.edu`; `public.faculty_director
 those emails.
 
 - `invite_adviser()` refuses anyone not on the list ("Only Computer Science faculty can advise a
-  project"), and `search_advisers()` only offers people on it. Admin accounts are still left out
-  of search, as before; a faculty member who is also an admin can still be invited by id.
+  project"), and `search_advisers()` only offers people on it. A faculty member who is also an
+  admin is offered too, since their name is already public.
 - A faculty member has to have signed in to TeamUp once before they can be found or asked.
 - Leaving the list doesn't remove anyone from teams they already advise; they just can't be asked
-  again. Pending invitations to non-faculty accounts are cancelled when the migration runs.
+  again. Pending invitations to anyone not on the list are cancelled, both when the migration
+  runs and whenever a sync removes someone, so they can't be accepted afterwards.
 - The migration seeds the 37 emails listed on 2026-11-23, so the rule works right away.
 
 The `sync-faculty` Edge Function (`supabase/functions/sync-faculty/`) keeps the list current: it

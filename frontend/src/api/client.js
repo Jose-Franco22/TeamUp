@@ -2030,8 +2030,7 @@ function mockIsOnProjectTeam(projectId, userId) {
 // Who the owner may ask, by name or email. Two characters minimum, so an
 // empty box doesn't return the student body; ten at most, ordered by name.
 // Only CS faculty (the faculty directory, 44_faculty_advisers.sql) are offered.
-// Excluded: the owner, the team, admin accounts (search would expose a row
-// RLS hides from students), and whoever already holds an open invitation.
+// Excluded: the owner, the team, and whoever already holds an open invitation.
 // Somebody who declined earlier is still listed — asking again is allowed.
 export async function searchAdvisers(projectId, query) {
   const trimmed = (query ?? '').trim();
@@ -2047,7 +2046,6 @@ export async function searchAdvisers(projectId, query) {
       .filter(
         (u) =>
           u.is_faculty &&
-          !u.is_admin &&
           u.id !== id &&
           (u.name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle)) &&
           !mockIsOnProjectTeam(projectId, u.id) &&
