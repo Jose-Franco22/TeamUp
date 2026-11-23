@@ -1341,8 +1341,10 @@ button:disabled { opacity: 0.45; cursor: default; }
 .deliverable-version .sub,
 .thread .sub { font-size: 12.5px; color: var(--mute); }
 /* A download is an action, not a page, so it's a button that looks like a
-   link — and keeps a 24px target (WCAG 2.2) despite reading as text. */
-.link-button { background: none; border: 0; padding: 0; min-height: 24px; font: inherit; color: var(--open); text-decoration: underline; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+   link — and keeps a 24px target (WCAG 2.2) despite reading as text. It
+   takes the link colour: --link where the admin-dashboard rework has defined
+   it (AA on --paper and --canvas in both themes), --open until then. */
+.link-button { background: none; border: 0; padding: 0; min-height: 24px; font: inherit; color: var(--link, var(--open)); text-decoration: underline; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
 .link-button:disabled { color: var(--mute); cursor: progress; }
 .thread li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .thread-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
