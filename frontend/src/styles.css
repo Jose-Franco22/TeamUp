@@ -607,6 +607,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .empty-title { font-size: 15px; font-weight: 500; color: var(--ink); margin: 0 0 4px; }
 .empty-state p { margin: 0; font-size: 13.5px; color: var(--slate); }
+/* Those paragraphs have no margin, so a button under one needs its own. */
+.empty-state .empty-action { margin-top: 12px; }
 
 /* ---------- login hero ---------- */
 .hero { padding: 40px 0 8px; max-width: 640px; }
