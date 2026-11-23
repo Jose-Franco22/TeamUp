@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { deleteMilestone, getMilestones, saveMilestone } from '../api/client';
 import { MILESTONE_MESSAGE_MAX, ValidationError, charCount, validateMilestone } from '../lib/validation';
 import { formatCountdown, isDueSoon } from '../lib/deadlines';
+import { setMilestoneRequiresDeliverable } from '../api/client';
 
 // The class schedule (issue #38). Admins keep it on the dashboard; students
 // see what's coming up in a banner on every page.
@@ -119,6 +120,8 @@ export function MilestoneManager() {
   const [saving, setSaving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(null);
   const [message, setMessage] = useState(null);
+  // The milestone whose deliverable switch is saving.
+  const [flagging, setFlagging] = useState(null);
 
   async function load() {
     try {
@@ -183,6 +186,29 @@ export function MilestoneManager() {
     }
   }
 
+  // Its own call rather than a field on the form (issue #57): the switch
+  // saves on its own, so turning it on doesn't depend on re-saving the name
+  // and date, and set_milestone_requires_deliverable() can refuse turning it
+  // off once teams have submitted.
+  async function handleRequiresDeliverable(m, requires) {
+    setFlagging(m.id);
+    setServerError(null);
+    setMessage(null);
+    try {
+      const saved = await setMilestoneRequiresDeliverable(m.id, requires);
+      setList((rows) => rows.map((r) => (r.id === m.id ? { ...r, requires_deliverable: saved.requires_deliverable } : r)));
+      setMessage(
+        saved.requires_deliverable
+          ? `Teams now hand in a deliverable for “${m.name}”.`
+          : `“${m.name}” no longer takes a deliverable.`
+      );
+    } catch (err) {
+      setServerError(err.message);
+    } finally {
+      setFlagging(null);
+    }
+  }
+
   async function handleDelete(m) {
     setConfirmingDelete(null);
     try {
@@ -213,6 +239,16 @@ export function MilestoneManager() {
                   {m.is_formation_deadline && <span className="pill warn">Formation deadline</span>}
                   <span className="admin-secondary">{formatDue(m.due_at)}</span>
                   {m.message && <p className="milestone-message">{m.message}</p>}
+                  <label className="switch milestone-deliverable">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(m.requires_deliverable)}
+                      disabled={flagging === m.id}
+                      onChange={(e) => handleRequiresDeliverable(m, e.target.checked)}
+                      aria-label={`${m.name} needs a deliverable`}
+                    />
+                    Needs a deliverable — each team hands in a file or link on its team page
+                  </label>
                 </div>
                 <span className="acts">
                   {confirmingDelete === m.id ? (

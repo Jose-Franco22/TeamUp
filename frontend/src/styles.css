@@ -1317,3 +1317,34 @@ button:disabled { opacity: 0.45; cursor: default; }
   .check-in dl { grid-template-columns: 1fr; }
   .check-in dt { margin-top: 4px; }
 }
+
+/* --- Deliverables (#57) ---------------------------------------------------
+   Every status reads as words; tone is a second signal, never the only one.
+   Submitted gets its own outlined tone so it can't be mistaken for Not
+   submitted's quiet grey. Built from existing tokens, so both themes follow. */
+.pill.info { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.deliverables .deliverable { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; }
+.deliverable-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.deliverable-head h3 { margin: 0; font-size: 15px; }
+.deliverable-form { margin-top: 12px; }
+.deliverable-mode { border: 0; padding: 0; margin: 0 0 10px; display: flex; gap: 16px; }
+.deliverable-mode label { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; min-height: 24px; }
+.deliverable-versions h4,
+.deliverable-thread h4 { margin: 16px 0 8px; font-size: 13px; font-weight: 600; color: var(--slate); }
+.deliverable-versions ol,
+.thread { list-style: none; margin: 0; padding: 0; }
+.deliverable-version { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.deliverable-version:last-child { border-bottom: 0; }
+.deliverable-version .version-number { font-weight: 600; min-width: 72px; }
+.deliverable-version .version-what { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.deliverable-version .version-tags { display: inline-flex; gap: 6px; }
+.deliverable-version .sub,
+.thread .sub { font-size: 12.5px; color: var(--mute); }
+/* A download is an action, not a page, so it's a button that looks like a
+   link — and keeps a 24px target (WCAG 2.2) despite reading as text. */
+.link-button { background: none; border: 0; padding: 0; min-height: 24px; font: inherit; color: var(--open); text-decoration: underline; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+.link-button:disabled { color: var(--mute); cursor: progress; }
+.thread li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.thread-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.thread-body { margin: 4px 0 0; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.thread-reply { margin-top: 12px; }

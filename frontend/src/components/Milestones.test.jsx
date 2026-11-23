@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MilestoneBanner, MilestoneManager } from './Milestones';
 import { setSessionUserId } from '../api/client';
-import { milestones } from '../api/mockData';
+import { deliverableSubmissions, milestones } from '../api/mockData';
 
 beforeEach(() => {
   milestones.length = 0;
@@ -56,7 +56,9 @@ test('flagging a second milestone as the formation deadline moves the flag', asy
   for (const [name, due] of [['Teams due', '2098-10-01T12:00'], ['Teams due (extended)', '2098-10-08T12:00']]) {
     await user.type(screen.getByLabelText('Name'), name);
     await user.type(screen.getByLabelText('Due'), due);
-    await user.click(screen.getByRole('checkbox'));
+    // By name: every listed milestone also has a "needs a deliverable"
+    // checkbox (#57), so after the first one there's more than one.
+    await user.click(screen.getByRole('checkbox', { name: /team formation deadline/ }));
     await user.click(screen.getByRole('button', { name: 'Add milestone' }));
     await screen.findByText(name, { selector: 'b' });
   }
@@ -266,5 +268,60 @@ describe('the banner counts down to the next deadline', () => {
     render(<MemoryRouter><MilestoneBanner /></MemoryRouter>);
     await new Promise((r) => setTimeout(r, 300));
     expect(screen.queryByRole('region', { name: 'Upcoming deadlines' })).not.toBeInTheDocument();
+  });
+});
+
+// --- needs a deliverable (#57) ---------------------------------------------
+
+describe('marking a milestone as needing a deliverable', () => {
+  beforeEach(() => {
+    deliverableSubmissions.length = 0;
+    milestones.push({ id: 'ms-prop', name: 'Proposal', due_at: '2098-11-01T17:00:00Z', is_formation_deadline: false, message: '' });
+  });
+  afterEach(() => {
+    deliverableSubmissions.length = 0;
+  });
+
+  test('the admin turns it on from the list, and it is saved', async () => {
+    const user = userEvent.setup();
+    render(<MilestoneManager />);
+    const box = await screen.findByRole('checkbox', { name: 'Proposal needs a deliverable' });
+    expect(box).not.toBeChecked();
+
+    await user.click(box);
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Teams now hand in a deliverable for “Proposal”.');
+    expect(box).toBeChecked();
+    expect(milestones.find((m) => m.id === 'ms-prop').requires_deliverable).toBe(true);
+  });
+
+  test('turning it off once a team has submitted is refused, and the box stays on', async () => {
+    milestones[milestones.length - 1].requires_deliverable = true;
+    deliverableSubmissions.push({ id: 'ds-1', project_id: 'p-1', milestone_id: 'ms-prop', version: 1 });
+    const user = userEvent.setup();
+    render(<MilestoneManager />);
+    const box = await screen.findByRole('checkbox', { name: 'Proposal needs a deliverable' });
+    expect(box).toBeChecked();
+
+    await user.click(box);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Teams have already submitted for this milestone, so it has to keep taking deliverables'
+    );
+    expect(box).toBeChecked();
+    expect(milestones.find((m) => m.id === 'ms-prop').requires_deliverable).toBe(true);
+  });
+
+  test('a milestone with submissions cannot be deleted either', async () => {
+    deliverableSubmissions.push({ id: 'ds-1', project_id: 'p-1', milestone_id: 'ms-prop', version: 1 });
+    const user = userEvent.setup();
+    render(<MilestoneManager />);
+    await user.click(await screen.findByRole('button', { name: 'Delete Proposal' }));
+    await user.click(screen.getByRole('button', { name: 'Delete “Proposal”' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Teams have already submitted for this milestone, so it can't be deleted"
+    );
+    expect(milestones.some((m) => m.id === 'ms-prop')).toBe(true);
   });
 });
