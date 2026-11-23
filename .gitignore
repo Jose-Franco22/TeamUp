@@ -1,0 +1,35 @@
+# Repo-wide ignores. A folder's own .gitignore protects only that folder, and
+# a folder that isn't tracked at all has nowhere to put one — which is how
+# matching/.env sat in every working tree both untracked and unignored while
+# holding a live API key (issue #89). Secrets are ignored from the root so a
+# new top-level folder starts protected instead of having to remember.
+#
+# This deliberately does not ignore matching/ itself: that is source code
+# living on feat/matching-engine, and ignoring the directory here would
+# quietly stop it from ever being added. Ignoring the key is the point.
+
+# --- secrets ---------------------------------------------------------------
+# .env and .env.anything, except the committed example. frontend/.env.example
+# is tracked, so the negation below is what keeps it addable.
+.env
+.env.*
+!.env.example
+
+# --- dependencies and build output -----------------------------------------
+node_modules/
+dist/
+out/
+
+# --- editor and OS noise ---------------------------------------------------
+.DS_Store
+Thumbs.db
+*.log
+
+# --- per-person tool settings ----------------------------------------------
+# .claude/launch.json and settings.json are shareable, so the directory is
+# left visible; settings.local.json is one person's own permission grants.
+.claude/settings.local.json
+
+# --- deploy tooling --------------------------------------------------------
+# Written by `vercel link`; holds the project and org ids.
+.vercel

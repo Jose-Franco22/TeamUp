@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   deleteAnnouncement,
   getAnnouncementFeed,
@@ -29,6 +29,7 @@ export const ANNOUNCEMENTS_SEEN = 'teamup:announcements-seen';
 export default function Announcements() {
   const { user } = useSession();
   const isAdmin = user?.is_admin === true;
+  const navigate = useNavigate();
   const feed = useAsync(getAnnouncementFeed, []);
   const schedule = useAsync(getMilestones, []);
   const [editing, setEditing] = useState(null);
@@ -67,9 +68,16 @@ export default function Announcements() {
         ) : upcoming.length === 0 ? (
           <Empty title="No upcoming deadlines.">
             {isAdmin ? (
-              <p>
-                Add them on the <Link to="/admin/milestones">Milestones</Link> tab.
-              </p>
+              <>
+                <p>Add them on the Milestones tab.</p>
+                <button
+                  type="button"
+                  className="btn ghost empty-action"
+                  onClick={() => navigate('/admin/milestones')}
+                >
+                  Manage milestones
+                </button>
+              </>
             ) : (
               <p>Deadlines appear here as soon as they're set.</p>
             )}
