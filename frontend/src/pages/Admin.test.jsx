@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Admin from './Admin';
 import { getAdminActions, getAdminDashboard } from '../api/client';
-import { DASHBOARD, EMPTY_DASHBOARD } from '../test/adminFixtures';
+import { DASHBOARD, EMPTY_DASHBOARD, FULL_TEAM, OPEN_TEAM } from '../test/adminFixtures';
 
 vi.mock('../api/client', () => ({
   getAdminDashboard: vi.fn(),
@@ -102,8 +102,19 @@ test('shows each team\'s progress through the next-steps checklist (#42)', async
   expect(within(teams).getByRole('columnheader', { name: 'Next steps' })).toBeInTheDocument();
   const fullRow = within(teams).getByRole('link', { name: 'Lab equipment sign-out' }).closest('tr');
   expect(within(fullRow).getByText('2 of 5 done')).toBeInTheDocument();
+  // An open team hasn't started: the cell says when it will, not "open" again.
   const openRow = within(teams).getByRole('link', { name: 'Campus parking tracker' }).closest('tr');
-  expect(within(openRow).getByText('Not complete yet')).toBeInTheDocument();
+  expect(within(openRow).getByText('Starts when the team is full')).toBeInTheDocument();
+  expect(within(openRow).getByText('—')).toHaveAttribute('aria-hidden', 'true');
+  expect(within(openRow).queryByText('Not complete yet')).not.toBeInTheDocument();
+});
+
+test('an open team that already has checklist progress still shows it', async () => {
+  getAdminDashboard.mockReset().mockResolvedValue({ ...DASHBOARD, teams: [{ ...OPEN_TEAM, next_steps: { done: 2, total: 5 } }] });
+  renderAdmin();
+  const teams = await screen.findByRole('table', { name: 'All teams' });
+  expect(within(teams).getByText('2 of 5 done')).toBeInTheDocument();
+  expect(within(teams).queryByText('Starts when the team is full')).not.toBeInTheDocument();
 });
 
 test('a team that has finished the checklist is marked done, and an empty checklist says so', async () => {
@@ -115,4 +126,134 @@ test('a team that has finished the checklist is marked done, and an empty checkl
   getAdminDashboard.mockReset().mockResolvedValue({ ...DASHBOARD, teams: [{ ...first, next_steps: { done: 0, total: 0 } }] });
   render(<MemoryRouter><Admin /></MemoryRouter>);
   expect(await screen.findByText('No checklist yet')).toBeInTheDocument();
+});
+
+// ---------- the teams table: sorting, filtering, empty states ----------
+
+// Four teams whose orders differ by every sort key. The server sends them
+// by title, as admin_dashboard() does.
+const ALPHA = { ...FULL_TEAM, id: 'alpha', title: 'Alpha', team_size_target: 3, member_count: 3, next_steps: { done: 4, total: 5 } };
+const BRAVO = { ...OPEN_TEAM, id: 'bravo', title: 'Bravo', team_size_target: 4, member_count: 3, next_steps: { done: 0, total: 5 } };
+const CHARLIE = { ...OPEN_TEAM, id: 'charlie', title: 'Charlie', team_size_target: 4, member_count: 1, next_steps: { done: 0, total: 5 } };
+const DELTA = { ...FULL_TEAM, id: 'delta', title: 'Delta', team_size_target: 2, member_count: 2, next_steps: { done: 1, total: 5 } };
+const SORTABLE = { ...DASHBOARD, teams: [ALPHA, BRAVO, CHARLIE, DELTA], summary: { formed_teams: 2, open_teams: 2, unplaced_students: 2 } };
+
+async function renderTeams(dashboard = SORTABLE) {
+  getAdminDashboard.mockReset().mockResolvedValue(dashboard);
+  renderAdmin();
+  await screen.findByRole('table', { name: 'All teams' });
+  return userEvent.setup();
+}
+const order = () => within(screen.getByRole('table', { name: 'All teams' })).getAllByRole('rowheader').map((th) => th.textContent);
+const header = (name) => screen.getByRole('columnheader', { name });
+const arrow = (name) => header(name).querySelector('svg').dataset.direction;
+
+test('by default the teams needing attention come first', async () => {
+  await renderTeams();
+  // Open teams, emptiest first; then full teams, least checklist progress first.
+  expect(order()).toEqual(['Charlie', 'Bravo', 'Delta', 'Alpha']);
+  expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveDisplayValue('Needs attention first');
+  for (const name of ['Team', 'Seats filled', 'Status', 'Next steps']) expect(header(name)).not.toHaveAttribute('aria-sort');
+});
+
+test('clicking a column title sorts ascending, clicking again sorts descending, and the arrow shows which', async () => {
+  const user = await renderTeams();
+  await user.click(screen.getByRole('button', { name: 'Team' }));
+  expect(order()).toEqual(['Alpha', 'Bravo', 'Charlie', 'Delta']);
+  expect(header('Team')).toHaveAttribute('aria-sort', 'ascending');
+  expect(arrow('Team')).toBe('asc');
+
+  await user.click(screen.getByRole('button', { name: 'Team' }));
+  expect(order()).toEqual(['Delta', 'Charlie', 'Bravo', 'Alpha']);
+  expect(header('Team')).toHaveAttribute('aria-sort', 'descending');
+  expect(arrow('Team')).toBe('desc');
+  expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveDisplayValue('Team, Z to A');
+});
+
+test('seats filled sorts by how full each team is, not by head count', async () => {
+  const user = await renderTeams();
+  await user.click(screen.getByRole('button', { name: 'Seats filled' }));
+  expect(order()).toEqual(['Charlie', 'Bravo', 'Delta', 'Alpha']);
+  await user.click(screen.getByRole('button', { name: 'Seats filled' }));
+  expect(order()).toEqual(['Alpha', 'Delta', 'Bravo', 'Charlie']);
+  expect(header('Seats filled')).toHaveAttribute('aria-sort', 'descending');
+  expect(arrow('Team')).toBe('none');
+});
+
+test('status sorts open teams first, then full ones first', async () => {
+  const user = await renderTeams();
+  await user.click(screen.getByRole('button', { name: 'Status' }));
+  expect(order()).toEqual(['Bravo', 'Charlie', 'Alpha', 'Delta']);
+  await user.click(screen.getByRole('button', { name: 'Status' }));
+  expect(order()).toEqual(['Alpha', 'Delta', 'Bravo', 'Charlie']);
+});
+
+test('next steps sorts by checklist progress, with teams that have not started last either way', async () => {
+  const user = await renderTeams();
+  await user.click(screen.getByRole('button', { name: 'Next steps' }));
+  expect(order()).toEqual(['Delta', 'Alpha', 'Bravo', 'Charlie']);
+  await user.click(screen.getByRole('button', { name: 'Next steps' }));
+  expect(order()).toEqual(['Alpha', 'Delta', 'Bravo', 'Charlie']);
+});
+
+test('the toolbar sort sets the same order as the column titles', async () => {
+  const user = await renderTeams();
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Sort by' }), 'Seats filled, most first');
+  expect(order()).toEqual(['Alpha', 'Delta', 'Bravo', 'Charlie']);
+  expect(header('Seats filled')).toHaveAttribute('aria-sort', 'descending');
+});
+
+test('the status filter narrows the list, shows a removable chip, and removing it restores the list', async () => {
+  const user = await renderTeams();
+  expect(screen.getByText('Showing all 4 teams')).toBeInTheDocument();
+
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'full');
+  expect(order()).toEqual(['Delta', 'Alpha']);
+  expect(screen.getByText('Status: full')).toBeInTheDocument();
+  expect(screen.getByText('Showing 2 of 4 teams')).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Remove filter: status full' }));
+  expect(order()).toEqual(['Charlie', 'Bravo', 'Delta', 'Alpha']);
+  expect(screen.queryByText('Status: full')).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: 'Status' })).toHaveValue('');
+  expect(screen.getByText('Showing all 4 teams')).toBeInTheDocument();
+});
+
+test('filtering keeps the chosen sort', async () => {
+  const user = await renderTeams();
+  await user.click(screen.getByRole('button', { name: 'Team' }));
+  await user.click(screen.getByRole('button', { name: 'Team' }));
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'open');
+  expect(order()).toEqual(['Charlie', 'Bravo']);
+});
+
+test('a filter that matches nothing gets its own empty state, which clears the filter', async () => {
+  const user = await renderTeams({ ...DASHBOARD, teams: [OPEN_TEAM] });
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'full');
+  expect(screen.getByText('No teams match this filter.')).toBeInTheDocument();
+  expect(screen.queryByText('No teams yet.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('table', { name: 'All teams' })).not.toBeInTheDocument();
+  expect(screen.getByText('Showing 0 of 1 team')).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Clear filter' }));
+  expect(order()).toEqual(['Campus parking tracker']);
+  expect(screen.queryByText('No teams match this filter.')).not.toBeInTheDocument();
+});
+
+test('with no teams at all there is nothing to filter: the first-run empty state, no toolbar', async () => {
+  getAdminDashboard.mockResolvedValue(EMPTY_DASHBOARD);
+  renderAdmin();
+  expect(await screen.findByText('No teams yet.')).toBeInTheDocument();
+  expect(screen.queryByText('No teams match this filter.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('combobox', { name: 'Status' })).not.toBeInTheDocument();
+});
+
+test('"Students unplaced" links to the unplaced students table further down', async () => {
+  renderAdmin();
+  const link = await screen.findByRole('link', { name: /students unplaced/i });
+  expect(link).toHaveTextContent('2');
+  expect(link).toHaveAttribute('href', '#unplaced-heading');
+  const target = document.getElementById(link.getAttribute('href').slice(1));
+  expect(target).toHaveTextContent('Unplaced students');
+  expect(screen.getByRole('table', { name: 'Unplaced students' })).toHaveAttribute('aria-labelledby', target.id);
 });
