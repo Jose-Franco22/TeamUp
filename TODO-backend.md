@@ -446,19 +446,23 @@ Science`) and shows each one as `<username>@utrgv.edu`; `public.faculty_director
 those emails.
 
 - `invite_adviser()` refuses anyone not on the list ("Only Computer Science faculty can advise a
-  project"), and `search_advisers()` only offers people on it. A faculty member who is also an
-  admin is offered too, since their name is already public.
+  project"), and `search_advisers()` only offers people on it. Admin accounts are still left out
+  of search, as before; a faculty member who is also an admin can still be invited by id.
 - A faculty member has to have signed in to TeamUp once before they can be found or asked.
 - Leaving the list doesn't remove anyone from teams they already advise; they just can't be asked
-  again.
+  again. Pending invitations to non-faculty accounts are cancelled when the migration runs.
 - The migration seeds the 37 emails listed on 2026-11-23, so the rule works right away.
 
 The `sync-faculty` Edge Function (`supabase/functions/sync-faculty/`) keeps the list current: it
 reads the directory and replaces the table via `sync_faculty_directory()`. If the directory is
-down or lists nobody, the current list is kept. One-time setup:
+down, lists nobody, or lists fewer than half the people currently on file, the current list is
+kept (a real change that big is applied by hand with
+`select sync_faculty_directory(array[...], p_allow_shrink => true)`). One-time setup:
 
-1. `supabase secrets set SYNC_FACULTY_SECRET=<any long random string>`
-2. `supabase functions deploy sync-faculty`
+1. `supabase secrets set SYNC_FACULTY_SECRET=<any long random string>` (e.g. `openssl rand -hex 32`)
+2. `supabase functions deploy sync-faculty --no-verify-jwt`. The flag matters: the Cron job sends
+   only the shared secret, and with JWT verification on, Supabase refuses it with a 401 before the
+   function runs.
 3. Dashboard → **Integrations → Cron → Create job**: weekly (e.g. `0 9 * * 1`), type **Supabase
    Edge Function**, function `sync-faculty`, method POST, header `x-sync-secret: <the same string>`.
 4. Check: run the job once and look under **Edge Functions → sync-faculty → Logs** for

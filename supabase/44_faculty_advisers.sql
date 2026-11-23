@@ -22,17 +22,20 @@
 --   * invite_adviser() refuses anyone whose email is not in the directory.
 --     The check runs after the self/team checks, so those keep their more
 --     specific messages.
---   * search_advisers() only offers faculty. It no longer hides admin
---     accounts: an admin on the faculty list has their name and email on a
---     public university page already, so listing them leaks nothing, and an
---     instructor is the most likely adviser there is. (39's admin filter was
---     about not exposing names `users_select_students_or_admin` hides; for a
---     faculty member that reason is gone.) An admin who is NOT faculty is not
---     listed, same as any other non-faculty account.
---   * Existing adviser_requests rows are left alone. Someone who leaves the
+--   * search_advisers() only offers faculty, and still leaves admin accounts
+--     out, as 39 did. The function is SECURITY DEFINER, so listing an admin
+--     would hand a student a users row that `users_select_students_or_admin`
+--     hides from them — and with it the fact that this faculty member holds
+--     admin rights in TeamUp, which the public directory does not say. An
+--     admin who is faculty can still be invited by id; being findable is
+--     what #60's "Available to advise" switch should decide.
+--   * Accepted adviser_requests are left alone. Someone who leaves the
 --     directory keeps the teams they already advise; they just cannot be
 --     asked again. Dropping an accepted adviser behind the owner's back would
 --     be a surprise nobody asked for.
+--   * Pending invitations to anyone not on the directory are cancelled. They
+--     were sent under 39's open rule, and accepting one would make a
+--     non-faculty account the adviser after all.
 --   * Faculty must still have signed in to TeamUp once before they can be
 --     found or asked, because an invitation points at a users row.
 begin;
@@ -82,10 +85,23 @@ revoke all on function private.is_faculty_email(text) from public, anon, authent
 -- quietly make every project unable to find an adviser; a failed sync leaves
 -- last week's list in place instead, which is the better way to be wrong.
 --
+-- For the same reason a list less than half the size of the current one is
+-- refused too. Empty is only the extreme case of a bad answer: a truncated or
+-- paged response, or a text search that suddenly matches fewer records, would
+-- otherwise delete most of the department in one run and leave owners unable
+-- to find their adviser until the next good sync a week later. A real change
+-- that big (a reorganised department) is applied by hand with
+-- p_allow_shrink => true.
+--
 -- service_role only: this is what the Edge Function calls, and nobody signed
 -- in has any business rewriting who counts as faculty.
 
-create or replace function public.sync_faculty_directory(p_emails text[])
+drop function if exists public.sync_faculty_directory(text[]);
+
+create or replace function public.sync_faculty_directory(
+  p_emails text[],
+  p_allow_shrink boolean default false
+)
 returns integer
 language plpgsql
 security definer
@@ -93,6 +109,7 @@ set search_path = public
 as $$
 declare
   v_emails text[];
+  v_current integer;
 begin
   select coalesce(array_agg(distinct e), '{}')
     into v_emails
@@ -101,6 +118,16 @@ begin
 
   if cardinality(v_emails) = 0 then
     raise exception 'Refusing to empty the faculty directory: no valid @utrgv.edu emails were given';
+  end if;
+
+  -- Two syncs at once take turns, so the size compared against is the one
+  -- that is about to be replaced.
+  lock table public.faculty_directory in share row exclusive mode;
+  select count(*) into v_current from public.faculty_directory;
+
+  if not coalesce(p_allow_shrink, false) and cardinality(v_emails) * 2 < v_current then
+    raise exception 'Refusing to shrink the faculty directory from % to % emails: that looks like a partial answer from the directory',
+      v_current, cardinality(v_emails);
   end if;
 
   delete from public.faculty_directory where email <> all (v_emails);
@@ -113,8 +140,8 @@ begin
 end;
 $$;
 
-revoke all on function public.sync_faculty_directory(text[]) from public, anon, authenticated;
-grant execute on function public.sync_faculty_directory(text[]) to service_role;
+revoke all on function public.sync_faculty_directory(text[], boolean) from public, anon, authenticated;
+grant execute on function public.sync_faculty_directory(text[], boolean) to service_role;
 
 -- --- invite_adviser -------------------------------------------------------
 -- 39's function with one more check. Order is now:
@@ -196,8 +223,8 @@ revoke all on function public.invite_adviser(uuid, uuid) from public, anon;
 grant execute on function public.invite_adviser(uuid, uuid) to authenticated;
 
 -- --- search_advisers ------------------------------------------------------
--- 39's function, offering faculty only. The admin filter is replaced by the
--- faculty one; see the header for why that is not a leak.
+-- 39's function, offering faculty only. 39's admin filter stays; see the
+-- header for why.
 
 create or replace function public.search_advisers(p_project_id uuid, p_query text)
 returns table (id uuid, name text, email text)
@@ -234,7 +261,8 @@ begin
     select u.id, u.name, u.email
       from public.users u
       join public.faculty_directory f on f.email = lower(u.email)
-     where u.id <> caller
+     where not u.is_admin
+       and u.id <> caller
        and (u.name ilike '%' || v_query || '%' or u.email ilike '%' || v_query || '%')
        and not exists (
          select 1
@@ -300,5 +328,22 @@ insert into public.faculty_directory (email) values
   ('yifeng.gao@utrgv.edu'),
   ('zhixiang.chen@utrgv.edu')
 on conflict (email) do nothing;
+
+-- --- invitations sent under the old rule ---------------------------------
+-- invite_adviser() only checks the directory from now on, and accepting
+-- (40_respond_to_adviser_request.sql) checks the invitation is pending, not
+-- who it is for. So a pending invitation to a non-faculty account, sent
+-- under 39's open rule, would still turn that account into the adviser.
+-- Cancel those, exactly as the owner cancelling would: status 'cancelled',
+-- nobody notified (39's cancel_adviser_request() explains why).
+--
+-- Pending only. An accepted adviser is left in place; see the header.
+
+update public.adviser_requests ar
+   set status = 'cancelled', responded_at = now()
+  from public.users u
+ where u.id = ar.adviser_id
+   and ar.status = 'pending'
+   and not private.is_faculty_email(u.email);
 
 commit;

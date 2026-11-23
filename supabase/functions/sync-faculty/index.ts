@@ -6,6 +6,13 @@
 // Secrets (supabase secrets set ...):
 //   SYNC_FACULTY_SECRET  Shared with the caller's x-sync-secret header.
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase.
+//
+// Deploy with --no-verify-jwt:
+//   supabase functions deploy sync-faculty --no-verify-jwt
+// The caller is a Cron job, not a signed-in user, and the shared secret below
+// is the whole of the check. With Supabase's default JWT verification on, a
+// job that sends only x-sync-secret is refused with a 401 before this code
+// ever runs, and the list silently stops being refreshed.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { DIRECTORY_URL, facultyEmails } from './faculty.js';
 
@@ -17,9 +24,32 @@ const env = (name: string) => {
 
 const reply = (body: string, status = 200) => new Response(body, { status });
 
+// Compared as SHA-256 digests, in constant time, so the response time says
+// nothing about how much of a guess was right.
+async function sameSecret(given: string, expected: string) {
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(given)),
+    crypto.subtle.digest('SHA-256', enc.encode(expected)),
+  ]);
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return reply('Method not allowed', 405);
-  if (req.headers.get('x-sync-secret') !== env('SYNC_FACULTY_SECRET')) return reply('Forbidden', 403);
+
+  // A readable answer rather than a crash when the function is deployed
+  // before its secret is set, the way fit-review handles a missing key.
+  const secret = Deno.env.get('SYNC_FACULTY_SECRET');
+  if (!secret) {
+    console.error('sync-faculty: SYNC_FACULTY_SECRET is not set');
+    return reply('Not configured: SYNC_FACULTY_SECRET is not set', 503);
+  }
+  if (!(await sameSecret(req.headers.get('x-sync-secret') ?? '', secret))) return reply('Forbidden', 403);
 
   let emails: string[];
   try {

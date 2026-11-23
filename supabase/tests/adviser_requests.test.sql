@@ -500,8 +500,8 @@ select is((select count(*)::int from public.search_advisers(
             current_setting('tests.project')::uuid, 'Mark Member')), 0,
   'nor is anybody already on the team');
 select is((select count(*)::int from public.search_advisers(
-            current_setting('tests.project')::uuid, 'Instructor')), 1,
-  'an admin who is on the faculty directory is offered — their name is on a public page already');
+            current_setting('tests.project')::uuid, 'Instructor')), 0,
+  'an admin is not offered, even on the faculty directory — search would hand a student a row RLS hides');
 select is((select count(*)::int from public.search_advisers(
             current_setting('tests.project')::uuid, 'Sam Second')), 0,
   'a student who is not on the faculty directory is never offered');

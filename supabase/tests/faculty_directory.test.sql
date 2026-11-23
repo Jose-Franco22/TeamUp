@@ -2,16 +2,23 @@
 -- Who may be invited and searched is covered in adviser_requests.test.sql;
 -- this is the list itself: sync_faculty_directory() and who can touch it.
 begin;
-select plan(10);
+select plan(15);
 
 select ok((select count(*) from public.faculty_directory) > 0,
   'the migration seeds the directory, so the rule works before the first sync');
 
 -- --- syncing ---------------------------------------------------------------
 
+select throws_like(
+  $$ select public.sync_faculty_directory(array['prof.one@utrgv.edu', 'prof.two@utrgv.edu']) $$,
+  '%Refusing to shrink the faculty directory%',
+  'replacing the 37 seeded emails with 2 is refused: it looks like a partial answer');
+
+-- Past this point the tests work on a small list of their own, so the first
+-- replacement says it means to shrink it.
 select is(public.sync_faculty_directory(array[
             'Prof.One@UTRGV.edu', '  prof.two@utrgv.edu ', 'prof.two@utrgv.edu',
-            'someone@gmail.com', 'not an email']), 2,
+            'someone@gmail.com', 'not an email'], p_allow_shrink => true), 2,
   'a sync keeps the valid @utrgv.edu emails, once each');
 
 select is((select array_agg(email order by email) from public.faculty_directory),
@@ -34,6 +41,20 @@ select throws_like(
   'and so is a list with nothing valid in it');
 select is((select count(*)::int from public.faculty_directory), 2,
   'and a refused sync leaves the list as it was');
+
+-- --- a sharp drop is refused ------------------------------------------------
+
+select is(public.sync_faculty_directory(array[
+            'prof.one@utrgv.edu', 'prof.three@utrgv.edu', 'prof.four@utrgv.edu', 'prof.five@utrgv.edu']), 4,
+  'growing the list is always fine');
+select throws_like(
+  $$ select public.sync_faculty_directory(array['prof.one@utrgv.edu']) $$,
+  '%Refusing to shrink the faculty directory from 4 to 1 emails%',
+  'a list under half the current size is refused, so a partial answer cannot wipe the department');
+select is((select count(*)::int from public.faculty_directory), 4,
+  'and the list is left as it was');
+select is(public.sync_faculty_directory(array['prof.one@utrgv.edu'], p_allow_shrink => true), 1,
+  'a real shrink goes through when asked for by hand');
 
 -- --- who can touch it -------------------------------------------------------
 

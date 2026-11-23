@@ -195,10 +195,12 @@ describe('inviteAdviser', () => {
     expect(row.adviser_id).toBe('u-instructor');
   });
 
-  test('and is offered as a candidate, like any faculty member', async () => {
+  // Search still leaves admins out (44_faculty_advisers.sql): it would hand a
+  // student a row users_select_students_or_admin hides. Invitable by id only.
+  test('but is not offered as a candidate in search', async () => {
     setSessionUserId('u-omar');
     const results = await searchAdvisers(LAB, 'Instructor');
-    expect(results.map((u) => u.id)).toEqual(['u-instructor']);
+    expect(results).toEqual([]);
   });
 
   describe('refusals', () => {
