@@ -201,9 +201,15 @@ export default function Team() {
         <p className="desc">{data.description}</p>
 
         {isOwner && (
-          <p className="hint">
-            <Link to={`/projects/${data.id}/edit`}>Edit this project</Link> — description, team size
-            target, or the roles you're recruiting for.
+          <p className="hint edit-project">
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => navigate(`/projects/${data.id}/edit`)}
+            >
+              Edit project
+            </button>
+            Change the description, team size target, or the roles you're recruiting for.
           </p>
         )}
 

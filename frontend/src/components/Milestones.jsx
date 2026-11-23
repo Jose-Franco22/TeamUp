@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { deleteMilestone, getMilestones, saveMilestone } from '../api/client';
 import { MILESTONE_MESSAGE_MAX, ValidationError, charCount, validateMilestone } from '../lib/validation';
 import { formatCountdown, isDueSoon } from '../lib/deadlines';
@@ -30,6 +30,7 @@ export function toLocalInput(iso) {
 // the countdown, the warning style and "closed" keep up on a page left open.
 export function MilestoneBanner({ limit = 3 }) {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [list, setList] = useState(null);
   const [now, setNow] = useState(() => new Date());
 
@@ -91,9 +92,13 @@ export function MilestoneBanner({ limit = 3 }) {
           ))}
         </ul>
       )}
-      <p className="milestone-more">
-        <Link to="/announcements">All deadlines and announcements</Link>
-      </p>
+      {/* A button, like Edit project and Manage milestones: the app's
+          ways onward are buttons, not inline text links. */}
+      <div className="milestone-more">
+        <button type="button" className="btn ghost" onClick={() => navigate('/announcements')}>
+          All deadlines and announcements
+        </button>
+      </div>
     </section>
   );
 }
