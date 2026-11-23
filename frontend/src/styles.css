@@ -8,6 +8,7 @@
   --open: #cb4900;
   --open-bg: #fbe9df;
   --open-line: #e8ab86;
+  --link: #c14500;
   --warn: #8a6212;
   --warn-bg: #fbf2de;
   --danger: #9b2c2c;
@@ -25,6 +26,7 @@
   --open: #e2590c;
   --open-bg: #3a2414;
   --open-line: #7a4018;
+  --link: #ee5e0d;
   --warn: #e0a94a;
   --warn-bg: #3a2f14;
   --danger: #e2685f;
@@ -71,8 +73,14 @@ button:disabled { opacity: 0.45; cursor: default; }
 /* Without a rule, links fall back to the browser's #0000EE (#551A8B once
    visited): about 1.6:1 on dark mode's --paper. Visited links look the same
    on purpose. :where() keeps this at zero specificity, so class rules
-   (.btn, .nav a, .mark, .guest-note…) still win, visited or not. */
-:where(a:link, a:visited) { color: var(--open); }
+   (.btn, .nav a, .mark, .guest-note…) still win, visited or not.
+   --link, not --open: --open is 4.29:1 on light --canvas and 4.18:1 on dark
+   --paper, short of AA's 4.5:1 for text. --link is the same hue and
+   saturation with only the lightness moved, the least that clears 4.5:1 on
+   both backgrounds in both themes (light 5.10 / 4.68, dark 4.61 / 5.22) —
+   and so on the admin table's row tint, which is a mix of the two.
+   styles.test.js recomputes these from this file. */
+:where(a:link, a:visited) { color: var(--link); }
 
 /* ---------- top bar ---------- */
 .bar {
