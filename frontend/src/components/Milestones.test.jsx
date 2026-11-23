@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MilestoneBanner, MilestoneManager } from './Milestones';
 import { setSessionUserId } from '../api/client';
 import { milestones } from '../api/mockData';
@@ -176,6 +176,29 @@ test('HTML and SQL typed into a milestone are shown as plain text, never run', a
 
   expect(document.querySelector('img, script')).toBeNull();
   expect(window.__pwned).toBeUndefined();
+});
+
+// The way on to the full list is a button, not an inline text link, and it
+// really moves the page: the /announcements route here is a stand-in, so the
+// test sees the navigation happen instead of trusting a mocked navigate().
+test('the banner’s "All deadlines and announcements" is a button that opens Announcements', async () => {
+  milestones.push({ id: 'ms-x', name: 'Proposal due', due_at: '2098-11-01T17:00:00Z', is_formation_deadline: false, message: '' });
+  setSessionUserId('u-adan');
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter initialEntries={['/browse']}>
+      <Routes>
+        <Route path="/browse" element={<MilestoneBanner />} />
+        <Route path="/announcements" element={<h1>Announcements page</h1>} />
+      </Routes>
+    </MemoryRouter>
+  );
+  const banner = await screen.findByRole('region', { name: 'Upcoming deadlines' });
+  expect(within(banner).queryByRole('link')).not.toBeInTheDocument();
+
+  await user.click(within(banner).getByRole('button', { name: 'All deadlines and announcements' }));
+
+  expect(await screen.findByRole('heading', { name: 'Announcements page' })).toBeInTheDocument();
 });
 
 // --- Issue #22: the countdown to the next deadline -------------------------
