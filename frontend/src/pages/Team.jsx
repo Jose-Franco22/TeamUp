@@ -17,6 +17,7 @@ import Avatar from '../components/Avatar';
 import StatusPill from '../components/StatusPill';
 import { TeamChecklist } from '../components/NextSteps';
 import AdviserPanel from '../components/AdviserPanel';
+import AdvisedTeams from '../components/AdvisedTeams';
 
 export default function Team() {
   const { data, loading, error, reload, setData } = useAsync(getMyTeam, []);
@@ -129,6 +130,10 @@ export default function Team() {
             </p>
           )}
         </Empty>
+        {/* An adviser holds no seat, so most of them have no team of their
+            own and land here (#54). The teams they advise still belong on
+            this page — it is where "my teams" lives. */}
+        <AdvisedTeams />
       </>
     );
   }
@@ -423,6 +428,10 @@ export default function Team() {
           </div>
         </section>
       )}
+
+      {/* Below the viewer's own team, and separate from it: advising is not
+          membership, and somebody can do both at once (#54). */}
+      <AdvisedTeams />
     </>
   );
 }

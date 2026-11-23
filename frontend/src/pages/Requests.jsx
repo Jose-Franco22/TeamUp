@@ -5,6 +5,7 @@ import { Empty, ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
 import StatusPill from '../components/StatusPill';
 import { REQUESTS_CHANGED } from '../components/RequestAlerts';
+import AdviserInvitations from '../components/AdviserInvitations';
 
 // Default role for an incoming request: whichever listed role has a skill
 // pinned to it that the applicant actually claims, otherwise the first role
@@ -77,6 +78,12 @@ export default function Requests() {
           <p>People asking to join your project, and requests you have sent</p>
         </div>
       </div>
+
+      {/* Its own section, above the join requests: being asked to advise a
+          project is not the same as somebody asking for a seat on yours, and
+          one list for both would make them easy to confuse (#54). Renders
+          nothing at all when nobody has asked. */}
+      <AdviserInvitations />
 
       <h2 className="section">Incoming</h2>
       {incoming.length === 0 ? (

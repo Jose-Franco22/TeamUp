@@ -241,13 +241,49 @@ function recordAdminAction(action) {
   });
 }
 
+// The trigger pair in 40_respond_to_adviser_request.sql: the accepted adviser
+// of a project holds no seat on it, whichever end you arrive from. In SQL that
+// is one trigger on team_members and one on join_requests, which between them
+// cover all eight statements that seat somebody. Mock mode has no triggers, so
+// the same question is asked at each place that seats or requests.
+//
+// WHERE IN THE ORDER. Server-side the trigger fires on the insert, so every
+// refusal the calling function has of its own is reached first. createJoinRequest
+// and respondToJoinRequest below match that exactly. Admin placement does not,
+// and deliberately: adminMoveStudent takes the student off their old team before
+// seating them on the new one, and a mock has no transaction to roll that back,
+// so the question is asked up front in mockPlacementTarget instead. That is the
+// same reason respondToJoinRequest runs every check before it mutates anything.
+// The refusal is the same either way; only how much else is checked first
+// differs, and only for a path no student can reach.
+//
+// Advising a *different* project is untouched: #54 says advising doesn't stop
+// you from being on a team of your own.
+function mockAdvisesProject(userId, projectId) {
+  return adviserRequests.some(
+    (r) => r.project_id === projectId && r.adviser_id === userId && r.status === 'accepted'
+  );
+}
+
+// The membership half of the same question. #91 needs an identical helper for
+// repo_activity's select policy; it is written the same way there on purpose,
+// so whichever of the two merges second drops its copy rather than renaming.
+function mockOnProjectTeam(projectId, userId) {
+  const team = teams.find((t) => t.project_id === projectId);
+  return Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === userId));
+}
+
+const NOT_THE_ADVISER = 'The adviser of a project cannot also hold a seat on it';
+
 // Checks shared by assign and move, in the same order as the SQL.
 function mockPlacementTarget(userId, teamId, roleId) {
   if (!roleId || !allRoles.some((r) => r.id === roleId)) throw new Error('Pick a role');
   if (!users.some((u) => u.id === userId && !u.is_admin)) throw new Error('Student not found');
   const team = teams.find((t) => t.id === teamId);
   if (!team) throw new Error('Team not found');
-  return { team, project: projects.find((p) => p.id === team.project_id) };
+  const project = projects.find((p) => p.id === team.project_id);
+  if (mockAdvisesProject(userId, project.id)) throw new Error(NOT_THE_ADVISER);
+  return { team, project };
 }
 
 function mockAssertOpenSeat(team, project) {
@@ -1558,6 +1594,10 @@ export async function createJoinRequest(projectId, message = '') {
       throw new Error(JOIN_BLOCKED.full);
     }
     if (isPastDeadline(formationDeadline())) throw new Error(JOIN_BLOCKED.deadline);
+    // Last, because in SQL this is the trigger firing on the insert rather
+    // than a check inside create_join_request() — so every one of the
+    // function's own refusals is reached first.
+    if (mockAdvisesProject(id, projectId)) throw new Error(NOT_THE_ADVISER);
     const row = {
       id: `jr-${Date.now()}`,
       project_id: projectId,
@@ -1667,6 +1707,11 @@ export async function respondToRequest(requestId, status, roleId) {
       if (teamMembers.some((tm) => tm.user_id === r.user_id)) {
         throw new Error('That student has already joined a team');
       }
+      // Alongside the admin check above, and for the same reason: both are
+      // triggers on team_members server-side, so both fire on the insert.
+      // Reachable in one order only — ask to join, then accept an invitation
+      // to advise the same project, which takes no seat and so is allowed.
+      if (mockAdvisesProject(r.user_id, r.project_id)) throw new Error(NOT_THE_ADVISER);
     }
 
     r.status = status;
@@ -2202,6 +2247,141 @@ export async function removeAdviser(projectId) {
 
   const { error } = await supabase.rpc('remove_adviser', { p_project_id: projectId });
   if (error) throw error;
+}
+
+// --- Answering an invitation to advise (issue #54) -----------------------
+//
+// #53 is the owner asking; this is the other person's answer, and what they
+// get afterwards. Nothing here writes to team_members or touches a project's
+// fill state — accepting is the moment that would be tempting, and the seat
+// rule is the same one 39_project_advisers.sql is built around.
+
+// The invitations waiting for the caller's answer. Pending only: an answered
+// one is not waiting for anything, and a withdrawn one stops being offered.
+export async function getMyAdviserRequests() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'pending')
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((r) => {
+        const project = projects.find((p) => p.id === r.project_id);
+        const owner = users.find((u) => u.id === project.creator_id);
+        return {
+          id: r.id,
+          project_id: r.project_id,
+          project_title: project.title,
+          project_description: project.description,
+          owner_id: owner.id,
+          owner_name: owner.name,
+          created_at: r.created_at,
+        };
+      });
+  }
+
+  const { data, error } = await supabase.rpc('my_adviser_requests');
+  if (error) throw error;
+  return data ?? [];
+}
+
+// accept === false declines. The two share a function because they are one
+// answer with two values, and because only one of them may ever be given.
+export async function respondToAdviserRequest(requestId, accept) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (accept !== true && accept !== false) {
+      throw new Error('Answer the invitation with accept or decline');
+    }
+    const row = adviserRequests.find((r) => r.id === requestId);
+    if (!row) throw new Error('Adviser request not found');
+    if (row.adviser_id !== id) {
+      throw new Error('Only the person who was asked can answer this invitation');
+    }
+    if (row.status !== 'pending') throw new Error('That adviser request has already been answered');
+    // Only accepting. Someone on the team holding an open invitation can still
+    // decline it, and should — same order as the SQL, which asks this after
+    // the pending check and before it writes the status.
+    if (accept && mockOnProjectTeam(row.project_id, id)) {
+      throw new Error('You are on this team, so you cannot also advise it');
+    }
+
+    const project = projects.find((p) => p.id === row.project_id);
+    row.status = accept ? 'accepted' : 'declined';
+    row.responded_at = new Date().toISOString();
+    mockNotify({
+      user_id: project.creator_id,
+      kind: accept ? 'adviser_accepted' : 'adviser_declined',
+      project_id: project.id,
+      actor_id: id,
+    });
+    return row;
+  }
+
+  const { data, error } = await supabase.rpc('respond_to_adviser_request', {
+    p_request_id: requestId,
+    p_accept: accept,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// The mirror of removeAdviser(): same end state, opposite direction, and the
+// notification goes the other way. The row lands on 'cancelled' either way —
+// which of the two it was lives in the notification, not the status.
+export async function stepDownAsAdviser(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+    const row = adviserRequests.find(
+      (r) => r.project_id === projectId && r.adviser_id === id && r.status === 'accepted'
+    );
+    if (!row) throw new Error('You are not the adviser for this project');
+    row.status = 'cancelled';
+    row.responded_at = new Date().toISOString();
+    mockNotify({
+      user_id: project.creator_id,
+      kind: 'adviser_stepped_down',
+      project_id: projectId,
+      actor_id: id,
+    });
+    return;
+  }
+
+  const { error } = await supabase.rpc('step_down_as_adviser', { p_project_id: projectId });
+  if (error) throw error;
+}
+
+// The projects the caller advises, shaped exactly like every other project
+// view: the ids come from the database, the projects themselves come through
+// the same select Browse uses, so there is no second composition to drift.
+export async function getAdvisedProjects() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'accepted')
+      .map((r) => projects.find((p) => p.id === r.project_id))
+      .filter(Boolean)
+      .map((p) => buildProject(p, id));
+  }
+
+  const viewerId = requireViewerId(await getViewerId());
+  const { data: ids, error: idsErr } = await supabase.rpc('advised_project_ids');
+  if (idsErr) throw idsErr;
+  const projectIds = (ids ?? []).map((row) => (typeof row === 'string' ? row : row.advised_project_ids));
+  if (projectIds.length === 0) return [];
+
+  const [{ data: rows, error }, requestMap] = await Promise.all([
+    supabase.from('projects').select(PROJECT_SELECT).in('id', projectIds),
+    fetchViewerRequestMap(viewerId),
+  ]);
+  if (error) throw error;
+  const advisers = await fetchProjectAdvisers(viewerId, rows);
+  return rows.map((row) => composeProject(row, viewerId, requestMap, undefined, advisers));
 }
 
 // Accepted advisers for a page of Browse cards, in one call — the same shape
