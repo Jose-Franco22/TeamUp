@@ -437,6 +437,33 @@ One-time setup, with the Supabase CLI linked to the project:
 6. Check: request to join a project from a second account and the owner gets the email; post an
    announcement and a student gets it. Failures show under **Edge Functions → notify-email → Logs**.
 
+## Who can advise — the CS faculty directory (`44_faculty_advisers.sql`)
+
+Only Computer Science faculty can be asked to advise a project. "Faculty" means the account's
+email is listed on the [CS faculty directory](https://www.utrgv.edu/cecs/departments/csci/faculty/index.htm).
+That page loads its people from a public JSON endpoint (`GetDMList?search=Department of Computer
+Science`) and shows each one as `<username>@utrgv.edu`; `public.faculty_directory` stores exactly
+those emails.
+
+- `invite_adviser()` refuses anyone not on the list ("Only Computer Science faculty can advise a
+  project"), and `search_advisers()` only offers people on it. A faculty member who is also an
+  admin is offered too, since their name is already public.
+- A faculty member has to have signed in to TeamUp once before they can be found or asked.
+- Leaving the list doesn't remove anyone from teams they already advise; they just can't be asked
+  again.
+- The migration seeds the 37 emails listed on 2026-11-23, so the rule works right away.
+
+The `sync-faculty` Edge Function (`supabase/functions/sync-faculty/`) keeps the list current: it
+reads the directory and replaces the table via `sync_faculty_directory()`. If the directory is
+down or lists nobody, the current list is kept. One-time setup:
+
+1. `supabase secrets set SYNC_FACULTY_SECRET=<any long random string>`
+2. `supabase functions deploy sync-faculty`
+3. Dashboard → **Integrations → Cron → Create job**: weekly (e.g. `0 9 * * 1`), type **Supabase
+   Edge Function**, function `sync-faculty`, method POST, header `x-sync-secret: <the same string>`.
+4. Check: run the job once and look under **Edge Functions → sync-faculty → Logs** for
+   "N faculty listed".
+
 ## Accepting a join request — one transaction, `respond_to_join_request()`
 
 `respond_to_join_request` in `03_functions.sql` is the one piece of business logic worth

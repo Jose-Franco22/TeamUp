@@ -15,7 +15,7 @@
 -- unauthenticated, and say so. When #54 lands those lines become calls to
 -- its function and these assertions should still pass unchanged.
 begin;
-select plan(101);
+select plan(104);
 
 select set_config('tests.owner',   tests.sign_in_with_microsoft('owner53@utrgv.edu', 'Olivia Owner')::text, true);
 select set_config('tests.member',  tests.sign_in_with_microsoft('member53@utrgv.edu', 'Mark Member')::text, true);
@@ -29,10 +29,16 @@ select set_config('tests.admin',   tests.sign_in_with_microsoft('instructor53@ut
 select set_config('tests.r_pm', (select id from public.roles where name = 'Project Manager')::text, true);
 select set_config('tests.r_be', (select id from public.roles where name = 'Backend Developer')::text, true);
 
--- An admin account, so the "advisers are students" rule has something to
--- refuse. Done while unauthenticated: protect_admin_flag() in
+-- An admin account, to show the admin flag is not what decides who may
+-- advise. Done while unauthenticated: protect_admin_flag() in
 -- 18_admin_access.sql refuses the `authenticated` role outright.
 update public.users set is_admin = true where id = current_setting('tests.admin')::uuid;
+
+-- Only accounts on the CS faculty directory can advise (44_faculty_advisers.sql).
+-- These four are the ones this file asks; owner, member and second stay
+-- students, so there is someone for the faculty rule to refuse.
+insert into public.faculty_directory (email) values
+  ('adviser53@utrgv.edu'), ('adviser53b@utrgv.edu'), ('other53@utrgv.edu'), ('instructor53@utrgv.edu');
 
 -- A three-seat project with the owner and one member on it, so it reads two
 -- of three and still open. Every seat-rule assertion below is about an
@@ -148,6 +154,12 @@ select throws_like(
 
 select throws_like(
   $$ select public.invite_adviser(current_setting('tests.project')::uuid,
+                                  current_setting('tests.second')::uuid) $$,
+  '%Only Computer Science faculty can advise a project%',
+  'nor a student who is not on the faculty directory');
+
+select throws_like(
+  $$ select public.invite_adviser(current_setting('tests.project')::uuid,
                                   current_setting('tests.other')::uuid) $$,
   '%already has a pending adviser request%',
   'a second invitation is refused while one is still unanswered');
@@ -227,9 +239,8 @@ select throws_ok(
 -- `join_requests` — the three ways to take a seat. An adviser takes no seat,
 -- so advising was never one of the paths that trigger guards.
 --
--- Being *findable* is the separate question, and the answer there is still
--- no: the search section below asserts that an admin does not appear. This
--- case therefore goes through the id, which is what the function takes.
+-- What does matter is the faculty directory (44_faculty_advisers.sql), and
+-- this admin is on it, so they can be asked like any other faculty member.
 
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select lives_ok(
@@ -474,7 +485,7 @@ select is((select count(*)::int from public.search_advisers(current_setting('tes
 
 select is((select count(*)::int from public.search_advisers(
             current_setting('tests.project')::uuid, 'Ada Adviser')), 1,
-  'searching a name finds that student');
+  'searching a name finds that faculty member');
 select is((select count(*)::int from public.search_advisers(
             current_setting('tests.project')::uuid, 'adviser53@utrgv.edu')), 1,
   'and so does searching their email');
@@ -489,8 +500,14 @@ select is((select count(*)::int from public.search_advisers(
             current_setting('tests.project')::uuid, 'Mark Member')), 0,
   'nor is anybody already on the team');
 select is((select count(*)::int from public.search_advisers(
-            current_setting('tests.project')::uuid, 'Instructor')), 0,
-  'nor an admin account — invitable by id, but not discoverable until #60''s opt-in');
+            current_setting('tests.project')::uuid, 'Instructor')), 1,
+  'an admin who is on the faculty directory is offered — their name is on a public page already');
+select is((select count(*)::int from public.search_advisers(
+            current_setting('tests.project')::uuid, 'Sam Second')), 0,
+  'a student who is not on the faculty directory is never offered');
+select is((select count(*)::int from public.search_advisers(
+            current_setting('tests.project')::uuid, 'ADVISER53@UTRGV.EDU')), 1,
+  'and the faculty match does not care how the email is cased');
 select is((select count(*)::int from public.search_advisers(
             current_setting('tests.project')::uuid, 'Otto Other')), 0,
   'nor whoever is already holding an open invitation');

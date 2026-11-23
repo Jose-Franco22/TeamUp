@@ -186,20 +186,19 @@ describe('inviteAdviser', () => {
   });
 
   // Not a refusal, which is the point: advising is not tied to `is_admin`
-  // (39_project_advisers.sql, decision 1). An admin stays out of
-  // searchAdvisers(), so this is reachable only by id — but it is reachable,
-  // and the database agrees (adviser_requests.test.sql).
-  test('an admin account can be asked, by id', async () => {
+  // (39_project_advisers.sql, decision 1). The instructor is CS faculty, and
+  // that is what counts (44_faculty_advisers.sql).
+  test('an admin account on the faculty directory can be asked', async () => {
     setSessionUserId('u-omar');
     const row = await inviteAdviser(LAB, 'u-instructor');
     expect(row.status).toBe('pending');
     expect(row.adviser_id).toBe('u-instructor');
   });
 
-  test('but an admin is never offered as a candidate', async () => {
+  test('and is offered as a candidate, like any faculty member', async () => {
     setSessionUserId('u-omar');
     const results = await searchAdvisers(LAB, 'Instructor');
-    expect(results).toEqual([]);
+    expect(results.map((u) => u.id)).toEqual(['u-instructor']);
   });
 
   describe('refusals', () => {
@@ -225,6 +224,13 @@ describe('inviteAdviser', () => {
     test('nor somebody already on the team', async () => {
       setSessionUserId('u-omar');
       await expect(inviteAdviser(LAB, 'u-priya')).rejects.toThrow('already on this team');
+    });
+
+    test('nor a student who is not CS faculty', async () => {
+      setSessionUserId('u-omar');
+      await expect(inviteAdviser(LAB, 'u-marcus')).rejects.toThrow(
+        'Only Computer Science faculty can advise a project'
+      );
     });
 
     test('nor an account that does not exist', async () => {
@@ -330,7 +336,7 @@ describe('removeAdviser', () => {
 // --- finding somebody to ask ----------------------------------------------
 
 describe('searchAdvisers', () => {
-  test('finds a student by name, and by email', async () => {
+  test('finds a faculty member by name, and by email', async () => {
     setSessionUserId('u-nicolas');
 
     const [byName, byEmail] = await Promise.all([
@@ -364,19 +370,19 @@ describe('searchAdvisers', () => {
     expect(spaces).toEqual([]);
   });
 
-  test('leaves out the owner, the team, admins, and whoever holds the invitation', async () => {
+  test('leaves out students, the owner, the team, and whoever holds the invitation', async () => {
     setSessionUserId('u-nicolas');
 
-    const [owner, member, admin, current] = await Promise.all([
+    const [student, owner, member, current] = await Promise.all([
+      searchAdvisers(PARKING, 'Marcus'),
       searchAdvisers(PARKING, 'Nicolas Guerra'),
       searchAdvisers(PARKING, 'Jose'),
-      searchAdvisers(PARKING, 'Instructor'),
       searchAdvisers(PARKING, 'Dana'),
     ]);
 
+    expect(student).toEqual([]);
     expect(owner).toEqual([]);
     expect(member).toEqual([]);
-    expect(admin).toEqual([]);
     expect(current).toEqual([]);
   });
 
