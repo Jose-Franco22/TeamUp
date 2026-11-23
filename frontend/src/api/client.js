@@ -2029,8 +2029,8 @@ function mockIsOnProjectTeam(projectId, userId) {
 
 // Who the owner may ask, by name or email. Two characters minimum, so an
 // empty box doesn't return the student body; ten at most, ordered by name.
-// Excluded: the owner, the team, admin accounts (18_admin_access.sql keeps
-// them out of student teams), and whoever already holds an open invitation.
+// Only CS faculty (the faculty directory, 44_faculty_advisers.sql) are offered.
+// Excluded: the owner, the team, and whoever already holds an open invitation.
 // Somebody who declined earlier is still listed — asking again is allowed.
 export async function searchAdvisers(projectId, query) {
   const trimmed = (query ?? '').trim();
@@ -2045,7 +2045,7 @@ export async function searchAdvisers(projectId, query) {
     return users
       .filter(
         (u) =>
-          !u.is_admin &&
+          u.is_faculty &&
           u.id !== id &&
           (u.name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle)) &&
           !mockIsOnProjectTeam(projectId, u.id) &&
@@ -2122,12 +2122,13 @@ export async function inviteAdviser(projectId, adviserId) {
     const adviser = users.find((u) => u.id === adviserId);
     if (!adviser) throw new Error('That account does not exist');
     // `adviser.is_admin` is deliberately not checked: advising is not tied to
-    // the flag (39_project_advisers.sql, decision 1). searchAdvisers() above
-    // still leaves admins out, so the only way here is by id.
+    // the flag (39_project_advisers.sql, decision 1). Being CS faculty is
+    // (44_faculty_advisers.sql), checked after the team, as there.
     if (adviserId === id) throw new Error('You cannot invite yourself to advise your own project');
     if (mockIsOnProjectTeam(projectId, adviserId)) {
       throw new Error('They are already on this team, so they cannot advise it');
     }
+    if (!adviser.is_faculty) throw new Error('Only Computer Science faculty can advise a project');
 
     const open = mockOpenAdviserRow(projectId);
     if (open) {

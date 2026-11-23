@@ -51,6 +51,8 @@ const skillById = Object.fromEntries(skills.map((s) => [s.id, s]));
 
 // --- USERS -------------------------------------------------------------
 // users: id, email, name, bio, availability_hours, github_url
+// is_faculty stands in for public.faculty_directory (44_faculty_advisers.sql):
+// only these accounts can be asked to advise. It is not a users column.
 export const users = [
   {
     id: 'u-adan',
@@ -85,10 +87,10 @@ export const users = [
     github_url: 'https://github.com/acovarrubias',
   },
   { id: 'u-maria', email: 'mreyna01@utrgv.edu', name: 'Maria Reyna', bio: '', availability_hours: 16, github_url: '' },
-  { id: 'u-luis', email: 'ltrevino01@utrgv.edu', name: 'Luis Trevino', bio: '', availability_hours: 15, github_url: '' },
-  { id: 'u-dana', email: 'dkim01@utrgv.edu', name: 'Dana Kim', bio: '', availability_hours: 14, github_url: '' },
-  { id: 'u-priya', email: 'pvale01@utrgv.edu', name: 'Priya Vale', bio: '', availability_hours: 10, github_url: '' },
-  { id: 'u-omar', email: 'omolina01@utrgv.edu', name: 'Omar Molina', bio: '', availability_hours: 12, github_url: '' },
+  { id: 'u-luis', email: 'ltrevino01@utrgv.edu', name: 'Luis Trevino', bio: '', availability_hours: 15, github_url: '', is_faculty: true },
+  { id: 'u-dana', email: 'dkim01@utrgv.edu', name: 'Dana Kim', bio: '', availability_hours: 14, github_url: '', is_faculty: true },
+  { id: 'u-priya', email: 'pvale01@utrgv.edu', name: 'Priya Vale', bio: '', availability_hours: 10, github_url: '', is_faculty: true },
+  { id: 'u-omar', email: 'omolina01@utrgv.edu', name: 'Omar Molina', bio: '', availability_hours: 12, github_url: '', is_faculty: true },
   { id: 'u-rita', email: 'rcano01@utrgv.edu', name: 'Rita Cano', bio: '', availability_hours: 6, github_url: '' },
   // Unteamed students. Eight of the ten accounts above are already seated
   // on a fixture team, which is correct data but made the app look broken
@@ -96,12 +98,12 @@ export const users = [
   // reads "Already on a team." These exist so there's a pool of people who
   // can actually send a request. Keep several of them free — see the
   // invariant on teamMembers below.
-  { id: 'u-sofia', email: 'sgarza02@utrgv.edu', name: 'Sofia Garza', bio: 'Frontend, a lot of CSS. Want a project people outside class will use.', availability_hours: 14, github_url: '' },
+  { id: 'u-sofia', email: 'sgarza02@utrgv.edu', name: 'Sofia Garza', bio: 'Frontend, a lot of CSS. Want a project people outside class will use.', availability_hours: 14, github_url: '', is_faculty: true },
   { id: 'u-marcus', email: 'mhall01@utrgv.edu', name: 'Marcus Hall', bio: 'Backend and APIs. Happy to own deployment too.', availability_hours: 11, github_url: '' },
   { id: 'u-ana', email: 'avillarreal01@utrgv.edu', name: 'Ana Villarreal', bio: 'Data and notebooks. Looking for something with messy real data.', availability_hours: 9, github_url: '' },
   { id: 'u-derek', email: 'dcho01@utrgv.edu', name: 'Derek Cho', bio: 'I like testing and keeping a project organized.', availability_hours: 8, github_url: '' },
-  { id: 'u-instructor', email: 'instructor@utrgv.edu', name: 'Course Instructor', bio: '', availability_hours: 0, github_url: '', is_admin: true },
-].map((u) => ({ is_admin: false, ...u }));
+  { id: 'u-instructor', email: 'instructor@utrgv.edu', name: 'Course Instructor', bio: '', availability_hours: 0, github_url: '', is_admin: true, is_faculty: true },
+].map((u) => ({ is_admin: false, is_faculty: false, ...u }));
 
 const userById = Object.fromEntries(users.map((u) => [u.id, u]));
 
