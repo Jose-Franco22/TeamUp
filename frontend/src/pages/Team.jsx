@@ -18,6 +18,7 @@ import StatusPill from '../components/StatusPill';
 import { TeamChecklist } from '../components/NextSteps';
 import AdviserPanel from '../components/AdviserPanel';
 import AdvisedTeams from '../components/AdvisedTeams';
+import CheckIns from '../components/CheckIns';
 
 export default function Team() {
   const { data, loading, error, reload, setData } = useAsync(getMyTeam, []);
@@ -245,6 +246,17 @@ export default function Team() {
       {/* The checklist is for complete teams (issue #30); set_next_step_done()
           refuses a team that's still forming. */}
       {data.status === 'full' && <TeamChecklist teamId={data.team_id} />}
+
+      {/* Weekly check-ins (#55), once the team is formed — the same moment
+          the database starts accepting them (42_check_ins.sql). */}
+      {data.formed_at && (
+        <CheckIns
+          projectId={data.id}
+          members={data.members}
+          formedAt={data.formed_at}
+          viewerId={user?.id}
+        />
+      )}
 
       <div className="rows">
         <div className="row hd">

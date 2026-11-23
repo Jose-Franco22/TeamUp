@@ -1296,3 +1296,24 @@ button:disabled { opacity: 0.45; cursor: default; }
 .adviser-results .nm { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .adviser-results .sub { font-size: 12.5px; color: var(--slate); overflow-wrap: anywhere; }
 .adviser-results button { padding: 6px 12px; font-size: 13px; border-radius: 6px; }
+
+/* ---------- weekly check-ins (#55) ---------- */
+.check-ins .check-in-form { margin: 14px 0 6px; }
+.check-ins .field label .sub { font-weight: 400; color: var(--mute); }
+.check-in-week { margin-top: 18px; }
+.check-in-week h3 { font-size: 14px; margin: 0 0 8px; }
+.check-in-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.check-in { border: 1px solid var(--line, rgba(127, 127, 127, 0.25)); border-radius: 8px; padding: 10px 12px; }
+.check-in .nm { font-weight: 600; margin-bottom: 4px; }
+.check-in dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 0; font-size: 13.5px; }
+.check-in dt { color: var(--mute); }
+.check-in dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A blocker is the one thing the adviser should not miss. */
+.check-in.blocked { border-color: var(--warn); background: var(--warn-bg); border-left-width: 4px; }
+.check-in .blocker-text { color: var(--warn); font-weight: 500; }
+.tag.blocker { margin-left: 7px; padding: 1px 6px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em; background: var(--warn); color: var(--warn-bg); }
+.check-in-week .missing { font-size: 13px; color: var(--mute); margin: 8px 0 0; }
+@media (max-width: 520px) {
+  .check-in dl { grid-template-columns: 1fr; }
+  .check-in dt { margin-top: 4px; }
+}

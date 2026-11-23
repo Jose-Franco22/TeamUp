@@ -3,6 +3,7 @@ import { getAdvisedProjects, stepDownAsAdviser } from '../api/client';
 import useAsync from './useAsync';
 import Avatar from './Avatar';
 import StatusPill from './StatusPill';
+import CheckIns from './CheckIns';
 
 // The teams you advise, on the team page (issue #54).
 //
@@ -79,6 +80,13 @@ export default function AdvisedTeams() {
                   </div>
                 ))}
               </div>
+            )}
+
+            {/* An adviser reads the team's check-ins (#55) but holds no seat,
+                so has none of their own to post. Blockers are highlighted
+                for exactly this reader. */}
+            {p.formed_at && (
+              <CheckIns projectId={p.id} members={p.members} formedAt={p.formed_at} canPost={false} />
             )}
 
             <p className="hint">
