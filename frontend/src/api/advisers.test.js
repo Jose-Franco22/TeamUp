@@ -346,8 +346,19 @@ describe('searchAdvisers', () => {
 
     expect(byName.map((u) => u.id)).toContain('u-sofia');
     expect(byEmail.map((u) => u.id)).toEqual(['u-sofia']);
-    // Only the three columns the function exposes.
-    expect(Object.keys(byEmail[0]).sort()).toEqual(['email', 'id', 'name']);
+    // Exactly the columns search_advisers() exposes — three until #60 added
+    // what the owner chooses on: the areas they advise in, and whether they
+    // have room. A field here that the SQL does not return is how mock mode
+    // ends up showing something production cannot.
+    expect(Object.keys(byEmail[0]).sort()).toEqual([
+      'advising',
+      'email',
+      'expertise',
+      'id',
+      'is_full',
+      'max_teams',
+      'name',
+    ]);
   });
 
   test('case does not matter', async () => {

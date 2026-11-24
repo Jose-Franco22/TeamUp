@@ -30,6 +30,10 @@ import {
   evidenceForUser,
   adviserRequests,
   adviserFor,
+  adviserExpertise,
+  expertiseForAdviser,
+  advisingAccepted,
+  advisingIsFull,
   checkIns,
   deliverableSubmissions,
   deliverableComments,
@@ -1961,6 +1965,128 @@ export async function setAdviserDigest(enabled) {
   return value;
 }
 
+// --- Advising: expertise and capacity (issue #60) ----------------------
+//
+// Shaped by supabase/48_adviser_expertise.sql. The one thing worth knowing
+// here is why `myAdvising()` exists at all rather than two more fields on
+// getCurrentUser(): the browser cannot work out whether you are faculty.
+// faculty_directory revokes everything from `authenticated` by design, and
+// USER_SELECT carries no such flag — so one function answers it, for the
+// caller and nobody else.
+
+/**
+ * The signed-in user's advising settings: whether they are faculty (which is
+ * what decides if the Profile card appears at all), the switch, the maximum,
+ * how many teams they advise, whether that is full, and their expertise.
+ */
+export async function myAdvising() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const u = users.find((x) => x.id === id);
+    if (!u) throw new Error('Account not found');
+    return {
+      is_faculty: Boolean(u.is_faculty),
+      available: u.advising_available !== false,
+      max_teams: u.advising_max_teams ?? null,
+      advising: advisingAccepted(id),
+      is_full: advisingIsFull(u),
+      expertise: expertiseForAdviser(id),
+    };
+  }
+
+  const { data, error } = await supabase.rpc('my_advising');
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Turn Available to advise on or off.
+ *
+ * On by default, so this is almost always a user turning themselves off.
+ * It hides them from adviser search and refuses new invitations; the teams
+ * they already advise are untouched (#60 criterion 6).
+ */
+export async function setAdvisingAvailable(on) {
+  const value = Boolean(on);
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    users.find((x) => x.id === id).advising_available = value;
+    return myAdvising();
+  }
+  const viewerId = requireViewerId(await getViewerId());
+  const { error } = await supabase.from('users').update({ advising_available: value }).eq('id', viewerId);
+  if (error) throw error;
+  return myAdvising();
+}
+
+/**
+ * The most teams this adviser will advise at once, 1-20, or null for no
+ * limit. Lowering it below the number already advised is allowed and changes
+ * nothing retroactively — see the migration.
+ */
+export async function setAdvisingMaxTeams(value) {
+  const { values, errors, isValid } = validateProfile({ advising_max_teams: value });
+  if (!isValid) throw new ValidationError(errors);
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    users.find((x) => x.id === id).advising_max_teams = values.advising_max_teams;
+    return myAdvising();
+  }
+  const viewerId = requireViewerId(await getViewerId());
+  const { error } = await supabase
+    .from('users')
+    .update({ advising_max_teams: values.advising_max_teams })
+    .eq('id', viewerId);
+  if (error) {
+    const fieldErrors = fieldErrorsFromDbError(error);
+    throw fieldErrors ? new ValidationError(fieldErrors) : error;
+  }
+  return myAdvising();
+}
+
+/**
+ * Add or remove an area of expertise. Own rows only, by RLS
+ * (adviser_expertise_manage_own) — the same shape as addSkill/removeSkill,
+ * and for the same reason: the row is the claim, so there is nothing to
+ * update, only rows to add and drop.
+ */
+export async function addExpertise(skillId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const already = adviserExpertise.some((r) => r.user_id === id && r.skill_id === skillId);
+    if (!already) adviserExpertise.push({ user_id: id, skill_id: skillId });
+    return myAdvising();
+  }
+  const viewerId = requireViewerId(await getViewerId());
+  const { error } = await supabase
+    .from('adviser_expertise')
+    .upsert({ user_id: viewerId, skill_id: skillId }, { onConflict: 'user_id,skill_id', ignoreDuplicates: true });
+  if (error) throw error;
+  return myAdvising();
+}
+
+export async function removeExpertise(skillId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const at = adviserExpertise.findIndex((r) => r.user_id === id && r.skill_id === skillId);
+    if (at !== -1) adviserExpertise.splice(at, 1);
+    return myAdvising();
+  }
+  const viewerId = requireViewerId(await getViewerId());
+  const { error } = await supabase
+    .from('adviser_expertise')
+    .delete()
+    .eq('user_id', viewerId)
+    .eq('skill_id', skillId);
+  if (error) throw error;
+  return myAdvising();
+}
+
 // --- Join requests -----------------------------------------------------
 
 const REQUEST_SELECT = `
@@ -2831,14 +2957,32 @@ export async function searchAdvisers(projectId, query) {
       .filter(
         (u) =>
           u.is_faculty &&
+          // Turning Available to advise off hides you here (#60 criterion 6),
+          // which is the whole effect: there is no "hidden" state for the
+          // owner to see, so nothing else in the panel has to know about it.
+          u.advising_available &&
           u.id !== id &&
           (u.name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle)) &&
           !mockIsOnProjectTeam(projectId, u.id) &&
           !(open && open.adviser_id === u.id)
       )
-      .sort((a, b) => a.name.localeCompare(b.name))
+      // Full advisers last, then by name — search_advisers()'s own ordering.
+      // The expertise half of #60's ordering is the caller's, in
+      // lib/advising.js, so that it happens once for both modes.
+      .sort(
+        (a, b) =>
+          Number(advisingIsFull(a)) - Number(advisingIsFull(b)) || a.name.localeCompare(b.name)
+      )
       .slice(0, 10)
-      .map((u) => ({ id: u.id, name: u.name, email: u.email }));
+      .map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        max_teams: u.advising_max_teams,
+        advising: advisingAccepted(u.id),
+        is_full: advisingIsFull(u),
+        expertise: expertiseForAdviser(u.id),
+      }));
   }
 
   const { data, error } = await supabase.rpc('search_advisers', {
@@ -2914,6 +3058,16 @@ export async function inviteAdviser(projectId, adviserId) {
       throw new Error('They are already on this team, so they cannot advise it');
     }
     if (!adviser.is_faculty) throw new Error('Only Computer Science faculty can advise a project');
+    // #60, in invite_adviser()'s order: the switch they chose is checked
+    // before the limit they set, and both after the faculty rule — a student
+    // hearing about advising limits would be a worse answer than hearing
+    // they are not faculty.
+    if (!adviser.advising_available) {
+      throw new Error('They are not taking advising requests right now');
+    }
+    if (advisingIsFull(adviser)) {
+      throw new Error('They are already advising as many teams as they take on');
+    }
 
     const open = mockOpenAdviserRow(projectId);
     if (open) {
@@ -3045,6 +3199,16 @@ export async function respondToAdviserRequest(requestId, accept) {
     // the pending check and before it writes the status.
     if (accept && mockOnProjectTeam(row.project_id, id)) {
       throw new Error('You are on this team, so you cannot also advise it');
+    }
+    // The cap (#60). Enforced on accepting and not on inviting, because
+    // pending invitations do not fill a spot: this row is still pending, so
+    // it is not counted against the limit it is about to be checked against.
+    // Declining while full stays possible, which is why this is inside the
+    // `accept` branch.
+    if (accept && advisingIsFull(users.find((u) => u.id === id))) {
+      throw new Error(
+        'You are already advising as many teams as you said you would take on. Raise your limit in your profile to accept more.'
+      );
     }
 
     const project = projects.find((p) => p.id === row.project_id);

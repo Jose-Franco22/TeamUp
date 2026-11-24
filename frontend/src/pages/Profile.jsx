@@ -13,6 +13,7 @@ import { ErrorState, Loading } from '../components/States';
 import Avatar from '../components/Avatar';
 import ResumeImport from '../components/ResumeImport';
 import SkillPicker from '../components/SkillPicker';
+import AdvisingCard from '../components/AdvisingCard';
 
 export default function Profile() {
   const { data, loading, error, reload, setData } = useAsync(getCurrentUser, []);
@@ -197,13 +198,22 @@ export default function Profile() {
         />
       )}
 
-      {/* Anyone can be asked to advise a team (39_project_advisers.sql), so
-          everyone gets the switch; the digest itself only goes to people who
-          advise at least one team. */}
+      {/* This switch is shown to everyone on purpose (#87), and the sentence
+          that used to justify it — "anyone can be asked to advise a team" —
+          stopped being true when #99 made advising faculty-only. What is
+          still true is that the digest only reaches people who advise at
+          least one team, so the switch is harmless rather than wrong for a
+          student. Narrowing it to faculty is #59's call and would want its
+          own change; the card below is the one that needed the gate, because
+          its fields do nothing at all for a non-faculty account. */}
       <DigestPreference
         enabled={data.adviser_digest !== false}
         onSaved={(on) => setData({ ...data, adviser_digest: on })}
       />
+
+      {/* Issue #60. Renders nothing unless the account is CS faculty, which
+          only the server can answer — see AdvisingCard. */}
+      <AdvisingCard />
 
       {!data.is_admin && <section className="card">
         <h2>Skills</h2>

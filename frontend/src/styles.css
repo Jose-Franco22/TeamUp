@@ -1320,6 +1320,39 @@ button:disabled { opacity: 0.45; cursor: default; }
 .adviser-results .sub { font-size: 12.5px; color: var(--slate); overflow-wrap: anywhere; }
 .adviser-results button { padding: 6px 12px; font-size: 13px; border-radius: 6px; }
 
+/* ---------- adviser expertise and capacity (#60) ---------- */
+/* The areas an adviser advises in, under their name in search results. The
+   ones this project asks for are picked out — that highlight is the whole
+   point of showing them, so it has to survive a grey-on-grey theme: it takes
+   a border and a weight change as well as the colour. */
+.adviser-results .areas { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.adviser-results .area {
+  font-size: 11.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--slate);
+  white-space: nowrap;
+}
+.adviser-results .area.match {
+  border-color: var(--open-line);
+  background: var(--open-bg);
+  color: var(--ink);
+  font-weight: 600;
+}
+/* Still legible, still invitable-looking enough to read as "this person, but
+   not now" rather than as an error. */
+.adviser-results li.is-full .nm,
+.adviser-results li.is-full .sub { opacity: 0.72; }
+.adviser-results li.is-full .tag { margin-left: 7px; }
+
+/* The Profile card. `row-inline` keeps the number and its Save button on one
+   line without the number stretching to fill the card. */
+.advising .field { margin-top: 16px; }
+.advising .row-inline { display: flex; align-items: center; gap: 8px; }
+.advising .row-inline input { width: 7.5em; }
+.advising .lbl { font-weight: 500; margin: 0 0 2px; }
+
 /* ---------- weekly check-ins (#55) ---------- */
 .check-ins .check-in-form { margin: 14px 0 6px; }
 .check-ins .field label .sub { font-weight: 400; color: var(--mute); }

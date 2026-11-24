@@ -4,7 +4,19 @@ import { addSkill, getSkills } from '../api/client';
 // "Add a skill" button that opens a searchable dropdown of every skill in the
 // taxonomy. Typing filters to skills whose name contains the query anywhere
 // (case-insensitive). Skills already on the profile are left out.
-export default function SkillPicker({ mySkills, onAdded }) {
+//
+// `onPick` and `label` exist because issue #60 picks from the same taxonomy
+// for a different table: an adviser's areas of expertise are
+// adviser_expertise rows, not user_skills, and the two must not be written by
+// the same call. Everything else about choosing from ~1262 skills — the
+// search, the keyboard handling, leaving out what you already have — is the
+// same problem, and a second copy of it would be a second set of bugs.
+export default function SkillPicker({
+  mySkills,
+  onAdded,
+  onPick = addSkill,
+  label = 'Add a skill',
+}) {
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -43,7 +55,10 @@ export default function SkillPicker({ mySkills, onAdded }) {
   useEffect(() => setActive(0), [query]);
 
   useEffect(() => {
-    listRef.current?.children[active]?.scrollIntoView({ block: 'nearest' });
+    // Optional call, like SkillSelect.jsx: jsdom does not implement
+    // scrollIntoView, and until #60 opened this dropdown in a test nothing
+    // had ever run this line outside a browser.
+    listRef.current?.children[active]?.scrollIntoView?.({ block: 'nearest' });
   }, [active]);
 
   function close() {
@@ -56,7 +71,7 @@ export default function SkillPicker({ mySkills, onAdded }) {
     setAdding(true);
     setAddError(null);
     try {
-      onAdded(await addSkill(skill.id));
+      onAdded(await onPick(skill.id));
       setQuery('');
     } catch (err) {
       setAddError(err.message);
@@ -88,7 +103,7 @@ export default function SkillPicker({ mySkills, onAdded }) {
         aria-haspopup="listbox"
         onClick={() => (open ? close() : setOpen(true))}
       >
-        Add a skill
+        {label}
       </button>
 
       {open && (

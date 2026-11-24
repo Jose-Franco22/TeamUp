@@ -55,6 +55,11 @@ const skillById = Object.fromEntries(skills.map((s) => [s.id, s]));
 // users: id, email, name, bio, availability_hours, github_url
 // is_faculty stands in for public.faculty_directory (44_faculty_advisers.sql):
 // only these accounts can be asked to advise. It is not a users column.
+//
+// advising_available and advising_max_teams ARE columns
+// (48_adviser_expertise.sql, issue #60). Available is on by default and the
+// maximum is null for "none set", which matches the database's defaults, so
+// nothing in mock mode has to list them to behave like a real account.
 export const users = [
   {
     id: 'u-adan',
@@ -90,9 +95,13 @@ export const users = [
   },
   { id: 'u-maria', email: 'mreyna01@utrgv.edu', name: 'Maria Reyna', bio: '', availability_hours: 16, github_url: '' },
   { id: 'u-luis', email: 'ltrevino01@utrgv.edu', name: 'Luis Trevino', bio: '', availability_hours: 15, github_url: '', is_faculty: true },
-  { id: 'u-dana', email: 'dkim01@utrgv.edu', name: 'Dana Kim', bio: '', availability_hours: 14, github_url: '', is_faculty: true },
+  // Dana advises the parking project (ar-1) and will take two teams, so the
+  // panel has a "1 of 2 spots open" to show. Omar's maximum is one and he is
+  // not advising anything, so raising his to the cap or filling it are both
+  // one step away in the demo.
+  { id: 'u-dana', email: 'dkim01@utrgv.edu', name: 'Dana Kim', bio: '', availability_hours: 14, github_url: '', is_faculty: true, advising_max_teams: 2 },
   { id: 'u-priya', email: 'pvale01@utrgv.edu', name: 'Priya Vale', bio: '', availability_hours: 10, github_url: '', is_faculty: true },
-  { id: 'u-omar', email: 'omolina01@utrgv.edu', name: 'Omar Molina', bio: '', availability_hours: 12, github_url: '', is_faculty: true },
+  { id: 'u-omar', email: 'omolina01@utrgv.edu', name: 'Omar Molina', bio: '', availability_hours: 12, github_url: '', is_faculty: true, advising_max_teams: 1 },
   { id: 'u-rita', email: 'rcano01@utrgv.edu', name: 'Rita Cano', bio: '', availability_hours: 6, github_url: '' },
   // Unteamed students. Eight of the ten accounts above are already seated
   // on a fixture team, which is correct data but made the app look broken
@@ -105,7 +114,13 @@ export const users = [
   { id: 'u-ana', email: 'avillarreal01@utrgv.edu', name: 'Ana Villarreal', bio: 'Data and notebooks. Looking for something with messy real data.', availability_hours: 9, github_url: '' },
   { id: 'u-derek', email: 'dcho01@utrgv.edu', name: 'Derek Cho', bio: 'I like testing and keeping a project organized.', availability_hours: 8, github_url: '' },
   { id: 'u-instructor', email: 'instructor@utrgv.edu', name: 'Course Instructor', bio: '', availability_hours: 0, github_url: '', is_admin: true, is_faculty: true },
-].map((u) => ({ is_admin: false, is_faculty: false, ...u }));
+].map((u) => ({
+  is_admin: false,
+  is_faculty: false,
+  advising_available: true,
+  advising_max_teams: null,
+  ...u,
+}));
 
 const userById = Object.fromEntries(users.map((u) => [u.id, u]));
 
@@ -403,6 +418,47 @@ export const adviserRequests = [
     responded_at: '2026-09-02T08:00:00Z',
   },
 ];
+
+// --- ADVISER_EXPERTISE -------------------------------------------------
+// public.adviser_expertise (48_adviser_expertise.sql, issue #60): the areas
+// an adviser advises in, as skill ids. Its own table and not userSkills, for
+// the reason the migration gives — userSkills is what the matching engine
+// scores a student on, and resume import writes it.
+//
+// Only faculty rows here, because only faculty can be asked to advise. Luis
+// is deliberately left out so "a faculty member who has listed nothing" has
+// somewhere to show itself.
+export const adviserExpertise = [
+  { user_id: 'u-dana', skill_id: 's-python' },
+  { user_id: 'u-dana', skill_id: 's-opencv' },
+  { user_id: 'u-priya', skill_id: 's-react' },
+  { user_id: 'u-priya', skill_id: 's-figma' },
+  { user_id: 'u-omar', skill_id: 's-pg' },
+  { user_id: 'u-sofia', skill_id: 's-react' },
+  { user_id: 'u-sofia', skill_id: 's-js' },
+];
+
+// The areas one adviser advises in, by category then name — the order
+// my_advising() and search_advisers() both return them in.
+export function expertiseForAdviser(userId) {
+  return adviserExpertise
+    .filter((row) => row.user_id === userId)
+    .map((row) => skillById[row.skill_id])
+    .filter(Boolean)
+    .map((sk) => ({ id: sk.id, name: sk.name, category: sk.category }))
+    .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+}
+
+// How many teams someone advises, and whether that fills the maximum they
+// set. Accepted rows only: a pending invitation does not fill a spot.
+export function advisingAccepted(userId) {
+  return adviserRequests.filter((r) => r.adviser_id === userId && r.status === 'accepted').length;
+}
+
+export function advisingIsFull(user) {
+  if (user?.advising_max_teams === null || user?.advising_max_teams === undefined) return false;
+  return advisingAccepted(user.id) >= user.advising_max_teams;
+}
 
 // The open invitation or adviser for a project, if it has one. 'cancelled' is
 // left out the way project_adviser() leaves it out: the owner undid it, so
