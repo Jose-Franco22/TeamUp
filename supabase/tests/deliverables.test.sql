@@ -27,6 +27,9 @@ select set_config('tests.admin',    tests.sign_in_with_microsoft('instructor57@u
 -- protect_admin_flag() (18_) refuses this from `authenticated`.
 update public.users set is_admin = true where id = current_setting('tests.admin')::uuid;
 
+-- Only CS faculty can be asked to advise (44_faculty_advisers.sql).
+insert into public.faculty_directory (email) values ('adviser57@utrgv.edu'), ('adviser57b@utrgv.edu');
+
 select set_config('tests.project_a',
   tests.create_full_team(current_setting('tests.owner_a')::uuid, current_setting('tests.member_a')::uuid)::text, true);
 select set_config('tests.project_b',

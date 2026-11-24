@@ -17,6 +17,12 @@ select set_config('tests.member_b', tests.sign_in_with_microsoft('memberb55@utrg
 select set_config('tests.forming',  tests.sign_in_with_microsoft('forming55@utrgv.edu', 'Fran Forming')::text, true);
 select set_config('tests.loner',    tests.sign_in_with_microsoft('loner55@utrgv.edu', 'Lou Loner')::text, true);
 
+-- Only accounts on the CS faculty directory can be asked to advise
+-- (44_faculty_advisers.sql, which merged alongside this file). These two are
+-- the ones this file invites.
+insert into public.faculty_directory (email) values
+  ('adviser55@utrgv.edu'), ('pending55@utrgv.edu');
+
 -- Two formed two-seat teams, A and B. Ada advises A (accepted); Pat has been
 -- asked to advise B and hasn't answered. Fran is alone on a three-seat
 -- project that is still forming. Lou is on no team.

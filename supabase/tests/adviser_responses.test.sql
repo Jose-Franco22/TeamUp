@@ -25,6 +25,12 @@ select set_config('tests.seeker',  tests.sign_in_with_microsoft('seeker54@utrgv.
 select set_config('tests.r_pm', (select id from public.roles where name = 'Project Manager')::text, true);
 select set_config('tests.r_be', (select id from public.roles where name = 'Backend Developer')::text, true);
 
+-- Only accounts on the CS faculty directory can be asked to advise
+-- (44_faculty_advisers.sql, which merged alongside this file). These three
+-- are the ones this file invites; everyone else stays a student.
+insert into public.faculty_directory (email) values
+  ('adviser54@utrgv.edu'), ('other54@utrgv.edu'), ('seeker54@utrgv.edu');
+
 -- A three-seat project, owner plus one member, with an invitation out to Ada.
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select set_config('tests.project', (select (public.create_project(
