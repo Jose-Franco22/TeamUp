@@ -25,6 +25,16 @@ select set_config('tests.seeker',  tests.sign_in_with_microsoft('seeker54@utrgv.
 select set_config('tests.r_pm', (select id from public.roles where name = 'Project Manager')::text, true);
 select set_config('tests.r_be', (select id from public.roles where name = 'Backend Developer')::text, true);
 
+-- Only accounts on the CS faculty directory can be asked to advise
+-- (44_faculty_advisers.sql), and every account this file asks goes through
+-- invite_adviser(). #99 added that rule after this file had already passed
+-- CI on its own branch, so the two only met on Testing. The ones expected
+-- to be refused for other reasons stay refused for those reasons: the
+-- faculty check runs after the self and team checks, so their messages are
+-- unchanged.
+insert into public.faculty_directory (email) values
+  ('adviser54@utrgv.edu'), ('other54@utrgv.edu'), ('seeker54@utrgv.edu');
+
 -- A three-seat project, owner plus one member, with an invitation out to Ada.
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select set_config('tests.project', (select (public.create_project(
