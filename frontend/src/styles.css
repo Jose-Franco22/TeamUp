@@ -208,6 +208,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 .head > div { min-width: 0; }
 .head h1 { overflow-wrap: anywhere; margin: 0 0 3px; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
 .head p { margin: 0; font-size: 14px; color: var(--slate); }
+/* More than one control in a page header (#40 put Export beside Refresh).
+   Wraps rather than squashing, since an inline error can land beside them. */
+.head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 .section { font-size: 15px; font-weight: 600; margin: 26px 0 10px; }
 .section:first-of-type { margin-top: 0; }
@@ -300,8 +303,13 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 /* Cells: 8px vertical padding, 16px at the table's edges and 6 + 6 = 12px
    between columns, 1px row separators. Type stays at 13.5px. */
-.admin-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 24px; }
-.admin-table {
+/* `.repo-table` is the same table as the admin one, under a name that is
+   not about admin: the repository activity on the team page (#58). It is
+   not called `.data-table` because #97 took that name for the admin
+   dashboard's container div, which wraps a toolbar, a table and a footer —
+   a different thing at a different level. */
+.admin-table-wrap, .repo-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 24px; }
+.admin-table, .repo-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
@@ -310,12 +318,27 @@ button:disabled { opacity: 0.45; cursor: default; }
   font-size: 13.5px;
   line-height: 20px;
 }
-.admin-table th, .admin-table td { padding: 8px 6px; vertical-align: top; border-bottom: 1px solid var(--line); }
-.admin-table :is(th, td):first-child { padding-left: 16px; }
-.admin-table :is(th, td):last-child { padding-right: 16px; }
-.admin-table thead th { background: var(--canvas); color: var(--slate); font-weight: 500; }
-.admin-table th { font-weight: 500; }
-.admin-table tbody tr:last-child > * { border-bottom: 0; }
+.admin-table th, .admin-table td,
+.repo-table th, .repo-table td { padding: 8px 6px; vertical-align: top; border-bottom: 1px solid var(--line); }
+.admin-table :is(th, td):first-child,
+.repo-table :is(th, td):first-child { padding-left: 16px; }
+.admin-table :is(th, td):last-child,
+.repo-table :is(th, td):last-child { padding-right: 16px; }
+.admin-table thead th,
+.repo-table thead th { background: var(--canvas); color: var(--slate); font-weight: 500; }
+.admin-table th, .repo-table th { font-weight: 500; }
+.admin-table tbody tr:last-child > *,
+.repo-table tbody tr:last-child > * { border-bottom: 0; }
+
+/* Numbers read better right-aligned, but the member column must not be. */
+.repo-table td + td, .repo-table th + th { text-align: right; }
+.repo-table .tag { margin-left: 8px; }
+.repo-table .sub { font-size: 12.5px; color: var(--slate); margin-top: 3px; }
+/* #97 turned the admin tables into cards at phone width. This one has four
+   short columns and keeps the simpler answer: scroll it inside its wrap. */
+@media (max-width: 620px) {
+  .repo-table { min-width: 540px; }
+}
 .admin-table .pill { margin-left: 0; }
 .admin-table .desc { color: var(--slate); }
 .admin-table .numeric { text-align: right; }

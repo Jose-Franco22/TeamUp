@@ -199,6 +199,10 @@ export const projects = [
       'Live lot occupancy estimated from existing camera feeds, with a map of where spaces are opening up.',
     team_size_target: 4,
     status: 'open',
+    // The one project with a repository linked (#58). Every other project
+    // reads as unlinked, which is the state most of them are in all
+    // semester and the one the owner's form has to handle.
+    github_repo: 'https://github.com/Jose-Franco22/TeamUp',
   },
   {
     id: 'p-degree',
@@ -276,15 +280,60 @@ export const teams = [
   { id: 't-lab', project_id: 'p-lab', formed_at: '2026-10-14T16:00:00Z' },
 ];
 
+// --- REPO_ACTIVITY -----------------------------------------------------
+// repo_activity: project_id, repo, contributors, last_commit_at,
+// window_days, fetched_at, error (issue #58).
+//
+// One row, on the one project with a repository linked. Its three
+// contributors are each a case the page has to draw differently:
+//
+//   - nguerra matches Nicolas's profile github_url, so his commits land on
+//     his roster row;
+//   - Jose is on this team and has a profile link, but nothing in the
+//     window, so he reads as a zero rather than as missing;
+//   - dependabot[bot] and the login-less commit match nobody, so they show
+//     below the roster as unlinked contributors — kept, not dropped, so the
+//     team's total matches what the repository holds.
+export const repoActivity = [
+  {
+    project_id: 'p-parking',
+    repo: 'https://github.com/Jose-Franco22/TeamUp',
+    contributors: [
+      { login: 'nguerra', name: 'Nicolas Guerra', commits: 12, pull_requests: 3, last_commit_at: '2026-11-18T22:14:00Z' },
+      { login: 'dependabot[bot]', name: null, commits: 4, pull_requests: 4, last_commit_at: '2026-11-17T06:02:00Z' },
+      // No account behind the email, which is what committing from a machine
+      // nobody configured looks like from GitHub's side.
+      { login: null, name: 'nicolas@thinkpad', commits: 2, pull_requests: 0, last_commit_at: '2026-11-16T19:40:00Z' },
+    ],
+    last_commit_at: '2026-11-18T22:14:00Z',
+    window_days: 14,
+    // Relative rather than fixed, so the demo always reads as a refresh that
+    // just happened — "updated 6 minutes ago" — instead of one from whenever
+    // these fixtures were written.
+    fetched_at: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+    error: null,
+  },
+];
+
+export const repoActivityFor = (projectId) =>
+  repoActivity.find((r) => r.project_id === projectId) ?? null;
+
+// joined_at is on every row because it is on every real row: the column has
+// a `not null default now()` in the baseline schema, and the mock's own
+// joining paths have always stamped it (createProject, respondToJoinRequest,
+// adminAssignStudent). Only the seeded rows were missing one, which showed
+// up the moment #40 put a Joined column in the roster export — blank in mock
+// mode, filled in production. Owners joined when their project was created;
+// the rest a few days later.
 export const teamMembers = [
-  { team_id: 't-parking', user_id: 'u-nicolas', role_id: 'r-backend' },
-  { team_id: 't-parking', user_id: 'u-jose', role_id: 'r-data' },
-  { team_id: 't-degree', user_id: 'u-alexis', role_id: 'r-fullstack' },
-  { team_id: 't-scam', user_id: 'u-maria', role_id: 'r-data' },
-  { team_id: 't-scam', user_id: 'u-luis', role_id: 'r-backend' },
-  { team_id: 't-scam', user_id: 'u-dana', role_id: 'r-data' },
-  { team_id: 't-lab', user_id: 'u-omar', role_id: 'r-backend' },
-  { team_id: 't-lab', user_id: 'u-priya', role_id: 'r-design' },
+  { team_id: 't-parking', user_id: 'u-nicolas', role_id: 'r-backend', joined_at: '2026-09-29T14:05:00Z' },
+  { team_id: 't-parking', user_id: 'u-jose', role_id: 'r-data', joined_at: '2026-10-03T18:20:00Z' },
+  { team_id: 't-degree', user_id: 'u-alexis', role_id: 'r-fullstack', joined_at: '2026-09-30T10:15:00Z' },
+  { team_id: 't-scam', user_id: 'u-maria', role_id: 'r-data', joined_at: '2026-10-01T09:40:00Z' },
+  { team_id: 't-scam', user_id: 'u-luis', role_id: 'r-backend', joined_at: '2026-10-06T13:00:00Z' },
+  { team_id: 't-scam', user_id: 'u-dana', role_id: 'r-data', joined_at: '2026-10-08T11:30:00Z' },
+  { team_id: 't-lab', user_id: 'u-omar', role_id: 'r-backend', joined_at: '2026-10-09T15:45:00Z' },
+  { team_id: 't-lab', user_id: 'u-priya', role_id: 'r-design', joined_at: '2026-10-14T16:00:00Z' },
 ];
 
 // --- JOIN_REQUESTS -----------------------------------------------------
@@ -539,6 +588,10 @@ export function buildProject(project, viewerId = null) {
     creator_name: userById[project.creator_id].name,
     adviser_id: viewerId && settledAdviser ? settledAdviser.adviser_id : null,
     adviser_name: viewerId && settledAdviser ? userById[settledAdviser.adviser_id].name : null,
+    // Always a string, never undefined: composeProject() in the real client
+    // returns '' for a project with nothing linked, and a mock shape that
+    // differs from the real one is how #47 shipped a broken query (#58).
+    github_repo: project.github_repo ?? '',
     team_id: team ? team.id : null,
     formed_at: team ? team.formed_at : null,
     members,

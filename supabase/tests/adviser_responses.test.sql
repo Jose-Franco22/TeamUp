@@ -26,8 +26,12 @@ select set_config('tests.r_pm', (select id from public.roles where name = 'Proje
 select set_config('tests.r_be', (select id from public.roles where name = 'Backend Developer')::text, true);
 
 -- Only accounts on the CS faculty directory can be asked to advise
--- (44_faculty_advisers.sql, which merged alongside this file). These three
--- are the ones this file invites; everyone else stays a student.
+-- (44_faculty_advisers.sql), and every account this file asks goes through
+-- invite_adviser(). #99 added that rule after this file had already passed
+-- CI on its own branch, so the two only met on Testing. The ones expected
+-- to be refused for other reasons stay refused for those reasons: the
+-- faculty check runs after the self and team checks, so their messages are
+-- unchanged.
 insert into public.faculty_directory (email) values
   ('adviser54@utrgv.edu'), ('other54@utrgv.edu'), ('seeker54@utrgv.edu');
 
