@@ -19,7 +19,7 @@ import {
   setProjectRepo,
   setSessionUserId,
 } from './client';
-import { projects, repoActivity, repoActivityFor } from './mockData';
+import { adviserRequests, projects, repoActivity, repoActivityFor } from './mockData';
 import { ValidationError } from '../lib/validation';
 import { WINDOW_DAYS } from '../lib/github';
 
@@ -190,6 +190,34 @@ describe('getRepoActivity', () => {
   test('nor does someone on a different team', async () => {
     setSessionUserId('u-maria'); // on t-scam
     expect(await getRepoActivity(PARKING)).toBeNull();
+  });
+
+  // repo_activity_select_team lets the accepted adviser read it too. Dana
+  // advises p-parking (ar-1) without being on its team.
+  test("the project's accepted adviser reads it as well", async () => {
+    setSessionUserId('u-dana');
+    expect((await getRepoActivity(PARKING)).repo).toBe(REPO);
+  });
+
+  test('but not once they stop advising it', async () => {
+    const row = adviserRequests.find((r) => r.id === 'ar-1');
+    row.status = 'cancelled';
+    try {
+      setSessionUserId('u-dana');
+      expect(await getRepoActivity(PARKING)).toBeNull();
+    } finally {
+      row.status = 'accepted';
+    }
+  });
+
+  // Refreshing stays the team's: project_repo_for_refresh() checks the
+  // roster only, so an adviser reads the cache but cannot spend GitHub calls.
+  test('an adviser still cannot refresh it', async () => {
+    setSessionUserId('u-dana');
+    await expect(refreshRepoActivity(PARKING)).resolves.toMatchObject({
+      ok: false,
+      reason: 'not_on_team',
+    });
   });
 
   // The normal state of a repository linked a moment ago. The page asks for

@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
     // The database's floor under forced refreshes: one a minute per
     // project, claimed before any GitHub request is spent rather than
     // stamped after one comes back. See touch_repo_activity() in
-    // supabase/45_github_activity.sql for why the stamp lives on `projects`.
+    // supabase/41_github_activity.sql for why the stamp lives on `projects`.
     claimForce: async () => {
       const { data, error } = await admin.rpc('touch_repo_activity', {
         p_project_id: projectId,
@@ -177,7 +177,9 @@ Deno.serve(async (req) => {
   } catch (error) {
     // Only a code goes back; the details stay in the log, and nothing that
     // could be quoting the Authorization header is returned at all.
-    const aborted = error instanceof DOMException && error.name === 'AbortError';
+    // Asked of the signal, not the error: activity.js rethrows whatever the
+    // abort surfaced as, which is not always a DOMException.
+    const aborted = controller.signal.aborted;
     console.error('github-activity:', aborted ? 'timed out' : error);
     return json({ error: aborted ? 'timeout' : 'unreachable' }, 502);
   } finally {

@@ -36,7 +36,7 @@ const PER_PAGE = 100;
 const API = 'https://api.github.com';
 
 // Mirrors CANONICAL_REPO_PATTERN in frontend/src/lib/github.js, and
-// projects_github_repo_format_check in supabase/45_github_activity.sql.
+// projects_github_repo_format_check in supabase/41_github_activity.sql.
 //
 // Strict on purpose. The lenient reading of whatever somebody pasted happens
 // once, in the browser, and set_project_repo() stores only the canonical
@@ -198,6 +198,13 @@ async function fetchPages({ path, token, fetchImpl, signal }) {
  * no commits yet is the normal state of a team that has just linked one, and
  * it reports as an empty window rather than an error.
  */
+// A timeout is not a fact about the repository, so it is not answered like
+// one. When the caller's signal fires, the abort is rethrown instead of being
+// folded into 'unreachable': getActivity() then writes nothing, the last good
+// row keeps its old fetched_at (so the next visit tries again rather than
+// serving the failure for CACHE_MINUTES), and index.ts reports 'timeout'.
+// Checked on the signal rather than the error's name, since an abort can
+// surface from fetch() or from reading the body, as different error types.
 export async function collectActivity({
   repo,
   token = null,
@@ -220,7 +227,8 @@ export async function collectActivity({
       fetchImpl,
       signal,
     });
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     // Nothing of the request is reported: an error message from fetch can
     // quote the URL, and the Authorization header must never ride along.
     return { ok: false, reason: 'unreachable' };
@@ -238,7 +246,8 @@ export async function collectActivity({
       fetchImpl,
       signal,
     });
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return { ok: false, reason: 'unreachable' };
   }
   // Commits already worked, so a failure here is partial rather than total:

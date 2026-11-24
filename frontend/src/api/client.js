@@ -1883,9 +1883,16 @@ async function fetchLeaveRules() {
 // { ok: false, reason } the way lib/matching/judge.js does, and the page
 // shows a sentence beside the table instead of replacing it with an error.
 
-// The membership test that `repo_activity`'s select policy and
-// project_repo_for_refresh() both make server-side is mockOnProjectTeam(),
-// defined with the adviser helpers above — #54 got there first.
+// The membership and adviser tests that `repo_activity`'s select policy
+// makes server-side are mockOnProjectTeam() and mockAdvisesProject(), both
+// defined with the other adviser helpers above.
+//
+// This section carried its own copies under other names, deliberately: #54
+// and #58 were open at the same time, they are added far apart in this file
+// so git merges them without a conflict, and two top-level declarations of
+// one name are a SyntaxError that would break the build on whichever PR
+// merged second. Both comments said the second one in should fold rather
+// than keep a twin. #54 is on Testing now, so this is that fold.
 
 /**
  * Links a repository, changes it, or unlinks with ''.
@@ -1941,9 +1948,10 @@ export async function getRepoActivity(projectId) {
     await delay();
     const id = requireSessionUserId();
     // The select policy, restated: who committed how much is the team's
-    // business. Returning null rather than throwing matches what the real
-    // query does for a row RLS hides.
-    if (!mockOnProjectTeam(projectId, id)) return null;
+    // business, and its accepted adviser's. Returning null rather than
+    // throwing matches what the real query does for a row RLS hides.
+    //
+    if (!mockOnProjectTeam(projectId, id) && !mockAdvisesProject(id, projectId)) return null;
     const row = repoActivityFor(projectId);
     return row ? { ...row, contributors: row.contributors.map((c) => ({ ...c })) } : null;
   }

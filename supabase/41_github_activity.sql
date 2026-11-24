@@ -4,17 +4,17 @@
 -- the one thing #58 could not state until #88 had merged, and it has.
 -- Nothing here depends on 40 or above.
 --
--- 45, AND THIS IS THE SECOND MOVE. Jose's #91 review asked for one of this
--- file and #93 to give up 41, and since #91 was the blocked one, this file
--- moved to 42. Then #93 merged as `42_check_ins.sql` and took that too,
--- followed by 43 and 44. So it moves again, to the first number above
--- everything on Testing.
+-- 41, AFTER GOING AROUND IN A CIRCLE. Jose's #91 review asked for one of
+-- this file and #93 to give up 41. #91 was the blocked one, so this file
+-- took 42 — and then #93 merged as `42_check_ins.sql` and took 42 as well,
+-- followed by 43 and 44. Which leaves 41 free after all, and this file back
+-- where it started.
 --
--- The lesson is not "pick a bigger number", it is that a number claimed by
--- an open PR is not claimed at all until it merges. Nothing here depends on
--- anything above 39, so this file is correct at any number above it, and
--- taking the highest free one is simply the choice that needs no argument
--- with whoever merges next. Gaps are normal: 25, 38 and 41 are all absent.
+-- The lesson is not a number. It is that a number claimed by an open PR is
+-- not claimed at all until that PR merges, so the only safe time to settle
+-- one is after. Nothing here depends on anything above 39, so any free
+-- number above 39 is correct; gaps are normal, and 25 and 38 are both
+-- absent from Testing already.
 --
 -- Three pieces:
 --
@@ -439,8 +439,24 @@ set search_path = public
 as $$
 declare
   v_row public.repo_activity;
+  v_current text;
 begin
-  if not exists (select 1 from public.projects where id = p_project_id) then
+  -- `for share`, held to the end of this transaction, is what makes the
+  -- check below mean anything. Without it the link is read, then the row is
+  -- written, and a set_project_repo() committing in between deletes the
+  -- cache only for this insert to put the old repository's row straight back
+  -- (#91 review, second round). set_project_repo() updates this projects row,
+  -- which a share lock blocks, so the two now take turns: if it got there
+  -- first, this waits and then reads the new link; if this got there first,
+  -- it waits and its delete runs after the insert.
+  --
+  -- `for share` rather than `for key share`: changing github_repo is not a
+  -- key update, so a key-share lock would not block it.
+  select github_repo into v_current
+    from public.projects
+   where id = p_project_id
+     for share;
+  if not found then
     raise exception 'Project not found';
   end if;
 
@@ -463,9 +479,7 @@ begin
   --
   -- Before the CHECK constraints rather than after, since a payload aimed
   -- at a repository nobody is looking at any more is not worth validating.
-  if p_repo is distinct from (
-    select github_repo from public.projects where id = p_project_id
-  ) then
+  if p_repo is distinct from v_current then
     return null;
   end if;
 
