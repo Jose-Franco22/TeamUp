@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import Announcements from './Announcements';
 import { setSessionUserId } from '../api/client';
 import { announcements, announcementsSeenAt, milestones } from '../api/mockData';
@@ -25,16 +25,23 @@ function seed() {
   });
 }
 
+// A stand-in team page that shows which deliverable it was sent to.
+function TeamStandIn() {
+  const { hash } = useLocation();
+  return <h1>Team page {hash}</h1>;
+}
+
 function renderPage(as) {
   viewer = as;
   setSessionUserId(as.id);
-  // The Milestones route is a stand-in, there so a test can see the page
-  // actually move rather than trusting a mocked navigate().
+  // The Milestones and Team routes are stand-ins, there so a test can see
+  // the page actually move rather than trusting a mocked navigate().
   render(
     <MemoryRouter initialEntries={['/announcements']}>
       <Routes>
         <Route path="/announcements" element={<Announcements />} />
         <Route path="/admin/milestones" element={<h1>Milestones page</h1>} />
+        <Route path="/team" element={<TeamStandIn />} />
       </Routes>
     </MemoryRouter>
   );
@@ -179,4 +186,33 @@ test('HTML and SQL in an announcement are shown as text, never run', async () =>
   expect(within(posts).getByRole('heading', { name: "Robert'); DROP TABLE announcements; --" })).toBeInTheDocument();
   expect(document.querySelector('img, script')).toBeNull();
   expect(window.__pwned).toBeUndefined();
+});
+
+// --- deliverables on the schedule (#57) ----------------------------------------
+// A student reading a deadline that takes a deliverable is told so, and
+// given the way to the form; before this, nothing on the page said either.
+
+test('a deadline that takes a deliverable says so, and a student can go and hand it in', async () => {
+  milestones.find((m) => m.id === 'ms-1').requires_deliverable = true;
+  const user = userEvent.setup();
+  renderPage(STUDENT);
+
+  const list = await screen.findByRole('list', { name: 'Upcoming deadlines' });
+  const proposal = within(list).getByText('Proposal due', { selector: 'h3' }).closest('li');
+  const teams = within(list).getByText('Teams due', { selector: 'h3' }).closest('li');
+  expect(within(proposal).getByText('Deliverable')).toBeInTheDocument();
+  expect(within(teams).queryByText('Deliverable')).not.toBeInTheDocument();
+  expect(within(teams).queryByRole('button', { name: /Hand it in/ })).not.toBeInTheDocument();
+
+  await user.click(within(proposal).getByRole('button', { name: 'Hand it in: Proposal due' }));
+  expect(await screen.findByRole('heading', { name: 'Team page #deliverable-ms-1' })).toBeInTheDocument();
+});
+
+test('an admin sees which deadlines take a deliverable, but is not offered to hand one in', async () => {
+  milestones.find((m) => m.id === 'ms-1').requires_deliverable = true;
+  await renderLoadedPage(ADMIN);
+
+  const list = screen.getByRole('list', { name: 'Upcoming deadlines' });
+  expect(within(list).getByText('Deliverable')).toBeInTheDocument();
+  expect(within(list).queryByRole('button', { name: /Hand it in/ })).not.toBeInTheDocument();
 });

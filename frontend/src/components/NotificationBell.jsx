@@ -30,8 +30,10 @@ export const LINKS = {
   // Only sent to members of a formed team (#55), and the form is on their
   // team page.
   check_in_reminder: '/team',
-  // To the project's adviser (#57). /team is where #54 (PR #90) lists the
-  // teams someone advises; until it lands this is where they'd look anyway.
+  // #57. Feedback goes to the team, whose deliverables are on their team
+  // page; a submission goes to the adviser, whose advised teams (#54) are
+  // listed on that same page.
+  deliverable_feedback: '/team',
   deliverable_submitted: '/team',
   join_request: '/requests',
   member_left: '/team',
@@ -76,6 +78,10 @@ export function notificationText(n) {
     // posted this week's check-in.
     case 'check_in_reminder':
       return `You haven't checked in for ${project} this week — post a quick update before Sunday`;
+    // Covers a comment and a decision alike: the row doesn't say which, and
+    // the team page shows the verdict where it can't go stale.
+    case 'deliverable_feedback':
+      return `${n.actor_name} left feedback on a deliverable for ${project}`;
     case 'deliverable_submitted':
       return `${n.actor_name} submitted a deliverable for ${project}`;
     case 'join_request':

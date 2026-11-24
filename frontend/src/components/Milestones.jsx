@@ -20,6 +20,39 @@ export function toLocalInput(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// --- Deliverables on the schedule (#57) ---------------------------------------
+// A milestone that takes a deliverable says so wherever the schedule is
+// shown, and offers students the way to hand it in. Without this, a student
+// reading the deadline had no way to know there was anything to submit, or
+// that the form lives in the Deliverables card on their team page.
+
+export function DeliverableTag() {
+  return <span className="pill info">Deliverable</span>;
+}
+
+// The hash names the milestone, and the Deliverables card on the team page
+// scrolls that one into view once it has loaded, so nobody has to go
+// looking for it below the roster.
+export function deliverableAnchor(milestoneId) {
+  return `deliverable-${milestoneId}`;
+}
+
+export function HandItInButton({ milestoneId, milestoneName }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      className="btn ghost hand-it-in"
+      onClick={() => navigate(`/team#${deliverableAnchor(milestoneId)}`)}
+      // Starts with the visible words, so speech input still finds it, and
+      // names the milestone, since a list can hold several of these.
+      aria-label={`Hand it in: ${milestoneName}`}
+    >
+      Hand it in
+    </button>
+  );
+}
+
 // --- Student banner --------------------------------------------------------
 
 // A countdown to the next deadline (#22), the next few milestones, and
@@ -86,9 +119,12 @@ export function MilestoneBanner({ limit = 3 }) {
               <span className="milestone-name">
                 {m.name}
                 {m.is_formation_deadline && <span className="pill warn">Rosters lock</span>}
+                {m.requires_deliverable && <DeliverableTag />}
               </span>
               <span className="milestone-due">{formatDue(m.due_at)}</span>
               {m.message && <p className="milestone-message">{m.message}</p>}
+              {/* The banner only ever shows to students (App.jsx). */}
+              {m.requires_deliverable && <HandItInButton milestoneId={m.id} milestoneName={m.name} />}
             </li>
           ))}
         </ul>

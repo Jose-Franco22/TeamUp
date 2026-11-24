@@ -40,13 +40,25 @@ export const COMMENT_EMPTY = 'Write a comment first';
 export const COMMENT_TOO_LONG = `Keep the comment to ${COMMENT_MAX} characters or fewer`;
 export const BAD_COMMENT = "The comment can't contain hidden or control characters";
 
+// The adviser's review (review_deliverable() in the migration).
+export const DECISIONS = ['approved', 'changes_requested'];
+export const ONLY_ADVISER_DECIDES = "Only the project's adviser can approve or request changes";
+export const BAD_DECISION = 'Choose Approved or Changes requested';
+export const NOTE_REQUIRED = 'Say what needs to change';
+export const NOTHING_TO_REVIEW = 'Nothing has been submitted to review yet';
+export const NEWER_VERSION = 'A newer version has been submitted since — review that one';
+
 // Same character classes as the SQL: control characters, and the invisible
 // ones (zero-width, bidirectional overrides) that make a name read
-// differently from what's stored — "Report‮xcod.docx" shows as
+// differently from what's stored — "Report\u202Excod.docx" shows as
 // "Reportdocx.exe".
-const CONTROL = /[\x00-\x1F\x7F]/;
-const COMMENT_CONTROL = /[\x01-\x08\x0B-\x1F\x7F]/;
-const INVISIBLE = /[​-‏‪-‮⁠-⁩﻿]/;
+// C0 and C1 controls, the same ranges submit_deliverable() and the comment
+// cleaner spell out. The C1 block (\x80–\x9F) matters: before it was here,
+// such a file name passed the browser, uploaded up to 25 MB, and was only
+// then refused by the database.
+const CONTROL = /[\x00-\x1F\x7F-\x9F]/;
+const COMMENT_CONTROL = /[\x01-\x08\x0B-\x1F\x7F-\x9F]/;
+const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/;
 
 // Trimmed first: "Report.docx " must give 'docx', not 'docx ', or the upload
 // path stops matching the policy's pattern and the content type is lost.
@@ -92,6 +104,15 @@ export function validateComment(raw) {
   if ([...body].length > COMMENT_MAX) return COMMENT_TOO_LONG;
   if (COMMENT_CONTROL.test(body) || INVISIBLE.test(body)) return BAD_COMMENT;
   return null;
+}
+
+// review_deliverable()'s order: the decision, then the note. An approval may
+// come with no note; Changes requested always says what to change.
+export function validateReview(decision, raw) {
+  if (!DECISIONS.includes(decision)) return BAD_DECISION;
+  const body = normaliseComment(raw);
+  if (body === '') return decision === 'approved' ? null : NOTE_REQUIRED;
+  return validateComment(body);
 }
 
 // What each status reads as. 'not_submitted' isn't stored anywhere: it is a

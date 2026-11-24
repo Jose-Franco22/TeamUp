@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MilestoneBanner, MilestoneManager } from './Milestones';
 import { setSessionUserId } from '../api/client';
 import { deliverableSubmissions, milestones } from '../api/mockData';
@@ -201,6 +201,41 @@ test('the banner’s "All deadlines and announcements" is a button that opens An
   await user.click(within(banner).getByRole('button', { name: 'All deadlines and announcements' }));
 
   expect(await screen.findByRole('heading', { name: 'Announcements page' })).toBeInTheDocument();
+});
+
+// A stand-in team page that shows which deliverable it was sent to.
+function TeamStandIn() {
+  const { hash } = useLocation();
+  return <h1>Team page {hash}</h1>;
+}
+
+// #57: a deadline that takes a deliverable says so in the banner, with the
+// way to the form on the team page; one that doesn't, doesn't.
+test('the banner tags a deliverable and offers "Hand it in", which opens the team page', async () => {
+  milestones.push(
+    { id: 'ms-d', name: 'Proposal due', due_at: '2098-11-01T17:00:00Z', is_formation_deadline: false, message: '', requires_deliverable: true },
+    { id: 'ms-n', name: 'Demo day', due_at: '2098-11-08T17:00:00Z', is_formation_deadline: false, message: '' }
+  );
+  setSessionUserId('u-adan');
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter initialEntries={['/browse']}>
+      <Routes>
+        <Route path="/browse" element={<MilestoneBanner />} />
+        <Route path="/team" element={<TeamStandIn />} />
+      </Routes>
+    </MemoryRouter>
+  );
+  const banner = await screen.findByRole('region', { name: 'Upcoming deadlines' });
+  const proposal = within(banner).getByText('Proposal due', { selector: '.milestone-name' }).closest('li');
+  const demo = within(banner).getByText('Demo day', { selector: '.milestone-name' }).closest('li');
+  expect(within(proposal).getByText('Deliverable')).toBeInTheDocument();
+  expect(within(demo).queryByText('Deliverable')).not.toBeInTheDocument();
+  expect(within(demo).queryByRole('button', { name: /Hand it in/ })).not.toBeInTheDocument();
+
+  await user.click(within(proposal).getByRole('button', { name: 'Hand it in: Proposal due' }));
+
+  expect(await screen.findByRole('heading', { name: 'Team page #deliverable-ms-d' })).toBeInTheDocument();
 });
 
 // --- Issue #22: the countdown to the next deadline -------------------------

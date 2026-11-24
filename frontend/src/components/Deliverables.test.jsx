@@ -14,6 +14,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import Deliverables from './Deliverables';
 import * as client from '../api/client';
 
@@ -23,7 +24,8 @@ vi.mock('../api/client', async (importOriginal) => {
     ...actual,
     getDeliverables: vi.fn(),
     submitDeliverable: vi.fn(),
-    getDeliverableFileUrl: vi.fn(),
+    getDeliverableFileUrls: vi.fn(),
+    reviewDeliverable: vi.fn(),
     postDeliverableComment: vi.fn(),
   };
 });
@@ -75,12 +77,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   client.getDeliverables.mockResolvedValue([deliverable()]);
   client.submitDeliverable.mockResolvedValue({ version: 1, is_late: false });
-  client.getDeliverableFileUrl.mockResolvedValue('https://storage.example/signed');
+  client.getDeliverableFileUrls.mockResolvedValue({});
+  client.reviewDeliverable.mockResolvedValue({});
   client.postDeliverableComment.mockResolvedValue({});
 });
 
 async function renderList() {
-  render(<Deliverables projectId="p-parking" />);
+  render(<MemoryRouter><Deliverables projectId="p-parking" /></MemoryRouter>);
   return screen.findByRole('region', { name: 'Deliverables' });
 }
 
@@ -242,18 +245,20 @@ describe('version history', () => {
     version(2, { is_late: true, status: 'changes_requested', submitted_by_name: 'Nicolas Guerra' }),
     version(1),
   ];
+  const LINKS = { 'v-2': 'https://storage.example/v2?token=a', 'v-1': 'https://storage.example/v1?token=b' };
 
   test('lists every earlier version, newest first, with who submitted it', async () => {
     client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: THREE })]);
+    client.getDeliverableFileUrls.mockResolvedValue(LINKS);
     await renderList();
     const history = screen.getByRole('list', { name: 'Versions of Project proposal' });
     const rows = within(history).getAllByRole('listitem');
 
     expect(rows.map((r) => within(r).getByText(/^Version \d$/).textContent)).toEqual(['Version 3', 'Version 2', 'Version 1']);
     expect(within(rows[0]).getByRole('link', { name: 'https://docs.example.edu/v3' })).toHaveAttribute('href', 'https://docs.example.edu/v3');
-    expect(within(rows[1]).getByRole('button', { name: 'Download Proposal v2.pdf' })).toBeInTheDocument();
+    expect(await within(rows[1]).findByRole('link', { name: 'Download Proposal v2.pdf' })).toBeInTheDocument();
     expect(within(rows[1]).getByText(/Nicolas Guerra/)).toBeInTheDocument();
-    expect(within(rows[2]).getByRole('button', { name: 'Download Proposal v1.pdf' })).toBeInTheDocument();
+    expect(within(rows[2]).getByRole('link', { name: 'Download Proposal v1.pdf' })).toBeInTheDocument();
   });
 
   test('each version keeps its own late label and status', async () => {
@@ -266,25 +271,41 @@ describe('version history', () => {
     expect(within(rows[2]).queryByText('Late')).not.toBeInTheDocument();
   });
 
-  test('downloading asks for a signed URL for that version', async () => {
+  // #95 review: the download used to be a button that awaited a URL and then
+  // called window.open(), outside the click's user gesture — Safari, Firefox
+  // and mobile blocked it and nothing happened. It has to be a real link with
+  // its URL already in place before anyone clicks.
+  test('a stored file is a real link with its URL in place before the click — no window.open', async () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: THREE })]);
-    const user = userEvent.setup();
+    client.getDeliverableFileUrls.mockResolvedValue(LINKS);
     await renderList();
-    await user.click(screen.getByRole('button', { name: 'Download Proposal v1.pdf' }));
-    expect(client.getDeliverableFileUrl).toHaveBeenCalledWith('p-parking/ms-prop/1.pdf', 'Proposal v1.pdf');
-    await waitFor(() => expect(open).toHaveBeenCalledWith('https://storage.example/signed', '_blank', 'noopener'));
+
+    const download = await screen.findByRole('link', { name: 'Download Proposal v1.pdf' });
+    expect(download.tagName).toBe('A');
+    expect(download).toHaveAttribute('href', 'https://storage.example/v1?token=b');
+    expect(download).toHaveAttribute('download', 'Proposal v1.pdf');
+    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument();
+    expect(open).not.toHaveBeenCalled();
     open.mockRestore();
   });
 
-  test('a refused download says so next to that version', async () => {
-    client.getDeliverableFileUrl.mockRejectedValue(new Error("That file isn't available to you"));
+  test('links are minted up front, for every version, in one call', async () => {
     client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: THREE })]);
-    const user = userEvent.setup();
+    client.getDeliverableFileUrls.mockResolvedValue(LINKS);
     await renderList();
-    await user.click(screen.getByRole('button', { name: 'Download Proposal v2.pdf' }));
+    await waitFor(() => expect(client.getDeliverableFileUrls).toHaveBeenCalledTimes(1));
+    expect(client.getDeliverableFileUrls).toHaveBeenCalledWith(THREE);
+  });
+
+  test('a file that could not get a link says so next to it, and is not a dead link', async () => {
+    client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: THREE })]);
+    client.getDeliverableFileUrls.mockResolvedValue({ 'v-2': null, 'v-1': LINKS['v-1'] });
+    await renderList();
     const rows = within(screen.getByRole('list', { name: 'Versions of Project proposal' })).getAllByRole('listitem');
-    expect(await within(rows[1]).findByRole('alert')).toHaveTextContent("That file isn't available to you");
+    expect(await within(rows[1]).findByRole('alert')).toHaveTextContent('can’t be downloaded right now');
+    expect(within(rows[1]).queryByRole('link')).not.toBeInTheDocument();
+    expect(within(rows[1]).getByText('Proposal v2.pdf')).toBeInTheDocument();
   });
 
   test('a stored link that is not http(s) is shown as text, never as a link', async () => {
@@ -302,7 +323,51 @@ describe('version history', () => {
   });
 });
 
-// --- the thread, and who reviews ------------------------------------------------
+// --- a refresh that fails after a write ------------------------------------------
+// #95 review: a submission that saved, followed by a reload that failed,
+// used to swap the whole card for an error — the history vanished and the
+// success message with it, so students resubmitted. The list has to stay.
+
+describe('a refresh that fails after a write', () => {
+  test('after a submit, the list stays on screen and the message says it is stale', async () => {
+    client.getDeliverables
+      .mockResolvedValueOnce([deliverable({ status: 'submitted', versions: [version(1)] })])
+      .mockRejectedValueOnce(new Error('Network error'));
+    client.submitDeliverable.mockResolvedValue({ version: 2, is_late: false });
+    const user = userEvent.setup({ applyAccept: false });
+    await renderList();
+
+    await user.upload(screen.getByLabelText('File'), fileOf('Proposal v2.pdf', MB, 'application/pdf'));
+    await user.click(screen.getByRole('button', { name: 'Submit a new version' }));
+
+    const status = await screen.findByText(/Version 2 submitted\./);
+    await waitFor(() => expect(status).toHaveTextContent('couldn’t be refreshed'));
+    expect(screen.getByRole('list', { name: 'Versions of Project proposal' })).toBeInTheDocument();
+    expect(screen.queryByText('Network error')).not.toBeInTheDocument();
+  });
+
+  test('after a reply, the thread stays on screen and says it is stale', async () => {
+    client.getDeliverables
+      .mockResolvedValueOnce([
+        deliverable({
+          status: 'submitted',
+          versions: [version(1)],
+          comments: [{ id: 'c1', author_id: 'u-jose', author_name: 'Jose Franco Garza', body: 'First.', decision: null, version: 1, created_at: '2026-10-02T10:00:00Z' }],
+        }),
+      ])
+      .mockRejectedValueOnce(new Error('Network error'));
+    const user = userEvent.setup();
+    await renderList();
+
+    await user.type(screen.getByLabelText('Reply'), 'Second.');
+    await user.click(screen.getByRole('button', { name: 'Post reply' }));
+
+    expect(await screen.findByText(/Posted\. The list below couldn’t be refreshed/)).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Comments on Project proposal' })).toHaveTextContent('First.');
+  });
+});
+
+// --- the thread ------------------------------------------------------------------
 
 describe('the thread', () => {
   test('shows the comments and posts a reply', async () => {
@@ -333,18 +398,105 @@ describe('the thread', () => {
     expect(client.postDeliverableComment).not.toHaveBeenCalled();
   });
 
-  test('the team is not offered Approve or Request changes', async () => {
-    client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: [version(1)] })]);
+  test('an adviser’s decision shows in the thread with its badge', async () => {
+    client.getDeliverables.mockResolvedValue([
+      deliverable({
+        status: 'approved',
+        versions: [version(1, { status: 'approved' })],
+        comments: [{ id: 'c1', author_id: 'u-dana', author_name: 'Dana Kim', body: '', decision: 'approved', version: 1, created_at: '2026-10-03T10:00:00Z' }],
+      }),
+    ]);
     await renderList();
-    expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /request changes/i })).not.toBeInTheDocument();
+    const thread = screen.getByRole('list', { name: 'Comments on Project proposal' });
+    expect(within(thread).getByText('Dana Kim')).toBeInTheDocument();
+    expect(within(thread).getByText('Approved')).toHaveAttribute('data-status', 'approved');
+  });
+});
+
+// --- who reviews -------------------------------------------------------------------
+
+async function renderAsAdviser() {
+  render(<MemoryRouter><Deliverables projectId="p-parking" asAdviser /></MemoryRouter>);
+  return screen.findByRole('region', { name: 'Deliverables' });
+}
+
+describe('the review controls', () => {
+  const TWO = [version(2), version(1)];
+
+  test('a student is not offered Approve or Request changes, and does get the submit form', async () => {
+    client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: TWO })]);
+    await renderList();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Request changes' })).not.toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'Submit Project proposal' })).toBeInTheDocument();
+  });
+
+  test('the adviser is offered both, for the newest version, and no submit form', async () => {
+    client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: TWO })]);
+    await renderAsAdviser();
+    const panel = screen.getByRole('group', { name: 'Review version 2 of Project proposal' });
+    expect(within(panel).getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Request changes' })).toBeInTheDocument();
+    expect(screen.queryByRole('form', { name: 'Submit Project proposal' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('File')).not.toBeInTheDocument();
+  });
+
+  test('with nothing submitted yet, the adviser has nothing to decide on', async () => {
+    await renderAsAdviser();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.getByText('Nothing has been submitted for this yet.')).toBeInTheDocument();
+  });
+
+  test('Approve sends the version on screen, tells the adviser the team was told, and reloads', async () => {
+    client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: TWO })]);
+    client.reviewDeliverable.mockResolvedValue({});
+    const user = userEvent.setup();
+    await renderAsAdviser();
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(client.reviewDeliverable).toHaveBeenCalledWith('p-parking', 'ms-prop', 2, 'approved', '');
+    expect(await screen.findByText('Approved version 2. The team has been told.')).toBeInTheDocument();
+    await waitFor(() => expect(client.getDeliverables).toHaveBeenCalledTimes(2));
+  });
+
+  test('Request changes without a note is stopped before it is sent; with one it goes', async () => {
+    client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: TWO })]);
+    client.reviewDeliverable.mockResolvedValue({});
+    const user = userEvent.setup();
+    await renderAsAdviser();
+
+    await user.click(screen.getByRole('button', { name: 'Request changes' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Say what needs to change');
+    expect(client.reviewDeliverable).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText(/Note to the team/), 'Split the risks by owner.');
+    await user.click(screen.getByRole('button', { name: 'Request changes' }));
+    expect(client.reviewDeliverable).toHaveBeenCalledWith('p-parking', 'ms-prop', 2, 'changes_requested', 'Split the risks by owner.');
+  });
+
+  test('a refusal from the server is shown — e.g. a newer version arrived meanwhile', async () => {
+    client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: TWO })]);
+    client.reviewDeliverable.mockRejectedValue(new Error('A newer version has been submitted since — review that one'));
+    const user = userEvent.setup();
+    await renderAsAdviser();
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version has been submitted since');
+  });
+
+  test('the adviser comments rather than replies', async () => {
+    client.getDeliverables.mockResolvedValue([deliverable({ status: 'submitted', versions: TWO })]);
+    const user = userEvent.setup();
+    await renderAsAdviser();
+    await user.type(screen.getByLabelText('Comment'), 'Looks close.');
+    await user.click(screen.getByRole('button', { name: 'Post comment' }));
+    expect(client.postDeliverableComment).toHaveBeenCalledWith('p-parking', 'ms-prop', 'Looks close.');
   });
 });
 
 describe('around it', () => {
   test('renders nothing when no milestone needs a deliverable', async () => {
     client.getDeliverables.mockResolvedValue([]);
-    const { container } = render(<Deliverables projectId="p-parking" />);
+    const { container } = render(<MemoryRouter><Deliverables projectId="p-parking" /></MemoryRouter>);
     await waitFor(() => expect(client.getDeliverables).toHaveBeenCalled());
     await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
@@ -353,5 +505,79 @@ describe('around it', () => {
     client.getDeliverables.mockRejectedValue(new Error('Only this team, its adviser and admins can see its deliverables'));
     await renderList();
     expect(await screen.findByRole('alert')).toHaveTextContent('Only this team, its adviser and admins can see its deliverables');
+  });
+});
+
+// --- arriving from "Hand it in" ---------------------------------------------------
+// Announcements and the deadline banner send students to
+// /team#deliverable-<milestone>. The card brings that deliverable into view
+// and puts focus on its heading, so nobody scrolls looking for it.
+
+describe('arriving from "Hand it in"', () => {
+  const TWO_MILESTONES = [
+    deliverable({ milestone_id: 'ms-prop', name: 'Project proposal' }),
+    deliverable({ milestone_id: 'ms-final', name: 'Final report' }),
+  ];
+  let scrolled;
+  beforeEach(() => {
+    scrolled = [];
+    // jsdom has no scrollIntoView; record which element asked, and how.
+    Element.prototype.scrollIntoView = vi.fn(function scrollIntoView(options) {
+      scrolled.push({ id: this.id, options });
+    });
+  });
+
+  function renderAt(entry, props = {}) {
+    render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Deliverables projectId="p-parking" {...props} />
+      </MemoryRouter>
+    );
+  }
+
+  test('scrolls the named deliverable into view, smoothly, and focuses its heading', async () => {
+    client.getDeliverables.mockResolvedValue(TWO_MILESTONES);
+    renderAt('/team#deliverable-ms-final');
+
+    await waitFor(() => expect(scrolled).toEqual([{ id: 'deliverable-ms-final', options: { behavior: 'smooth', block: 'start' } }]));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Final report' }));
+  });
+
+  test('jumps instead of animating for someone who asked for reduced motion', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn((query) => ({ matches: query.includes('prefers-reduced-motion'), media: query }));
+    client.getDeliverables.mockResolvedValue(TWO_MILESTONES);
+    renderAt('/team#deliverable-ms-final');
+    await waitFor(() => expect(scrolled).toEqual([{ id: 'deliverable-ms-final', options: { behavior: 'auto', block: 'start' } }]));
+    window.matchMedia = original;
+  });
+
+  test('without a hash, the page stays where it is', async () => {
+    client.getDeliverables.mockResolvedValue(TWO_MILESTONES);
+    renderAt('/team');
+    await screen.findByRole('article', { name: 'Final report' });
+    expect(scrolled).toEqual([]);
+  });
+
+  test('a refresh after a write does not scroll the page back', async () => {
+    client.getDeliverables.mockResolvedValue(TWO_MILESTONES);
+    const user = userEvent.setup();
+    renderAt('/team#deliverable-ms-final');
+    await waitFor(() => expect(scrolled).toHaveLength(1));
+
+    const finalReport = screen.getByRole('article', { name: 'Final report' });
+    await user.type(within(finalReport).getByLabelText('Reply'), 'On it.');
+    await user.click(within(finalReport).getByRole('button', { name: 'Post reply' }));
+    await waitFor(() => expect(client.getDeliverables).toHaveBeenCalledTimes(2));
+
+    expect(scrolled).toHaveLength(1);
+  });
+
+  test('the adviser’s view of a team carries no anchors, so it is never the target', async () => {
+    client.getDeliverables.mockResolvedValue(TWO_MILESTONES);
+    renderAt('/team#deliverable-ms-final', { asAdviser: true });
+    await screen.findByRole('article', { name: 'Final report' });
+    expect(document.getElementById('deliverable-ms-final')).toBeNull();
+    expect(scrolled).toEqual([]);
   });
 });

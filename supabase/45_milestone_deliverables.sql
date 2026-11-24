@@ -1,28 +1,26 @@
--- Milestone deliverables (issue #57). Run after 39_project_advisers.sql.
---
--- Numbered 45, not 40: open pull requests already claim 38, 40, 41, 42 and
--- 43, and 44 is left free for whichever of them has to move. On the live
--- database files apply in merge order, not by number, and nothing here
--- depends on 40–43 except the notification kinds restated below.
+-- Milestone deliverables (issue #57). Run after 44_faculty_advisers.sql; it
+-- needs advised_project_ids() from 40_respond_to_adviser_request.sql.
 --
 -- An admin marks a milestone as needing a deliverable; every team then has
 -- one deliverable for it, submitted as a file in Storage or as a link,
 -- resubmitted as often as they like, with a thread underneath for the
--- adviser's feedback and the team's replies.
+-- adviser's feedback and the team's replies. The project's accepted adviser
+-- reads all of it, comments, and marks the newest version Approved or
+-- Changes requested; the team is told when they do.
 --
--- What is NOT in this file yet, so nobody reads its absence as a rule:
+-- Safe to run again: every table and column is `if not exists`, every
+-- policy is dropped first, every function is `create or replace`, and the
+-- bucket row is an upsert. That matters because the frontend reads
+-- milestones.requires_deliverable on every page — this file has to be on
+-- the live database before the frontend that reads it is deployed.
 --
---   THE ADVISER. Reviewing — setting Approved or Changes requested, and
---   commenting as the adviser — needs an accepted adviser, and only #54
---   (PR #90) can produce one. So does the adviser's read access. Both
---   arrive with #90 and use its advised_project_ids() rather than a second
---   way of asking the same question. Until then the only status any
---   function writes is 'submitted', nothing writes deliverable_comments.
---   decision, and can_see_deliverables() below lets in the team and admins
---   and nobody else. The one adviser-facing piece that is here is the
---   'deliverable_submitted' notification: it reads who the project's
---   accepted adviser is, which 39_ already records, rather than what the
---   caller advises, which is #90's question.
+-- WHO IS WHO. "The adviser" always means a row in
+-- public.advised_project_ids() (40_): the caller's accepted adviser_requests.
+-- Nothing here asks the question a second way. Note that since
+-- 44_faculty_advisers.sql an admin on the faculty list can advise, so an
+-- admin-adviser passes can_see_deliverables() twice over — through
+-- is_admin() and through advised_project_ids(). Reading needs either;
+-- reviewing needs the second, and being an admin is never enough on its own.
 --
 -- Decisions worth stating, since none of them is visible as a line of code:
 --
@@ -71,19 +69,26 @@
 --    needs !constraint_name disambiguation — the shape that shipped broken
 --    in #47. One function returns exactly what the team page draws, and the
 --    mock in client.js returns the same thing.
+--
+-- 7. A DECISION IS ABOUT ONE VERSION. review_deliverable() names the version
+--    the adviser looked at and refuses if a newer one has arrived since, so
+--    an approval can't land on work nobody reviewed. It sets that version's
+--    status; earlier versions keep theirs, and the next resubmission starts
+--    at Submitted again.
 begin;
 
--- --- the new kind ---------------------------------------------------------
+-- --- the new kinds --------------------------------------------------------
 -- Rewritten in full, as every migration since 21_ has done: the constraint
--- *is* the list. This is the list from 42_check_ins.sql (PR #93), which is
--- 40_respond_to_adviser_request.sql's (PR #90) plus 'check_in_reminder',
--- plus the one kind below. Listing kinds that have not landed yet costs
--- nothing; leaving them out would make this file narrow the constraint
--- under them if it merged after them. Whichever of these merges last has
--- to restate the union.
+-- *is* the list. This is the list on Testing as 42_check_ins.sql left it —
+-- 44_ adds none — with every kind kept, plus two:
 --
--- 'deliverable_submitted' goes to the project's accepted adviser. The
--- team's notice when the adviser responds arrives with the review half.
+--   'deliverable_submitted' — to the project's accepted adviser, when the
+--                             team hands in a version;
+--   'deliverable_feedback'  — to the team, when the adviser comments or
+--                             decides.
+--
+-- supabase/tests/deliverables.test.sql writes one row of every kind, so a
+-- later rewrite that drops one fails there rather than in production.
 
 alter table public.notifications
   drop constraint if exists notifications_kind_check;
@@ -92,8 +97,8 @@ alter table public.notifications
   add constraint notifications_kind_check
   check (kind in ('adviser_accepted', 'adviser_declined', 'adviser_invited',
                   'adviser_removed', 'adviser_stepped_down', 'check_in_reminder',
-                  'deadline_reminder', 'deliverable_submitted', 'join_request',
-                  'member_added', 'member_assigned', 'member_left',
+                  'deadline_reminder', 'deliverable_feedback', 'deliverable_submitted',
+                  'join_request', 'member_added', 'member_assigned', 'member_left',
                   'member_removed', 'project_removed', 'request_accepted',
                   'request_declined', 'team_complete'));
 
@@ -177,15 +182,27 @@ create table if not exists public.deliverable_comments (
   author_id     uuid
                   constraint deliverable_comments_author_id_fkey
                   references public.users(id) on delete set null,
-  body          text not null
-                  constraint deliverable_comments_body_check
-                  check (char_length(body) between 1 and 2000 and body = btrim(body, E' \t\n')),
-  -- Written only by the adviser's review, which arrives with #90.
+  body          text not null,
+  -- Written only by review_deliverable(), only by the project's adviser.
   decision      text
                   constraint deliverable_comments_decision_check
                   check (decision in ('approved', 'changes_requested')),
   created_at    timestamptz not null default now()
 );
+
+-- Every comment says something, with one exception: an approval may come
+-- with no note, since "Approved" is the whole message. Changes requested
+-- always says what to change (review_deliverable() insists, and so does
+-- this). Dropped and re-added rather than declared inline, so running this
+-- file over an earlier copy of it replaces the old, stricter rule.
+alter table public.deliverable_comments
+  drop constraint if exists deliverable_comments_body_check;
+alter table public.deliverable_comments
+  add constraint deliverable_comments_body_check
+  check (
+    (body = '' and decision = 'approved')
+    or (char_length(body) between 1 and 2000 and body = btrim(body, E' \t\n'))
+  );
 
 create index if not exists deliverable_comments_thread_idx
   on public.deliverable_comments(project_id, milestone_id, created_at);
@@ -213,8 +230,24 @@ as $$
   );
 $$;
 
--- The team and admins. The project's adviser joins them with #90, through
--- advised_project_ids().
+-- The project's accepted adviser: one of the caller's advised_project_ids()
+-- (40_). A pending or declined invitation is not in that set, and neither
+-- is having advised it once and stepped down.
+create or replace function private.is_deliverable_adviser(p_project_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p_project_id in (select public.advised_project_ids());
+$$;
+
+-- The team, its accepted adviser, and admins. This one function is what the
+-- table policies, project_deliverables() and the Storage select policy all
+-- ask, so the rows someone can read and the files they can download can't
+-- drift apart — an adviser who could see the versions but got a 403 on every
+-- download is the failure this prevents.
 create or replace function private.can_see_deliverables(p_project_id uuid)
 returns boolean
 language sql
@@ -222,7 +255,9 @@ stable
 security definer
 set search_path = ''
 as $$
-  select private.is_admin() or private.is_deliverable_team_member(p_project_id);
+  select private.is_admin()
+      or private.is_deliverable_team_member(p_project_id)
+      or private.is_deliverable_adviser(p_project_id);
 $$;
 
 -- The project a stored file belongs to: the first folder of its path, when
@@ -267,10 +302,12 @@ as $$
 $$;
 
 revoke all on function private.is_deliverable_team_member(uuid) from public, anon;
+revoke all on function private.is_deliverable_adviser(uuid) from public, anon;
 revoke all on function private.can_see_deliverables(uuid) from public, anon;
 revoke all on function private.deliverable_path_project(text) from public, anon;
 revoke all on function private.may_upload_deliverable(text) from public, anon;
 grant execute on function private.is_deliverable_team_member(uuid) to authenticated;
+grant execute on function private.is_deliverable_adviser(uuid) to authenticated;
 grant execute on function private.can_see_deliverables(uuid) to authenticated;
 grant execute on function private.deliverable_path_project(text) to authenticated;
 grant execute on function private.may_upload_deliverable(text) to authenticated;
@@ -317,6 +354,11 @@ on conflict (id) do update
 -- There is deliberately no update or delete policy for this bucket — see
 -- decision 2. Policies on storage.objects are shared by every bucket, so
 -- each one names its bucket first.
+--
+-- The select policy asks can_see_deliverables(), the same question as the
+-- table policies, so the adviser who can read the versions can download
+-- them. Writing the team/admin/adviser test out here instead would be the
+-- second copy that falls behind the first.
 
 drop policy if exists deliverables_select_viewers on storage.objects;
 create policy deliverables_select_viewers
@@ -527,7 +569,12 @@ begin
     if char_length(v_name) > 200 then
       raise exception 'Keep the file name to 200 characters or fewer';
     end if;
-    if v_name ~ '[[:cntrl:]]' or v_name ~ '[​-‏‪-‮⁠-⁩﻿]' then
+    -- C0 and C1 controls. Postgres's [[:cntrl:]] already catches the same
+    -- set; it is spelled out so lib/deliverables.js can hold the identical
+    -- range character for character. The browser's copy used to stop at
+    -- \x7F, so a name with a C1 control passed it, uploaded up to 25 MB, and
+    -- was only refused here (#95 review).
+    if v_name ~ '[\x01-\x1F\x7F-\x9F]' or v_name ~ '[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]' then
       raise exception 'The file name can''t contain hidden or control characters';
     end if;
 
@@ -581,11 +628,67 @@ $$;
 revoke all on function public.submit_deliverable(uuid, uuid, text, text, text) from public, anon;
 grant execute on function public.submit_deliverable(uuid, uuid, text, text, text) to authenticated;
 
+-- --- the thread's shared rules --------------------------------------------
+-- One cleaner for every comment body, so a comment and a review note can't
+-- disagree about what counts as text. Same normalising as a milestone
+-- message (28_): Windows line endings become plain ones, whitespace at
+-- either end goes. Line breaks and tabs are fine; other controls (C0 and
+-- C1, spelled out for the reason given in submit_deliverable()) and
+-- invisible characters are not. p_allow_empty is for an approval's note.
+create or replace function private.clean_deliverable_comment(p_body text, p_allow_empty boolean)
+returns text
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v_body text := btrim(regexp_replace(coalesce(p_body, ''), E'\r\n?', E'\n', 'g'), E' \t\n');
+begin
+  if v_body = '' then
+    if p_allow_empty then
+      return '';
+    end if;
+    raise exception 'Write a comment first';
+  end if;
+  if char_length(v_body) > 2000 then
+    raise exception 'Keep the comment to 2000 characters or fewer';
+  end if;
+  if v_body ~ '[\x01-\x08\x0B-\x1F\x7F-\x9F]' or v_body ~ '[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]' then
+    raise exception 'The comment can''t contain hidden or control characters';
+  end if;
+  return v_body;
+end;
+$$;
+
+-- "The adviser responded": one notification per team member. The adviser
+-- is never on the team (40_'s require_not_the_adviser()), but they are left
+-- out by id anyway rather than leaning on that.
+create or replace function private.notify_team_of_deliverable_feedback(p_project_id uuid, p_adviser uuid)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  insert into public.notifications (user_id, kind, project_id, actor_id)
+  select tm.user_id, 'deliverable_feedback', p_project_id, p_adviser
+    from public.teams t
+    join public.team_members tm on tm.team_id = t.id
+   where t.project_id = p_project_id
+     and tm.user_id <> p_adviser;
+$$;
+
+revoke all on function private.clean_deliverable_comment(text, boolean) from public, anon, authenticated;
+revoke all on function private.notify_team_of_deliverable_feedback(uuid, uuid) from public, anon, authenticated;
+
 -- --- post_deliverable_comment ---------------------------------------------
--- The team's side of the thread. The adviser's side, with a decision,
--- arrives with #90. A comment is allowed before anything is submitted —
--- "the draft is coming Friday" is a reasonable thing to say — and is then
--- about no version.
+-- The thread: the team and the project's adviser. A comment is allowed
+-- before anything is submitted — "the draft is coming Friday" is a
+-- reasonable thing to say — and is then about no version. An admin who is
+-- not the adviser reads the thread but doesn't write in it.
+--
+-- When the adviser comments, the team is told; that is half of "the team is
+-- notified when the adviser responds". A team member's reply notifies
+-- nobody: #57 asks for the adviser to hear about submissions, not chatter.
 
 create or replace function public.post_deliverable_comment(
   p_project_id   uuid,
@@ -600,9 +703,8 @@ as $$
 declare
   caller uuid := auth.uid();
   v_milestone public.milestones;
-  -- Same normalising as a milestone message (28_): Windows line endings
-  -- become plain ones, and whitespace at either end goes.
-  v_body text := btrim(regexp_replace(coalesce(p_body, ''), E'\r\n?', E'\n', 'g'), E' \t\n');
+  v_is_adviser boolean;
+  v_body text;
   v_latest uuid;
   v_row public.deliverable_comments;
 begin
@@ -614,8 +716,9 @@ begin
     raise exception 'Project not found';
   end if;
 
-  if not private.is_deliverable_team_member(p_project_id) then
-    raise exception 'Only members of this team can comment on its deliverables';
+  v_is_adviser := private.is_deliverable_adviser(p_project_id);
+  if not (v_is_adviser or private.is_deliverable_team_member(p_project_id)) then
+    raise exception 'Only this team and its adviser can comment on its deliverables';
   end if;
 
   select * into v_milestone from public.milestones where id = p_milestone_id;
@@ -626,15 +729,7 @@ begin
     raise exception 'This milestone doesn''t take a deliverable';
   end if;
 
-  if v_body = '' then
-    raise exception 'Write a comment first';
-  end if;
-  if char_length(v_body) > 2000 then
-    raise exception 'Keep the comment to 2000 characters or fewer';
-  end if;
-  if v_body ~ '[\x01-\x08\x0B-\x1F\x7F]' or v_body ~ '[​-‏‪-‮⁠-⁩﻿]' then
-    raise exception 'The comment can''t contain hidden or control characters';
-  end if;
+  v_body := private.clean_deliverable_comment(p_body, false);
 
   select s.id into v_latest
     from public.deliverable_submissions s
@@ -646,12 +741,119 @@ begin
   values (p_project_id, p_milestone_id, v_latest, caller, v_body)
   returning * into v_row;
 
+  if v_is_adviser then
+    perform private.notify_team_of_deliverable_feedback(p_project_id, caller);
+  end if;
+
   return v_row;
 end;
 $$;
 
 revoke all on function public.post_deliverable_comment(uuid, uuid, text) from public, anon;
 grant execute on function public.post_deliverable_comment(uuid, uuid, text) to authenticated;
+
+-- --- review_deliverable ---------------------------------------------------
+-- The adviser's decision on the newest version: Approved or Changes
+-- requested, with a note — required for Changes requested (say what to
+-- change), optional for Approved. Only the project's accepted adviser, as
+-- advised_project_ids() says; not a team member, not an admin who isn't the
+-- adviser, not the adviser of some other project.
+--
+-- p_version is the version the adviser was looking at. If the team has
+-- submitted a newer one since, this refuses instead of stamping a decision
+-- on work nobody reviewed (decision 7). It takes the same lock as
+-- submit_deliverable(), so a submission and a review of the same
+-- deliverable can't interleave.
+--
+-- Checks run in this order, and every refusal raises before anything is
+-- written, so a refused review neither changes a status nor notifies:
+--   signed in → project exists → caller is its adviser → milestone exists
+--   → it takes a deliverable → decision is one of the two → note is valid
+--   → something has been submitted → it is the version named.
+
+create or replace function public.review_deliverable(
+  p_project_id   uuid,
+  p_milestone_id uuid,
+  p_version      integer,
+  p_decision     text,
+  p_body         text default ''
+)
+returns public.deliverable_comments
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller uuid := auth.uid();
+  v_milestone public.milestones;
+  v_body text;
+  v_latest public.deliverable_submissions;
+  v_row public.deliverable_comments;
+begin
+  if caller is null then
+    raise exception 'Not signed in';
+  end if;
+
+  if not exists (select 1 from public.projects where id = p_project_id) then
+    raise exception 'Project not found';
+  end if;
+
+  if not private.is_deliverable_adviser(p_project_id) then
+    raise exception 'Only the project''s adviser can approve or request changes';
+  end if;
+
+  select * into v_milestone from public.milestones where id = p_milestone_id;
+  if not found then
+    raise exception 'Milestone not found';
+  end if;
+  if not v_milestone.requires_deliverable then
+    raise exception 'This milestone doesn''t take a deliverable';
+  end if;
+
+  if p_decision is null or p_decision not in ('approved', 'changes_requested') then
+    raise exception 'Choose Approved or Changes requested';
+  end if;
+
+  -- Blank passes the cleaner here so the refusal can say what is actually
+  -- missing; only an approval may stay blank.
+  v_body := private.clean_deliverable_comment(p_body, true);
+  if p_decision = 'changes_requested' and v_body = '' then
+    raise exception 'Say what needs to change';
+  end if;
+
+  perform pg_advisory_xact_lock(
+    hashtext('public.deliverable_submissions:' || p_project_id::text || ':' || p_milestone_id::text));
+
+  select * into v_latest
+    from public.deliverable_submissions s
+   where s.project_id = p_project_id and s.milestone_id = p_milestone_id
+   order by s.version desc
+   limit 1
+     for update;
+  if not found then
+    raise exception 'Nothing has been submitted to review yet';
+  end if;
+
+  if p_version is distinct from v_latest.version then
+    raise exception 'A newer version has been submitted since — review that one';
+  end if;
+
+  update public.deliverable_submissions
+     set status = p_decision
+   where id = v_latest.id;
+
+  insert into public.deliverable_comments (project_id, milestone_id, submission_id, author_id, body, decision)
+  values (p_project_id, p_milestone_id, v_latest.id, caller, v_body, p_decision)
+  returning * into v_row;
+
+  perform private.notify_team_of_deliverable_feedback(p_project_id, caller);
+
+  return v_row;
+end;
+$$;
+
+revoke all on function public.review_deliverable(uuid, uuid, integer, text, text) from public, anon;
+grant execute on function public.review_deliverable(uuid, uuid, integer, text, text) to authenticated;
 
 -- --- project_deliverables -------------------------------------------------
 -- What the team page draws: every milestone that takes a deliverable, in

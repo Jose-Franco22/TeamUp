@@ -1,8 +1,11 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
-  getDeliverableFileUrl,
+  DELIVERABLE_LINK_TTL_SECONDS,
+  getDeliverableFileUrls,
   getDeliverables,
   postDeliverableComment,
+  reviewDeliverable,
   submitDeliverable,
 } from '../api/client';
 import {
@@ -13,18 +16,27 @@ import {
   validateComment,
   validateDeliverableFile,
   validateDeliverableLink,
+  validateReview,
 } from '../lib/deliverables';
 import { charCount } from '../lib/validation';
-import { formatDue } from './Milestones';
+import { deliverableAnchor, formatDue } from './Milestones';
 
-// Milestone deliverables on the team page (issue #57). One entry per
-// milestone an admin marked as needing a deliverable, each with its status,
-// a way to hand in a new version, every earlier version, and the thread.
-//
-// The adviser's Approve / Request changes controls arrive with #54 (PR #90),
-// along with the adviser's access to this list. Until then nobody is shown
-// them — the database has no function to call, and a button that can only
-// fail is worse than none.
+// Milestone deliverables (issue #57). One entry per milestone an admin marked
+// as needing a deliverable, each with its status, every version, and the
+// thread. The team sees a form to hand in a new version; the project's
+// adviser (`asAdviser`, from the teams-you-advise list) sees Approve and
+// Request changes on the newest version instead. The database refuses each
+// side the other's controls anyway — review_deliverable() and the upload
+// policy — so what this decides is only what is worth offering.
+
+// Shown beside the list when a write succeeded but reading the list back
+// didn't. The list stays on screen: swapping it for an error made a saved
+// submission look lost, and students resubmitted (#95 review). The same
+// shape as NextStepManager's (PR #80).
+export const STALE_LIST = 'The list below couldn’t be refreshed — reload to see the change.';
+
+// Re-mint download links this long before they expire.
+const LINK_REFRESH_MARGIN_SECONDS = 10 * 60;
 
 export function DeliverableStatus({ status }) {
   const { label, tone } = DELIVERABLE_STATUS[status] ?? DELIVERABLE_STATUS.not_submitted;
@@ -56,48 +68,115 @@ function formatWhen(iso) {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export default function Deliverables({ projectId }) {
+export default function Deliverables({ projectId, asAdviser = false }) {
   const [list, setList] = useState(null);
   const [loadError, setLoadError] = useState(null);
+  // versionId -> signed URL, or null where none could be minted. A version
+  // missing from the map is still being minted.
+  const [links, setLinks] = useState({});
+  const listRef = useRef(null);
+  // Every read of the list takes a ticket; a reply is dropped once a newer
+  // one has landed, so a slow first load can't overwrite a refresh.
+  const seq = useRef(0);
 
-  async function load() {
+  const mintLinks = useCallback(async (rows) => {
+    const versions = (rows ?? []).flatMap((d) => d.versions);
     try {
-      setList(await getDeliverables(projectId));
-      setLoadError(null);
-    } catch (err) {
-      setLoadError(err);
+      setLinks(await getDeliverableFileUrls(versions));
+    } catch {
+      // Every file reads "unavailable" rather than the list failing: the
+      // versions and the thread are still worth showing.
+      setLinks(Object.fromEntries(versions.filter((v) => v.kind === 'file').map((v) => [v.id, null])));
     }
-  }
+  }, []);
+
+  // `afterWrite` marks a refresh that follows a write which already
+  // succeeded. A failure then keeps the list on screen and returns false,
+  // and the caller says the list is stale; only a first load that fails
+  // shows an error in place of the list.
+  const load = useCallback(
+    async ({ afterWrite = false } = {}) => {
+      const ticket = ++seq.current;
+      try {
+        const rows = await getDeliverables(projectId);
+        if (ticket !== seq.current) return true;
+        listRef.current = rows;
+        setList(rows);
+        setLoadError(null);
+        mintLinks(rows);
+        return true;
+      } catch (err) {
+        if (ticket !== seq.current) return true;
+        if (!afterWrite && !listRef.current) setLoadError(err);
+        return false;
+      }
+    },
+    [projectId, mintLinks]
+  );
 
   useEffect(() => {
-    let live = true;
-    getDeliverables(projectId)
-      .then((rows) => live && setList(rows))
-      .catch((err) => live && setLoadError(err));
+    listRef.current = null;
+    load();
     return () => {
-      live = false;
+      seq.current += 1;
     };
-  }, [projectId]);
+  }, [load]);
+
+  // A page left open keeps working downloads.
+  useEffect(() => {
+    const every = (DELIVERABLE_LINK_TTL_SECONDS - LINK_REFRESH_MARGIN_SECONDS) * 1000;
+    const timer = setInterval(() => mintLinks(listRef.current), every);
+    return () => clearInterval(timer);
+  }, [mintLinks]);
+
+  // "Hand it in" (Announcements, the deadline banner) arrives here as
+  // /team#deliverable-<milestone>. Once the list has rendered, bring that
+  // deliverable into view and move focus to its heading, so a keyboard or
+  // screen-reader user lands there too. Once per navigation, keyed on
+  // location.key: a refresh after a write must not yank the page back, but
+  // pressing the banner's button again while already on /team should.
+  // Only the student's own team carries the anchors — see Deliverable.
+  const location = useLocation();
+  const scrolledFor = useRef(null);
+  useEffect(() => {
+    if (asAdviser || !list || scrolledFor.current === location.key) return;
+    const target = location.hash ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+    if (!target || !target.classList.contains('deliverable')) return;
+    scrolledFor.current = location.key;
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView?.({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    target.querySelector('h3')?.focus({ preventScroll: true });
+  }, [list, location.key, location.hash, asAdviser]);
+
+  const afterWrite = () => load({ afterWrite: true });
 
   // Nothing is due, so there's nothing to show; an empty card would read as
   // something missing.
-  if (list && list.length === 0 && !loadError) return null;
+  if (list && list.length === 0) return null;
 
   return (
     <section className="card deliverables" aria-label="Deliverables">
       <h2>Deliverables</h2>
-      {loadError ? (
+      {!list && loadError ? (
         <p className="inline-error" role="alert">{loadError.message}</p>
       ) : !list ? (
         <p className="desc" role="status">Loading deliverables…</p>
       ) : (
         <>
           <p className="desc">
-            Anyone on the team can hand these in. Each new submission is kept as a version, so
-            nothing earlier is lost.
+            {asAdviser
+              ? 'Review the newest version of each deliverable. Approving or requesting changes tells the team.'
+              : 'Anyone on the team can hand these in. Each new submission is kept as a version, so nothing earlier is lost.'}
           </p>
           {list.map((d) => (
-            <Deliverable key={d.milestone_id} projectId={projectId} deliverable={d} onChanged={load} />
+            <Deliverable
+              key={d.milestone_id}
+              projectId={projectId}
+              deliverable={d}
+              links={links}
+              asAdviser={asAdviser}
+              onChanged={afterWrite}
+            />
           ))}
         </>
       )}
@@ -105,30 +184,43 @@ export default function Deliverables({ projectId }) {
   );
 }
 
-function Deliverable({ projectId, deliverable: d, onChanged }) {
+function Deliverable({ projectId, deliverable: d, links, asAdviser, onChanged }) {
   const headingId = useId();
   const pastDue = new Date(d.due_at) < new Date();
+  const latest = d.versions[0] ?? null;
 
   return (
-    <article className="deliverable" aria-labelledby={headingId}>
+    // The anchor "Hand it in" points at. Only on the student's own team: an
+    // adviser's view of other teams repeats the same milestones, and two
+    // elements with one id would make the target ambiguous.
+    <article
+      className="deliverable"
+      id={asAdviser ? undefined : deliverableAnchor(d.milestone_id)}
+      aria-labelledby={headingId}
+    >
       <header className="deliverable-head">
-        <h3 id={headingId}>{d.name}</h3>
+        {/* Focusable from script only, so arriving from "Hand it in" puts
+            keyboard and screen-reader users at this deliverable. */}
+        <h3 id={headingId} tabIndex={-1}>{d.name}</h3>
         <DeliverableStatus status={d.status} />
         {d.is_late && <LateTag />}
         <span className="meta">Due {formatDue(d.due_at)}</span>
       </header>
       {d.message && <p className="milestone-message">{d.message}</p>}
 
-      <SubmitForm
-        projectId={projectId}
-        deliverable={d}
-        pastDue={pastDue}
-        onSubmitted={onChanged}
-      />
+      {asAdviser ? (
+        latest ? (
+          <ReviewPanel projectId={projectId} deliverable={d} latest={latest} onReviewed={onChanged} />
+        ) : (
+          <p className="hint">Nothing has been submitted for this yet.</p>
+        )
+      ) : (
+        <SubmitForm projectId={projectId} deliverable={d} pastDue={pastDue} onSubmitted={onChanged} />
+      )}
 
-      {d.versions.length > 0 && <VersionHistory name={d.name} versions={d.versions} />}
+      {d.versions.length > 0 && <VersionHistory name={d.name} versions={d.versions} links={links} />}
 
-      <Thread projectId={projectId} deliverable={d} onPosted={onChanged} />
+      <Thread projectId={projectId} deliverable={d} asAdviser={asAdviser} onPosted={onChanged} />
     </article>
   );
 }
@@ -170,16 +262,20 @@ function SubmitForm({ projectId, deliverable: d, pastDue, onSubmitted }) {
     setSaving(true);
     setServerError(null);
     setDone(null);
+    let row;
     try {
-      const row = await submitDeliverable(projectId, d.milestone_id, mode === 'file' ? { file } : { link });
-      reset();
-      setDone(`Version ${row.version} submitted${row.is_late ? ' — marked late' : ''}.`);
-      await onSubmitted();
+      row = await submitDeliverable(projectId, d.milestone_id, mode === 'file' ? { file } : { link });
     } catch (err) {
       setServerError(err.message);
-    } finally {
       setSaving(false);
+      return;
     }
+    reset();
+    const saved = `Version ${row.version} submitted${row.is_late ? ' — marked late' : ''}.`;
+    setDone(saved);
+    const fresh = await onSubmitted();
+    if (!fresh) setDone(`${saved} ${STALE_LIST}`);
+    setSaving(false);
   }
 
   const hasVersions = d.versions.length > 0;
@@ -263,70 +359,144 @@ function SubmitForm({ projectId, deliverable: d, pastDue, onSubmitted }) {
   );
 }
 
-function VersionHistory({ name, versions }) {
-  // The version whose download is starting, or an error per version id.
-  const [opening, setOpening] = useState(null);
-  const [errors, setErrors] = useState({});
+// The adviser's decision on the newest version. The version number goes with
+// it, and review_deliverable() refuses if the team has submitted a newer one
+// in the meantime, so the verdict is always about what was on screen.
+function ReviewPanel({ projectId, deliverable: d, latest, onReviewed }) {
+  const id = useId();
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(null);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(null);
 
-  async function download(v) {
-    setOpening(v.id);
-    setErrors((e) => ({ ...e, [v.id]: undefined }));
-    try {
-      const url = await getDeliverableFileUrl(v.file_path, v.file_name);
-      window.open(url, '_blank', 'noopener');
-    } catch (err) {
-      setErrors((e) => ({ ...e, [v.id]: err.message }));
-    } finally {
-      setOpening(null);
+  async function decide(decision) {
+    const invalid = validateReview(decision, note);
+    if (invalid) {
+      setError(invalid);
+      return;
     }
+    setSaving(decision);
+    setError(null);
+    setDone(null);
+    try {
+      await reviewDeliverable(projectId, d.milestone_id, latest.version, decision, note);
+    } catch (err) {
+      setError(err.message);
+      setSaving(null);
+      return;
+    }
+    setNote('');
+    const said =
+      decision === 'approved'
+        ? `Approved version ${latest.version}. The team has been told.`
+        : `Asked for changes to version ${latest.version}. The team has been told.`;
+    setDone(said);
+    const fresh = await onReviewed();
+    if (!fresh) setDone(`${said} ${STALE_LIST}`);
+    setSaving(null);
   }
 
+  return (
+    <div className="review-panel" role="group" aria-label={`Review version ${latest.version} of ${d.name}`}>
+      <h4>Review version {latest.version}</h4>
+      <div className="field">
+        <label htmlFor={`${id}-note`}>
+          Note to the team <span className="opt">Required to request changes</span>
+        </label>
+        <textarea
+          id={`${id}-note`}
+          value={note}
+          onChange={(e) => {
+            setNote(e.target.value);
+            setError(null);
+          }}
+          aria-invalid={error ? 'true' : undefined}
+          aria-describedby={error ? `${id}-note-error` : undefined}
+        />
+      </div>
+      <div className="foot">
+        <button type="button" className="btn" disabled={Boolean(saving)} onClick={() => decide('approved')}>
+          {saving === 'approved' ? 'Approving…' : 'Approve'}
+        </button>
+        <button
+          type="button"
+          className="btn ghost"
+          disabled={Boolean(saving)}
+          onClick={() => decide('changes_requested')}
+        >
+          {saving === 'changes_requested' ? 'Sending…' : 'Request changes'}
+        </button>
+        {done && <span className="meta" role="status">{done}</span>}
+        {error && (
+          <span className="inline-error" id={`${id}-note-error`} role="alert">{error}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Each stored file is a real <a href download>, with its signed URL minted
+// before the click. A click handler that awaited the URL and then called
+// window.open() ran outside the click's user gesture, so Safari, Firefox and
+// mobile browsers blocked it and the button did nothing (#95 review). A link
+// also gets right-click and keyboard access for free.
+function VersionHistory({ name, versions, links }) {
   return (
     <div className="deliverable-versions">
       <h4>Version history</h4>
       <ol aria-label={`Versions of ${name}`} reversed>
-        {versions.map((v) => (
-          <li key={v.id} className="deliverable-version">
-            <span className="version-number">Version {v.version}</span>
-            <span className="version-what">
-              {v.kind === 'file' ? (
-                <>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => download(v)}
-                    disabled={opening === v.id}
-                    aria-label={`Download ${v.file_name}`}
-                  >
-                    {v.file_name}
-                  </button>{' '}
-                  <span className="sub">{formatBytes(v.file_size)}</span>
-                </>
-              ) : (
-                <SafeLink href={v.link_url} />
-              )}
-            </span>
-            <span className="sub">
-              {v.submitted_by_name ?? 'A former member'} · {formatWhen(v.submitted_at)}
-            </span>
-            <span className="version-tags">
-              <DeliverableStatus status={v.status} />
-              {v.is_late && <LateTag />}
-            </span>
-            {errors[v.id] && <span className="inline-error" role="alert">{errors[v.id]}</span>}
-          </li>
-        ))}
+        {versions.map((v) => {
+          const minted = Object.hasOwn(links, v.id);
+          const href = links[v.id];
+          return (
+            <li key={v.id} className="deliverable-version">
+              <span className="version-number">Version {v.version}</span>
+              <span className="version-what">
+                {v.kind === 'file' ? (
+                  <>
+                    {href ? (
+                      <a className="download-link" href={href} download={v.file_name} aria-label={`Download ${v.file_name}`}>
+                        {v.file_name}
+                      </a>
+                    ) : (
+                      <span>{v.file_name}</span>
+                    )}{' '}
+                    <span className="sub">
+                      {formatBytes(v.file_size)}
+                      {!minted && ' · preparing the download…'}
+                    </span>
+                    {minted && !href && (
+                      <span className="inline-error" role="alert">
+                        This file can’t be downloaded right now — reload to try again.
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <SafeLink href={v.link_url} />
+                )}
+              </span>
+              <span className="sub">
+                {v.submitted_by_name ?? 'A former member'} · {formatWhen(v.submitted_at)}
+              </span>
+              <span className="version-tags">
+                <DeliverableStatus status={v.status} />
+                {v.is_late && <LateTag />}
+              </span>
+            </li>
+          );
+        })}
       </ol>
     </div>
   );
 }
 
-function Thread({ projectId, deliverable: d, onPosted }) {
+function Thread({ projectId, deliverable: d, asAdviser, onPosted }) {
   const id = useId();
   const [body, setBody] = useState('');
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [serverError, setServerError] = useState(null);
+  const [stale, setStale] = useState(false);
 
   const error = touched ? validateComment(body) : null;
 
@@ -336,17 +506,22 @@ function Thread({ projectId, deliverable: d, onPosted }) {
     if (validateComment(body)) return;
     setSaving(true);
     setServerError(null);
+    setStale(false);
     try {
       await postDeliverableComment(projectId, d.milestone_id, body);
-      setBody('');
-      setTouched(false);
-      await onPosted();
     } catch (err) {
       setServerError(err.message);
-    } finally {
       setSaving(false);
+      return;
     }
+    setBody('');
+    setTouched(false);
+    const fresh = await onPosted();
+    setStale(!fresh);
+    setSaving(false);
   }
+
+  const label = asAdviser ? 'Comment' : 'Reply';
 
   return (
     <div className="deliverable-thread">
@@ -365,15 +540,15 @@ function Thread({ projectId, deliverable: d, onPosted }) {
                 </span>
                 {c.decision && <DeliverableStatus status={c.decision} />}
               </div>
-              <p className="thread-body">{c.body}</p>
+              {c.body && <p className="thread-body">{c.body}</p>}
             </li>
           ))}
         </ul>
       )}
 
-      <form className="thread-reply" onSubmit={handleSubmit} noValidate aria-label={`Reply on ${d.name}`}>
+      <form className="thread-reply" onSubmit={handleSubmit} noValidate aria-label={`${label} on ${d.name}`}>
         <div className="field">
-          <label htmlFor={`${id}-reply`}>Reply</label>
+          <label htmlFor={`${id}-reply`}>{label}</label>
           <textarea
             id={`${id}-reply`}
             value={body}
@@ -394,8 +569,9 @@ function Thread({ projectId, deliverable: d, onPosted }) {
         </div>
         <div className="foot">
           <button className="btn ghost" type="submit" disabled={saving}>
-            {saving ? 'Posting…' : 'Post reply'}
+            {saving ? 'Posting…' : asAdviser ? 'Post comment' : 'Post reply'}
           </button>
+          {stale && <span className="meta" role="status">Posted. {STALE_LIST}</span>}
           {serverError && <span className="inline-error" role="alert">{serverError}</span>}
         </div>
       </form>

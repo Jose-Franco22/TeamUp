@@ -3,6 +3,8 @@
 // testing both sides of it is that an off-by-one in either copy fails.
 import { describe, expect, test } from 'vitest';
 import {
+  BAD_COMMENT,
+  BAD_DECISION,
   BAD_LINK,
   BAD_NAME,
   COMMENT_EMPTY,
@@ -10,6 +12,7 @@ import {
   DELIVERABLE_MAX_BYTES,
   EMPTY_FILE,
   NAME_TOO_LONG,
+  NOTE_REQUIRED,
   NOTHING_CHOSEN,
   TOO_LARGE,
   WRONG_TYPE,
@@ -18,6 +21,7 @@ import {
   validateComment,
   validateDeliverableFile,
   validateDeliverableLink,
+  validateReview,
 } from './deliverables';
 
 const file = (name, size = 1024) => ({ name, size });
@@ -49,7 +53,7 @@ describe('validateDeliverableFile', () => {
     expect(validateDeliverableFile(null)).toBe(NOTHING_CHOSEN);
     expect(validateDeliverableFile(file(`${'a'.repeat(197)}.pdf`))).toBe(NAME_TOO_LONG);
     expect(validateDeliverableFile(file(`${'a'.repeat(196)}.pdf`))).toBeNull();
-    expect(validateDeliverableFile(file('Report‮xcod.docx'))).toBe(BAD_NAME);
+    expect(validateDeliverableFile(file('Report\u202Excod.docx'))).toBe(BAD_NAME);
   });
 
   test('the extension is read after trimming', () => {
@@ -82,6 +86,50 @@ describe('validateComment', () => {
     expect(validateComment(`  ${'a'.repeat(2000)}\r\n`)).toBeNull();
     expect(validateComment('a'.repeat(2001))).toBe(COMMENT_TOO_LONG);
     expect(validateComment(' \n\t ')).toBe(COMMENT_EMPTY);
+  });
+
+  test('refuses C1 controls as the database does, and keeps line breaks and tabs', () => {
+    expect(validateComment('Next line\x85here')).toBe(BAD_COMMENT);
+    expect(validateComment('Fine\nline two\twith a tab')).toBeNull();
+  });
+});
+
+// Jose's #95 review: Postgres refused C1 controls (\x80–\x9F) in a file
+// name that the browser let through, after a full upload. Both sides now
+// spell out the same range.
+describe('the file name check matches the database’s', () => {
+  test.each([
+    ['a C1 control (NEL)', 'Report\x85.pdf'],
+    ['the first C1 control', 'Report\x80.pdf'],
+    ['the last C1 control', 'Report\x9F.pdf'],
+    ['DEL', 'Report\x7F.pdf'],
+    ['a C0 control', 'Report\x07.pdf'],
+  ])('refuses %s', (_, name) => {
+    expect(validateDeliverableFile(file(name))).toBe(BAD_NAME);
+  });
+
+  test('takes the printable character just past the C1 block', () => {
+    expect(validateDeliverableFile(file('Caf\xE9 report.pdf'))).toBeNull();
+  });
+});
+
+describe('validateReview', () => {
+  test('an approval may come with no note', () => {
+    expect(validateReview('approved', '   ')).toBeNull();
+  });
+
+  test('Changes requested must say what to change', () => {
+    expect(validateReview('changes_requested', ' \n ')).toBe(NOTE_REQUIRED);
+    expect(validateReview('changes_requested', 'Split the risks by owner.')).toBeNull();
+  });
+
+  test('only the two decisions exist', () => {
+    expect(validateReview('rejected', 'x')).toBe(BAD_DECISION);
+    expect(validateReview(undefined, 'x')).toBe(BAD_DECISION);
+  });
+
+  test('a note is held to the comment rules', () => {
+    expect(validateReview('approved', 'a'.repeat(2001))).toBe(COMMENT_TOO_LONG);
   });
 });
 

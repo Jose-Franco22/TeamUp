@@ -144,7 +144,8 @@ describe('NotificationBell', () => {
     deadline_reminder: '/browse',
     // The check-in form is on the team page (#55).
     check_in_reminder: '/team',
-    // To the adviser (#57): /team is where #54 lists the teams they advise.
+    // #57: feedback to the team, submissions to the adviser — both on /team.
+    deliverable_feedback: '/team',
     deliverable_submitted: '/team',
     join_request: '/requests',
     member_left: '/team',
@@ -165,6 +166,12 @@ describe('NotificationBell', () => {
     expect(
       notificationText({ kind: 'deliverable_submitted', actor_name: 'Rita Cano', project_title: 'Campus parking tracker' })
     ).toBe('Rita Cano submitted a deliverable for “Campus parking tracker”');
+  });
+
+  test('a deliverable_feedback notification tells the team who responded, and on which project', () => {
+    expect(
+      notificationText({ kind: 'deliverable_feedback', actor_name: 'Dana Kim', project_title: 'Campus parking tracker' })
+    ).toBe('Dana Kim left feedback on a deliverable for “Campus parking tracker”');
   });
 
   // Starts somewhere no kind links to, so landing on /browse is a real move.

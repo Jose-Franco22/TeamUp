@@ -41,7 +41,10 @@ import { isOpenProject } from '../lib/browseFilters';
 import { JOIN_BLOCKED, isPastDeadline } from '../lib/joinRequests';
 import {
   DELIVERABLE_TYPES,
+  NEWER_VERSION,
   NOTHING_CHOSEN,
+  NOTHING_TO_REVIEW,
+  ONLY_ADVISER_DECIDES,
   TOO_LARGE,
   WRONG_TYPE,
   fileExtension,
@@ -49,6 +52,7 @@ import {
   validateComment,
   validateDeliverableFile,
   validateDeliverableLink,
+  validateReview,
 } from '../lib/deliverables';
 import {
   ValidationError,
@@ -500,11 +504,18 @@ export async function deleteMilestone(id) {
 // supabase/45_milestone_deliverables.sql; lib/deliverables.js holds the
 // browser's copy of the file and link rules.
 //
-// The adviser's half — Approve / Request changes, and their read access —
-// arrives with #54 (PR #90). Nothing here can set a status other than
-// 'submitted', because nothing in the database can yet either.
+// The project's accepted adviser (an advised_project_ids() row, #54) reads
+// everything, downloads the files, comments, and sets Approved or Changes
+// requested on the newest version through review_deliverable().
 
 const DELIVERABLE_BUCKET = 'deliverables';
+
+// How long a download link lasts. Links are minted when the list loads
+// (getDeliverableFileUrls) so the download is a real <a href download> — a
+// window.open() after an await falls outside the click's user gesture and
+// Safari, Firefox and mobile browsers block it silently. The component
+// re-mints well before this runs out, so a page left open keeps working.
+export const DELIVERABLE_LINK_TTL_SECONDS = 60 * 60;
 
 const MILESTONE_HAS_SUBMISSIONS_DELETE =
   "Teams have already submitted for this milestone, so it can't be deleted";
@@ -513,8 +524,7 @@ const MILESTONE_HAS_SUBMISSIONS_UNFLAG =
 const NOT_A_DELIVERABLE = "This milestone doesn't take a deliverable";
 const CANNOT_SEE_DELIVERABLES = 'Only this team, its adviser and admins can see its deliverables';
 const ONLY_MEMBERS_SUBMIT = 'Only members of this team can submit its deliverables';
-const ONLY_MEMBERS_COMMENT = 'Only members of this team can comment on its deliverables';
-const FILE_UNAVAILABLE = "That file isn't available to you";
+const ONLY_TEAM_OR_ADVISER_COMMENT = 'Only this team and its adviser can comment on its deliverables';
 // The Storage upload policy refuses with a bare 403 that says nothing about
 // which rule failed, and it is checked before submit_deliverable() runs. Mock
 // mode simulates the same upload step and throws this too, so the two paths
@@ -547,8 +557,29 @@ export async function setMilestoneRequiresDeliverable(id, requires) {
   return data;
 }
 
+// advised_project_ids() (40_): an accepted request, nothing less.
+function mockIsDeliverableAdviser(projectId, userId) {
+  return adviserRequests.some(
+    (r) => r.project_id === projectId && r.adviser_id === userId && r.status === 'accepted'
+  );
+}
+
+// can_see_deliverables(): admins, the team, the accepted adviser.
 function mockCanSeeDeliverables(projectId, userId) {
-  return Boolean(users.find((u) => u.id === userId)?.is_admin) || mockIsOnProjectTeam(projectId, userId);
+  return (
+    Boolean(users.find((u) => u.id === userId)?.is_admin) ||
+    mockIsOnProjectTeam(projectId, userId) ||
+    mockIsDeliverableAdviser(projectId, userId)
+  );
+}
+
+// private.notify_team_of_deliverable_feedback(): every member but the adviser.
+function mockNotifyTeamOfFeedback(projectId, adviserId) {
+  const team = teams.find((t) => t.project_id === projectId);
+  if (!team) return;
+  for (const tm of teamMembers.filter((x) => x.team_id === team.id && x.user_id !== adviserId)) {
+    mockNotify({ user_id: tm.user_id, kind: 'deliverable_feedback', project_id: projectId, actor_id: adviserId });
+  }
 }
 
 function mockDeliverable(projectId, m) {
@@ -662,7 +693,9 @@ export async function submitDeliverable(projectId, milestoneId, { file = null, l
       deliverableFiles.set(path, {
         size: file.size,
         mimetype: DELIVERABLE_TYPES[ext],
-        url: typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : null,
+        // A real blob URL in a browser; jsdom has no createObjectURL, so
+        // tests get a stand-in that is still a non-empty href.
+        url: typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : `blob:mock/${path}`,
       });
     }
 
@@ -721,29 +754,41 @@ export async function submitDeliverable(projectId, milestoneId, { file = null, l
   return data;
 }
 
-// A short-lived link to download one stored version. Minted through the
-// bucket's select policy, so anyone the policy refuses gets an error, not a
-// URL — and the error says the same thing whether the file is missing or
-// theirs to not see, so it can't be used to probe which files exist.
-export async function getDeliverableFileUrl(path, fileName) {
+// Download links for every stored version in `versions`, minted up front so
+// each download can be a plain <a href download> (see
+// DELIVERABLE_LINK_TTL_SECONDS). Returns { [versionId]: url | null }: null
+// where the bucket's select policy refused, or the file is gone — the same
+// answer either way, so it can't be used to probe which files exist. Each
+// link names the file after its original name, not its storage key.
+export async function getDeliverableFileUrls(versions) {
+  const files = (versions ?? []).filter((v) => v.kind === 'file' && v.file_path);
+
   if (USE_MOCKS) {
     await delay();
     const id = requireSessionUserId();
-    const stored = deliverableFiles.get(path);
-    if (!stored || !mockCanSeeDeliverables(String(path).split('/')[0], id)) {
-      throw new Error(FILE_UNAVAILABLE);
-    }
-    return stored.url ?? '#';
+    return Object.fromEntries(
+      files.map((v) => {
+        const stored = deliverableFiles.get(v.file_path);
+        const allowed = stored && mockCanSeeDeliverables(String(v.file_path).split('/')[0], id);
+        return [v.id, allowed ? stored.url : null];
+      })
+    );
   }
 
-  const { data, error } = await supabase.storage
-    .from(DELIVERABLE_BUCKET)
-    .createSignedUrl(path, 60, { download: fileName || true });
-  if (error || !data?.signedUrl) throw new Error(FILE_UNAVAILABLE);
-  return data.signedUrl;
+  const bucket = supabase.storage.from(DELIVERABLE_BUCKET);
+  const entries = await Promise.all(
+    files.map(async (v) => {
+      const { data, error } = await bucket.createSignedUrl(v.file_path, DELIVERABLE_LINK_TTL_SECONDS, {
+        download: v.file_name || true,
+      });
+      return [v.id, error || !data?.signedUrl ? null : data.signedUrl];
+    })
+  );
+  return Object.fromEntries(entries);
 }
 
-// The team's side of the thread under a deliverable.
+// The thread under a deliverable: the team, and the project's adviser. The
+// adviser's comment notifies the team; a member's reply notifies nobody.
 export async function postDeliverableComment(projectId, milestoneId, body) {
   const invalid = validateComment(body);
   if (invalid) throw new Error(invalid);
@@ -753,7 +798,8 @@ export async function postDeliverableComment(projectId, milestoneId, body) {
     await delay();
     const id = requireSessionUserId();
     if (!projects.some((p) => p.id === projectId)) throw new Error('Project not found');
-    if (!mockIsOnProjectTeam(projectId, id)) throw new Error(ONLY_MEMBERS_COMMENT);
+    const adviser = mockIsDeliverableAdviser(projectId, id);
+    if (!adviser && !mockIsOnProjectTeam(projectId, id)) throw new Error(ONLY_TEAM_OR_ADVISER_COMMENT);
     const milestone = milestones.find((m) => m.id === milestoneId);
     if (!milestone) throw new Error('Milestone not found');
     if (!milestone.requires_deliverable) throw new Error(NOT_A_DELIVERABLE);
@@ -771,12 +817,62 @@ export async function postDeliverableComment(projectId, milestoneId, body) {
       created_at: new Date().toISOString(),
     };
     deliverableComments.push(row);
+    if (adviser) mockNotifyTeamOfFeedback(projectId, id);
     return { ...row };
   }
 
   const { data, error } = await supabase.rpc('post_deliverable_comment', {
     p_project_id: projectId,
     p_milestone_id: milestoneId,
+    p_body: text,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// The adviser's decision on the version they looked at: 'approved' or
+// 'changes_requested', with a note (required for changes). Refused if a
+// newer version has arrived since, so a decision never lands on work nobody
+// reviewed. The team is notified. review_deliverable() in the migration.
+export async function reviewDeliverable(projectId, milestoneId, version, decision, note = '') {
+  const invalid = validateReview(decision, note);
+  if (invalid) throw new Error(invalid);
+  const text = normaliseComment(note);
+
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!projects.some((p) => p.id === projectId)) throw new Error('Project not found');
+    if (!mockIsDeliverableAdviser(projectId, id)) throw new Error(ONLY_ADVISER_DECIDES);
+    const milestone = milestones.find((m) => m.id === milestoneId);
+    if (!milestone) throw new Error('Milestone not found');
+    if (!milestone.requires_deliverable) throw new Error(NOT_A_DELIVERABLE);
+    const latest = deliverableSubmissions
+      .filter((s) => s.project_id === projectId && s.milestone_id === milestoneId)
+      .sort((a, b) => b.version - a.version)[0];
+    if (!latest) throw new Error(NOTHING_TO_REVIEW);
+    if (latest.version !== version) throw new Error(NEWER_VERSION);
+    latest.status = decision;
+    const row = {
+      id: `dc-${Date.now()}-${deliverableComments.length}`,
+      project_id: projectId,
+      milestone_id: milestoneId,
+      submission_id: latest.id,
+      author_id: id,
+      body: text,
+      decision,
+      created_at: new Date().toISOString(),
+    };
+    deliverableComments.push(row);
+    mockNotifyTeamOfFeedback(projectId, id);
+    return { ...row };
+  }
+
+  const { data, error } = await supabase.rpc('review_deliverable', {
+    p_project_id: projectId,
+    p_milestone_id: milestoneId,
+    p_version: version,
+    p_decision: decision,
     p_body: text,
   });
   if (error) throw error;

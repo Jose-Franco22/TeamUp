@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import AdvisedTeams from './AdvisedTeams';
 import * as client from '../api/client';
 
@@ -18,6 +19,8 @@ vi.mock('../api/client', async (importOriginal) => {
     ...actual,
     getAdvisedProjects: vi.fn(),
     stepDownAsAdviser: vi.fn(),
+    getDeliverables: vi.fn(),
+    getDeliverableFileUrls: vi.fn(),
   };
 });
 
@@ -41,10 +44,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   client.getAdvisedProjects.mockResolvedValue([PROJECT]);
   client.stepDownAsAdviser.mockResolvedValue(undefined);
+  client.getDeliverables.mockResolvedValue([]);
+  client.getDeliverableFileUrls.mockResolvedValue({});
 });
 
 async function renderAdvised() {
-  render(<AdvisedTeams />);
+  render(<MemoryRouter><AdvisedTeams /></MemoryRouter>);
   await waitFor(() => expect(client.getAdvisedProjects).toHaveBeenCalled());
 }
 
@@ -156,5 +161,38 @@ describe('stepping down', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('not the adviser for this project');
     expect(screen.getByText('Campus parking tracker')).toBeInTheDocument();
+  });
+});
+
+// --- deliverables (#57) ------------------------------------------------------
+
+describe('the team’s deliverables', () => {
+  test('the adviser reviews them here: the newest version with Approve and Request changes, and no submit form', async () => {
+    client.getDeliverables.mockResolvedValue([
+      {
+        milestone_id: 'ms-prop',
+        name: 'Project proposal',
+        due_at: '2098-11-01T17:00:00Z',
+        message: '',
+        status: 'submitted',
+        is_late: false,
+        versions: [
+          {
+            id: 'v-1', version: 1, kind: 'link', file_path: null, file_name: null, file_size: null, file_type: null,
+            link_url: 'https://docs.example.edu/proposal', is_late: false, status: 'submitted',
+            submitted_by: 'u-jose', submitted_by_name: 'Jose Franco Garza', submitted_at: '2026-10-01T15:00:00Z',
+          },
+        ],
+        comments: [],
+      },
+    ]);
+    await renderAdvised();
+
+    const deliverables = await within(card()).findByRole('region', { name: 'Deliverables' });
+    expect(client.getDeliverables).toHaveBeenCalledWith('p-parking');
+    const review = within(deliverables).getByRole('group', { name: 'Review version 1 of Project proposal' });
+    expect(within(review).getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(within(review).getByRole('button', { name: 'Request changes' })).toBeInTheDocument();
+    expect(within(deliverables).queryByRole('form', { name: 'Submit Project proposal' })).not.toBeInTheDocument();
   });
 });

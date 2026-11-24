@@ -133,17 +133,26 @@ describe('reading', () => {
     expect(list).toEqual([{ milestone_id: M, status: 'submitted', versions: [], comments: [] }]);
   });
 
-  test('a download is a 60-second signed URL named after the original file', async () => {
-    const { getDeliverableFileUrl } = await realMode();
-    const url = await getDeliverableFileUrl(`${P}/${M}/abc.pdf`, 'Proposal.pdf');
-    expect(fake.bucket.createSignedUrl).toHaveBeenCalledWith(`${P}/${M}/abc.pdf`, 60, { download: 'Proposal.pdf' });
-    expect(url).toBe('https://storage.example/signed?token=t');
+  const VERSIONS = [
+    { id: 'v2', kind: 'file', file_path: `${P}/${M}/abc.pdf`, file_name: 'Proposal.pdf' },
+    { id: 'v1', kind: 'link', file_path: null, file_name: null, link_url: 'https://docs.example.edu/x' },
+  ];
+
+  test('download links are minted up front, one per stored file, named after the original file', async () => {
+    const { getDeliverableFileUrls, DELIVERABLE_LINK_TTL_SECONDS } = await realMode();
+    const links = await getDeliverableFileUrls(VERSIONS);
+    expect(fake.bucket.createSignedUrl).toHaveBeenCalledTimes(1);
+    expect(fake.bucket.createSignedUrl).toHaveBeenCalledWith(`${P}/${M}/abc.pdf`, DELIVERABLE_LINK_TTL_SECONDS, {
+      download: 'Proposal.pdf',
+    });
+    // A link version has nothing in the bucket, so nothing is minted for it.
+    expect(links).toEqual({ v2: 'https://storage.example/signed?token=t' });
   });
 
-  test('a refused download reads the same as mock mode, whatever Storage said', async () => {
+  test('a refused file maps to null — the same answer whether it is missing or not yours', async () => {
     fake.state.signed = { data: null, error: { statusCode: '400', message: 'Object not found' } };
-    const { getDeliverableFileUrl } = await realMode();
-    await expect(getDeliverableFileUrl(`${P}/${M}/abc.pdf`, 'x.pdf')).rejects.toThrow("That file isn't available to you");
+    const { getDeliverableFileUrls } = await realMode();
+    await expect(getDeliverableFileUrls(VERSIONS)).resolves.toEqual({ v2: null });
   });
 });
 
@@ -155,6 +164,33 @@ describe('writing', () => {
       p_project_id: P,
       p_milestone_id: M,
       p_body: 'Moved the budget.\nSee p. 4',
+    });
+  });
+
+  test('a review goes to review_deliverable() with the version it is about, and a normalised note', async () => {
+    const { reviewDeliverable } = await realMode();
+    await reviewDeliverable(P, M, 4, 'changes_requested', '  Split the risks.\r\n ');
+    expect(fake.supabase.rpc).toHaveBeenCalledWith('review_deliverable', {
+      p_project_id: P,
+      p_milestone_id: M,
+      p_version: 4,
+      p_decision: 'changes_requested',
+      p_body: 'Split the risks.',
+    });
+  });
+
+  test('a review the browser can see is incomplete never reaches the database', async () => {
+    const { reviewDeliverable } = await realMode();
+    await expect(reviewDeliverable(P, M, 4, 'changes_requested', '  ')).rejects.toThrow('Say what needs to change');
+    await expect(reviewDeliverable(P, M, 4, 'rejected')).rejects.toThrow('Choose Approved or Changes requested');
+    expect(fake.supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  test('the database refusing a review comes back with its sentence', async () => {
+    fake.state.rpcResult = { data: null, error: { message: "Only the project's adviser can approve or request changes" } };
+    const { reviewDeliverable } = await realMode();
+    await expect(reviewDeliverable(P, M, 4, 'approved')).rejects.toMatchObject({
+      message: "Only the project's adviser can approve or request changes",
     });
   });
 

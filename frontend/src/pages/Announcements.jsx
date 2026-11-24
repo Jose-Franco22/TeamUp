@@ -10,7 +10,7 @@ import {
 import { useSession } from '../auth/SessionContext';
 import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
-import { formatDue } from '../components/Milestones';
+import { DeliverableTag, HandItInButton, formatDue } from '../components/Milestones';
 import { relativeDue } from '../lib/deadlines';
 import {
   ANNOUNCEMENT_BODY_MAX,
@@ -94,8 +94,11 @@ export default function Announcements() {
                   <h3>
                     {m.name}
                     {m.is_formation_deadline && <span className="pill warn">Rosters lock</span>}
+                    {m.requires_deliverable && <DeliverableTag />}
                   </h3>
                   {m.message && <p className="post-body">{m.message}</p>}
+                  {/* Admins see which milestones take one, but hand nothing in. */}
+                  {m.requires_deliverable && !isAdmin && <HandItInButton milestoneId={m.id} milestoneName={m.name} />}
                 </div>
               </li>
             ))}

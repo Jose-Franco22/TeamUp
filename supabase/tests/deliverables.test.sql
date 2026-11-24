@@ -8,12 +8,11 @@
 -- and the file checks read storage.objects the way the Storage server does
 -- for a download, as the caller, through the policy.
 --
--- The adviser review (Approved / Changes requested) is not here: it arrives
--- with #54 (PR #90), as does the adviser's read access. The cases that need
--- an accepted adviser set the status directly, while unauthenticated, the
--- way adviser_requests.test.sql does.
+-- The adviser half — reading, downloading, commenting, Approved / Changes
+-- requested, and the team's notification — is near the end, with advisers
+-- accepted through #54's own respond_to_adviser_request().
 begin;
-select plan(126);
+select plan(179);
 
 select set_config('tests.owner_a',  tests.sign_in_with_microsoft('owner57a@utrgv.edu', 'Ana Owner')::text, true);
 select set_config('tests.member_a', tests.sign_in_with_microsoft('member57a@utrgv.edu', 'Abe Member')::text, true);
@@ -23,17 +22,23 @@ select set_config('tests.loner',    tests.sign_in_with_microsoft('loner57@utrgv.
 select set_config('tests.adviser',  tests.sign_in_with_microsoft('adviser57@utrgv.edu', 'Ada Adviser')::text, true);
 select set_config('tests.adviser_b', tests.sign_in_with_microsoft('adviser57b@utrgv.edu', 'Pat Pending')::text, true);
 select set_config('tests.admin',    tests.sign_in_with_microsoft('instructor57@utrgv.edu', 'Instructor')::text, true);
+select set_config('tests.owner_c',  tests.sign_in_with_microsoft('owner57c@utrgv.edu', 'Cy Owner')::text, true);
+select set_config('tests.member_c', tests.sign_in_with_microsoft('member57c@utrgv.edu', 'Cam Member')::text, true);
 
 -- protect_admin_flag() (18_) refuses this from `authenticated`.
 update public.users set is_admin = true where id = current_setting('tests.admin')::uuid;
 
--- Only CS faculty can be asked to advise (44_faculty_advisers.sql).
-insert into public.faculty_directory (email) values ('adviser57@utrgv.edu'), ('adviser57b@utrgv.edu');
+-- Only CS faculty can be asked to advise (44_faculty_advisers.sql). The
+-- instructor is faculty as well as an admin, so they can advise project C.
+insert into public.faculty_directory (email)
+values ('adviser57@utrgv.edu'), ('adviser57b@utrgv.edu'), ('instructor57@utrgv.edu');
 
 select set_config('tests.project_a',
   tests.create_full_team(current_setting('tests.owner_a')::uuid, current_setting('tests.member_a')::uuid)::text, true);
 select set_config('tests.project_b',
   tests.create_full_team(current_setting('tests.owner_b')::uuid, current_setting('tests.member_b')::uuid)::text, true);
+select set_config('tests.project_c',
+  tests.create_full_team(current_setting('tests.owner_c')::uuid, current_setting('tests.member_c')::uuid)::text, true);
 
 -- Four milestones: two that will take a deliverable (one due ahead, one
 -- already past), one that never does, and a spare for the admin cases.
@@ -426,10 +431,20 @@ select throws_ok(
 select throws_ok(
   format($$ select public.submit_deliverable(current_setting('tests.project_a')::uuid,
                                              current_setting('tests.proposal')::uuid,
-                                             p_file_path => %L, p_file_name => E'Report‮xcod.docx') $$,
+                                             p_file_path => %L, p_file_name => E'Report\u202Excod.docx') $$,
          current_setting('tests.docx_a')),
   'P0001', 'The file name can''t contain hidden or control characters',
   'a name with a bidirectional override is refused');
+-- chr(133) is NEL, a C1 control. The database always refused it; the
+-- browser didn't, until #95's review (lib/deliverables.test.js has that
+-- side). This pins the database's half of the same range.
+select throws_ok(
+  format($$ select public.submit_deliverable(current_setting('tests.project_a')::uuid,
+                                             current_setting('tests.proposal')::uuid,
+                                             p_file_path => %L, p_file_name => 'Report' || chr(133) || '.docx') $$,
+         current_setting('tests.docx_a')),
+  'P0001', 'The file name can''t contain hidden or control characters',
+  'a name with a C1 control character is refused');
 select lives_ok(
   format($$ select public.submit_deliverable(current_setting('tests.project_a')::uuid,
                                              current_setting('tests.proposal')::uuid,
@@ -506,6 +521,12 @@ select throws_ok(
   'a comment over 2000 characters is refused');
 select throws_ok(
   $$ select public.post_deliverable_comment(current_setting('tests.project_a')::uuid,
+                                            current_setting('tests.proposal')::uuid,
+                                            'Next line' || chr(133) || 'here') $$,
+  'P0001', 'The comment can''t contain hidden or control characters',
+  'a comment with a C1 control character is refused');
+select throws_ok(
+  $$ select public.post_deliverable_comment(current_setting('tests.project_a')::uuid,
                                             current_setting('tests.demo')::uuid, 'Hello') $$,
   'P0001', 'This milestone doesn''t take a deliverable',
   'there is no thread on a milestone that takes no deliverable');
@@ -514,7 +535,7 @@ select tests.authenticate_as(current_setting('tests.owner_b')::uuid);
 select throws_ok(
   $$ select public.post_deliverable_comment(current_setting('tests.project_a')::uuid,
                                             current_setting('tests.proposal')::uuid, 'Nice work') $$,
-  'P0001', 'Only members of this team can comment on its deliverables',
+  'P0001', 'Only this team and its adviser can comment on its deliverables',
   'another team cannot comment in this team''s thread');
 
 select tests.clear_authentication();
@@ -729,21 +750,36 @@ select is((select count(*)::int
   'the other team''s submission is nowhere in it');
 
 -- =========================================================================
--- NOTIFICATIONS
+-- NOTIFICATIONS, AND THE ADVISER
 -- =========================================================================
+-- Every adviser here is accepted the real way, through #54's
+-- respond_to_adviser_request() (40_), not by setting the status by hand.
+--
+--   Ada        accepted adviser of project A
+--   Pat        invited to advise project B; pending, then accepted
+--   Instructor an admin who is also on the faculty list, accepted adviser of
+--              project C — so they reach C's deliverables twice over, through
+--              is_admin() and through advised_project_ids(), and reach A's
+--              only as an admin. The two paths are not disjoint, and the
+--              cases below are written so that matters.
 
 select is((select count(*)::int from public.notifications where kind = 'deliverable_submitted'), 0,
   'with no accepted adviser anywhere, no submission notified anyone');
 
--- An accepted adviser on project A, and a pending one on project B. #54 is
--- what accepts; until it lands the status is set here directly.
 select tests.authenticate_as(current_setting('tests.owner_a')::uuid);
-select public.invite_adviser(current_setting('tests.project_a')::uuid, current_setting('tests.adviser')::uuid);
+select set_config('tests.req_a', (public.invite_adviser(current_setting('tests.project_a')::uuid,
+                                                        current_setting('tests.adviser')::uuid)).id::text, true);
 select tests.authenticate_as(current_setting('tests.owner_b')::uuid);
-select public.invite_adviser(current_setting('tests.project_b')::uuid, current_setting('tests.adviser_b')::uuid);
-select tests.clear_authentication();
-update public.adviser_requests set status = 'accepted', responded_at = now()
- where project_id = current_setting('tests.project_a')::uuid;
+select set_config('tests.req_b', (public.invite_adviser(current_setting('tests.project_b')::uuid,
+                                                        current_setting('tests.adviser_b')::uuid)).id::text, true);
+select tests.authenticate_as(current_setting('tests.owner_c')::uuid);
+select set_config('tests.req_c', (public.invite_adviser(current_setting('tests.project_c')::uuid,
+                                                        current_setting('tests.admin')::uuid)).id::text, true);
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select lives_ok(
+  $$ select public.respond_to_adviser_request(current_setting('tests.req_a')::uuid, true) $$,
+  'Ada accepts advising project A');
 
 select tests.authenticate_as(current_setting('tests.member_a')::uuid);
 select lives_ok(
@@ -774,6 +810,305 @@ select results_eq(
   'exactly one notification: the accepted adviser, about their project, naming who submitted — '
   'not for the refused submission, and not to a pending adviser');
 
+-- --- what the adviser can read -------------------------------------------
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select is((select count(*)::int from public.deliverable_submissions
+            where project_id = current_setting('tests.project_a')::uuid), 6,
+  'the adviser reads every version project A has submitted');
+select is((select count(*)::int from public.deliverable_comments
+            where project_id = current_setting('tests.project_a')::uuid), 1,
+  'and its thread');
+select is((select count(*)::int from storage.objects
+            where bucket_id = 'deliverables' and name = current_setting('tests.pdf_a')), 1,
+  'and can download its file — the Storage select policy lets the adviser in too');
+select lives_ok(
+  $$ select public.project_deliverables(current_setting('tests.project_a')::uuid) $$,
+  'and project_deliverables() lets the adviser in');
+
+-- Pat is only invited to B so far. The positive control is B's own member.
+select tests.authenticate_as(current_setting('tests.member_b')::uuid);
+select is((select count(*)::int from public.deliverable_submissions
+            where project_id = current_setting('tests.project_b')::uuid), 2,
+  'project B has two submissions, which its member reads');
+select tests.authenticate_as(current_setting('tests.adviser_b')::uuid);
+select is((select count(*)::int from public.deliverable_submissions
+            where project_id = current_setting('tests.project_b')::uuid), 0,
+  'an adviser who has only been invited reads none of them');
+select throws_ok(
+  $$ select public.project_deliverables(current_setting('tests.project_b')::uuid) $$,
+  'P0001', 'Only this team, its adviser and admins can see its deliverables',
+  'and project_deliverables() refuses them');
+
+select lives_ok(
+  $$ select public.respond_to_adviser_request(current_setting('tests.req_b')::uuid, true) $$,
+  'Pat accepts advising project B');
+select is((select count(*)::int from public.deliverable_submissions
+            where project_id = current_setting('tests.project_b')::uuid), 2,
+  'and now reads B''s submissions');
+
+-- The adviser of B against A's work, which Ada reads above.
+select is((select count(*)::int from public.deliverable_submissions
+            where project_id = current_setting('tests.project_a')::uuid), 0,
+  'the adviser of another project reads none of A''s submissions');
+select is((select count(*)::int from public.deliverable_comments
+            where project_id = current_setting('tests.project_a')::uuid), 0,
+  'nor its thread');
+select is((select count(*)::int from storage.objects
+            where bucket_id = 'deliverables' and name = current_setting('tests.pdf_a')), 0,
+  'and cannot download A''s file');
+select is((select count(*)::int from storage.objects
+            where bucket_id = 'deliverables'
+              and name like current_setting('tests.project_a') || '/%'), 0,
+  'or list any of A''s files');
+select throws_ok(
+  $$ select public.project_deliverables(current_setting('tests.project_a')::uuid) $$,
+  'P0001', 'Only this team, its adviser and admins can see its deliverables',
+  'and project_deliverables() refuses them for A');
+
+-- --- the adviser in the thread -------------------------------------------
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select lives_ok(
+  $$ select public.post_deliverable_comment(current_setting('tests.project_a')::uuid,
+                                            current_setting('tests.proposal')::uuid,
+                                            'Section 4 still needs camera costs.') $$,
+  'the adviser comments in the thread');
+
+select tests.clear_authentication();
+select results_eq(
+  $$ select user_id, project_id, actor_id from public.notifications
+      where kind = 'deliverable_feedback' order by user_id $$,
+  format($$ select * from (values (%L::uuid, %L::uuid, %L::uuid), (%L::uuid, %L::uuid, %L::uuid)) v order by 1 $$,
+         current_setting('tests.owner_a'), current_setting('tests.project_a'), current_setting('tests.adviser'),
+         current_setting('tests.member_a'), current_setting('tests.project_a'), current_setting('tests.adviser')),
+  'both members of the team are told the adviser responded, and nobody else is');
+
+select tests.authenticate_as(current_setting('tests.adviser_b')::uuid);
+select throws_ok(
+  $$ select public.post_deliverable_comment(current_setting('tests.project_a')::uuid,
+                                            current_setting('tests.proposal')::uuid, 'Looks fine') $$,
+  'P0001', 'Only this team and its adviser can comment on its deliverables',
+  'the adviser of another project cannot comment on A');
+
+select tests.authenticate_as(current_setting('tests.member_a')::uuid);
+select lives_ok(
+  $$ select public.post_deliverable_comment(current_setting('tests.project_a')::uuid,
+                                            current_setting('tests.proposal')::uuid, 'Adding them now.') $$,
+  'the team replies');
+select tests.clear_authentication();
+select is((select count(*)::int from public.notifications where kind = 'deliverable_feedback'), 2,
+  'a team member''s reply notifies nobody');
+
+-- --- who may decide -------------------------------------------------------
+-- Project A's proposal is on version 4.
+
+select tests.authenticate_as(current_setting('tests.member_a')::uuid);
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 4, 'approved') $$,
+  'P0001', 'Only the project''s adviser can approve or request changes',
+  'a team member cannot approve their own work');
+select tests.authenticate_as(current_setting('tests.owner_a')::uuid);
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 4, 'approved') $$,
+  'P0001', 'Only the project''s adviser can approve or request changes',
+  'nor can the owner');
+select tests.authenticate_as(current_setting('tests.adviser_b')::uuid);
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 4, 'approved') $$,
+  'P0001', 'Only the project''s adviser can approve or request changes',
+  'nor the adviser of another project');
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 4, 'approved') $$,
+  'P0001', 'Only the project''s adviser can approve or request changes',
+  'nor an admin who is not A''s adviser — reading is not reviewing');
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 4, 'rejected') $$,
+  'P0001', 'Choose Approved or Changes requested',
+  'a decision other than the two is refused');
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 4, 'changes_requested', '   ') $$,
+  'P0001', 'Say what needs to change',
+  'Changes requested has to say what to change');
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 3, 'approved') $$,
+  'P0001', 'A newer version has been submitted since — review that one',
+  'a decision on version 3 is refused once version 4 exists');
+
+select tests.clear_authentication();
+select results_eq(
+  $$ select bool_or(status <> 'submitted'),
+            (select count(*)::int from public.notifications where kind = 'deliverable_feedback')
+       from public.deliverable_submissions
+      where project_id = current_setting('tests.project_a')::uuid $$,
+  $$ values (false, 2) $$,
+  'none of those refusals changed a status or notified anyone');
+
+-- --- the adviser decides --------------------------------------------------
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select lives_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 4, 'changes_requested',
+                                      'Split the risks section by owner.') $$,
+  'the adviser requests changes on version 4');
+
+select tests.clear_authentication();
+select results_eq(
+  $$ select version, status from public.deliverable_submissions
+      where project_id = current_setting('tests.project_a')::uuid
+        and milestone_id = current_setting('tests.proposal')::uuid
+      order by version $$,
+  $$ values (1, 'submitted'::text), (2, 'submitted'::text), (3, 'submitted'::text), (4, 'changes_requested'::text) $$,
+  'version 4 reads Changes requested; earlier versions keep theirs');
+select results_eq(
+  $$ select c.body, c.decision, s.version, c.author_id
+       from public.deliverable_comments c
+       join public.deliverable_submissions s on s.id = c.submission_id
+      where c.project_id = current_setting('tests.project_a')::uuid and c.decision is not null $$,
+  format($$ values ('Split the risks section by owner.'::text, 'changes_requested'::text, 4, %L::uuid) $$,
+         current_setting('tests.adviser')),
+  'the decision is in the thread, tied to version 4, with its note and its author');
+select is((select count(*)::int from public.notifications where kind = 'deliverable_feedback'), 4,
+  'and both members are told again');
+
+select tests.authenticate_as(current_setting('tests.member_a')::uuid);
+select is((select d ->> 'status' from jsonb_array_elements(
+             public.project_deliverables(current_setting('tests.project_a')::uuid)) d
+            where d ->> 'name' = 'Project proposal'), 'changes_requested',
+  'the team page reads Changes requested');
+
+select lives_ok(
+  $$ select public.submit_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid,
+                                      p_link_url => 'https://docs.example.edu/proposal-v5') $$,
+  'the team resubmits');
+select is((select d ->> 'status' from jsonb_array_elements(
+             public.project_deliverables(current_setting('tests.project_a')::uuid)) d
+            where d ->> 'name' = 'Project proposal'), 'submitted',
+  'and the deliverable reads Submitted again');
+
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select lives_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 5, 'approved') $$,
+  'the adviser approves version 5 without a note');
+
+select tests.clear_authentication();
+select results_eq(
+  $$ select s.status, c.body, c.decision
+       from public.deliverable_submissions s
+       join public.deliverable_comments c on c.submission_id = s.id and c.decision is not null
+      where s.project_id = current_setting('tests.project_a')::uuid
+        and s.milestone_id = current_setting('tests.proposal')::uuid and s.version = 5 $$,
+  $$ values ('approved'::text, ''::text, 'approved'::text) $$,
+  'version 5 is Approved, with an empty note');
+select tests.authenticate_as(current_setting('tests.member_a')::uuid);
+select is((select d ->> 'status' from jsonb_array_elements(
+             public.project_deliverables(current_setting('tests.project_a')::uuid)) d
+            where d ->> 'name' = 'Project proposal'), 'approved',
+  'and the team page reads Approved');
+
+-- The functions stay the only way in, for the adviser too.
+select tests.authenticate_as(current_setting('tests.adviser')::uuid);
+select throws_ok(
+  $$ insert into public.deliverable_comments (project_id, milestone_id, author_id, body, decision)
+     values (current_setting('tests.project_a')::uuid, current_setting('tests.proposal')::uuid,
+             auth.uid(), 'ok', 'approved') $$,
+  '42501', null,
+  'the adviser cannot write a decision straight into the table');
+with u as (
+  update public.deliverable_submissions set status = 'changes_requested'
+   where project_id = current_setting('tests.project_a')::uuid
+  returning 1
+)
+select is(count(*)::int, 0, 'nor change a status with an update') from u;
+
+-- Pat decides on B, which is theirs, and A is untouched by it.
+select tests.authenticate_as(current_setting('tests.adviser_b')::uuid);
+select lives_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_b')::uuid,
+                                      current_setting('tests.proposal')::uuid, 1, 'approved', 'Good start.') $$,
+  'the adviser of B approves B''s proposal');
+select tests.clear_authentication();
+select is((select count(*)::int from public.notifications
+            where kind = 'deliverable_feedback' and project_id = current_setting('tests.project_b')::uuid), 2,
+  'and B''s two members are told');
+
+-- --- an admin who is also an adviser -------------------------------------
+
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select lives_ok(
+  $$ select public.respond_to_adviser_request(current_setting('tests.req_c')::uuid, true) $$,
+  'the instructor, an admin on the faculty list, accepts advising project C');
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_c')::uuid,
+                                      current_setting('tests.proposal')::uuid, 1, 'approved') $$,
+  'P0001', 'Nothing has been submitted to review yet',
+  'there is nothing on C to review yet');
+
+select tests.authenticate_as(current_setting('tests.member_c')::uuid);
+select lives_ok(
+  $$ select public.submit_deliverable(current_setting('tests.project_c')::uuid,
+                                      current_setting('tests.proposal')::uuid,
+                                      p_link_url => 'https://c.example.edu/proposal') $$,
+  'project C submits its proposal');
+
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select lives_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_c')::uuid,
+                                      current_setting('tests.proposal')::uuid, 1, 'changes_requested',
+                                      'Add a timeline.') $$,
+  'as C''s adviser, the instructor reviews C');
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 5, 'changes_requested', 'x') $$,
+  'P0001', 'Only the project''s adviser can approve or request changes',
+  'and advising C still gives them no say over A');
+select is((select count(*)::int from public.deliverable_submissions
+            where project_id = current_setting('tests.project_a')::uuid), 7,
+  'though as an admin they still read all seven of A''s versions');
+
+select tests.clear_authentication();
+select set_config('role', 'anon', true);
+select throws_ok(
+  $$ select public.review_deliverable(current_setting('tests.project_a')::uuid,
+                                      current_setting('tests.proposal')::uuid, 5, 'approved') $$,
+  '42501', null,
+  'a guest cannot call review_deliverable() at all');
+select tests.clear_authentication();
+
+-- --- every kind of notification still fits -------------------------------
+-- This file rewrites notifications_kind_check, so it is the one that has to
+-- prove it dropped nothing: one row of every kind Testing already had, plus
+-- the two this file adds, and a made-up kind that must still be refused.
+
+select lives_ok(
+  format($$ insert into public.notifications (user_id, kind)
+            select %L::uuid, k from unnest(array[
+              'adviser_accepted', 'adviser_declined', 'adviser_invited', 'adviser_removed',
+              'adviser_stepped_down', 'check_in_reminder', 'deadline_reminder',
+              'deliverable_feedback', 'deliverable_submitted', 'join_request', 'member_added',
+              'member_assigned', 'member_left', 'member_removed', 'project_removed',
+              'request_accepted', 'request_declined', 'team_complete']) k $$,
+         current_setting('tests.loner')),
+  'every existing notification kind is still accepted, and both new ones are');
+select throws_ok(
+  format($$ insert into public.notifications (user_id, kind) values (%L::uuid, 'deliverable_graded') $$,
+         current_setting('tests.loner')),
+  '23514', null,
+  'a kind that is not on the list is still refused');
+
 -- =========================================================================
 -- A MILESTONE WITH WORK ON IT KEEPS IT
 -- =========================================================================
@@ -799,7 +1134,7 @@ select lives_ok(
 
 select tests.clear_authentication();
 select is((select count(*)::int from public.deliverable_submissions
-            where milestone_id = current_setting('tests.proposal')::uuid), 5,
+            where milestone_id = current_setting('tests.proposal')::uuid), 7,
   'the proposal''s submissions survived both refusals');
 
 select * from finish();

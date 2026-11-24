@@ -4,6 +4,7 @@ import useAsync from './useAsync';
 import Avatar from './Avatar';
 import StatusPill from './StatusPill';
 import CheckIns from './CheckIns';
+import Deliverables from './Deliverables';
 
 // The teams you advise, on the team page (issue #54).
 //
@@ -88,6 +89,13 @@ export default function AdvisedTeams() {
             {p.formed_at && (
               <CheckIns projectId={p.id} members={p.members} formedAt={p.formed_at} canPost={false} />
             )}
+
+            {/* The team's deliverables (#57), read as their adviser: every
+                version and file, the thread, and Approve / Request changes
+                on the newest version. No form to submit — the work is the
+                team's. Renders nothing until a milestone needs one. */}
+            <Deliverables projectId={p.id} asAdviser />
+
 
             <p className="hint">
               You advise this project. You are not on its roster and hold no seat on it, so you

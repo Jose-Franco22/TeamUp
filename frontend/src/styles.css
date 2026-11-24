@@ -1360,13 +1360,23 @@ button:disabled { opacity: 0.45; cursor: default; }
 .deliverable-version .version-tags { display: inline-flex; gap: 6px; }
 .deliverable-version .sub,
 .thread .sub { font-size: 12.5px; color: var(--mute); }
-/* A download is an action, not a page, so it's a button that looks like a
-   link — and keeps a 24px target (WCAG 2.2) despite reading as text. It
-   takes the link colour: --link where the admin-dashboard rework has defined
-   it (AA on --paper and --canvas in both themes), --open until then. */
-.link-button { background: none; border: 0; padding: 0; min-height: 24px; font: inherit; color: var(--link, var(--open)); text-decoration: underline; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
-.link-button:disabled { color: var(--mute); cursor: progress; }
+/* Downloads are real links (signed URL minted up front), so they take the
+   app's AA link colour from the global a rule. The padding keeps a 24px
+   target (WCAG 2.2) on a name that reads as text. */
+.download-link { display: inline-block; padding: 2px 0; overflow-wrap: anywhere; }
+/* The adviser's review of the newest version. */
+.review-panel { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); }
+.review-panel h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--slate); }
+.review-panel .field { margin-bottom: 10px; }
+.review-panel textarea { min-height: 60px; }
 .thread li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .thread-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
 .thread-body { margin: 4px 0 0; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .thread-reply { margin-top: 12px; }
+/* "Hand it in" under a deadline that takes a deliverable (#57), on
+   Announcements and in the banner: a real button, kept to its own width. */
+.hand-it-in { align-self: flex-start; margin-top: 8px; }
+/* Where "Hand it in" lands: clear of the 60px sticky top bar. */
+.deliverables .deliverable { scroll-margin-top: 76px; }
+.deliverable-head h3:focus { outline: none; }
+.deliverable-head h3:focus-visible { outline: 2px solid var(--open); outline-offset: 2px; border-radius: 4px; }

@@ -11,14 +11,15 @@
 // only invited; Sofia is on no team; u-instructor is an admin.
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
-  getDeliverableFileUrl,
+  getDeliverableFileUrls,
   getDeliverables,
   postDeliverableComment,
+  reviewDeliverable,
   setMilestoneRequiresDeliverable,
   setSessionUserId,
   submitDeliverable,
 } from './client';
-import { deliverableComments, deliverableFiles, deliverableSubmissions, milestones, notifications } from './mockData';
+import { adviserRequests, deliverableComments, deliverableFiles, deliverableSubmissions, milestones, notifications } from './mockData';
 import { DELIVERABLE_MAX_BYTES, TOO_LARGE, WRONG_TYPE } from '../lib/deliverables';
 
 const PDF = 'application/pdf';
@@ -46,7 +47,13 @@ beforeEach(() => {
     { id: 'ms-demo', name: 'Demo day', due_at: new Date(Date.now() + 30 * DAY).toISOString(), is_formation_deadline: false, message: '' }
   );
 });
-afterEach(() => setSessionUserId(null));
+afterEach(() => {
+  setSessionUserId(null);
+  // Some cases add an accepted adviser to p-degree; mockData is shared.
+  for (let i = adviserRequests.length - 1; i >= 0; i -= 1) {
+    if (adviserRequests[i].id === 'ar-test') adviserRequests.splice(i, 1);
+  }
+});
 
 describe('submitting and resubmitting', () => {
   test('a link, then a file: two versions, and the first is untouched', async () => {
@@ -207,14 +214,15 @@ describe('who can see a team’s submissions and files', () => {
     await postDeliverableComment('p-parking', 'ms-prop', 'Budget is in section 4.');
     return row;
   }
+  const link = async (row) => (await getDeliverableFileUrls([row]))[row.id];
 
-  test('the team reads its deliverables and can download its file', async () => {
+  test('the team reads its deliverables and gets a download link for its file', async () => {
     const row = await seed();
     as('u-jose');
     const proposal = (await getDeliverables('p-parking')).find((d) => d.milestone_id === 'ms-prop');
     expect(proposal.versions).toHaveLength(1);
     expect(proposal.comments.map((c) => c.body)).toEqual(['Budget is in section 4.']);
-    await expect(getDeliverableFileUrl(row.file_path, row.file_name)).resolves.toBeTruthy();
+    expect(await link(row)).toMatch(/^blob:/);
   });
 
   test('another team, and a student on no team, are refused both', async () => {
@@ -224,7 +232,7 @@ describe('who can see a team’s submissions and files', () => {
       await expect(getDeliverables('p-parking')).rejects.toThrow(
         'Only this team, its adviser and admins can see its deliverables'
       );
-      await expect(getDeliverableFileUrl(row.file_path, row.file_name)).rejects.toThrow("That file isn't available to you");
+      expect(await link(row)).toBeNull();
     }
   });
 
@@ -233,14 +241,38 @@ describe('who can see a team’s submissions and files', () => {
     as('u-instructor');
     const proposal = (await getDeliverables('p-parking')).find((d) => d.milestone_id === 'ms-prop');
     expect(proposal.versions).toHaveLength(1);
-    await expect(getDeliverableFileUrl(row.file_path, row.file_name)).resolves.toBeTruthy();
+    expect(await link(row)).toMatch(/^blob:/);
+  });
+
+  test('the project’s accepted adviser can read and download', async () => {
+    const row = await seed();
+    as('u-dana');
+    const proposal = (await getDeliverables('p-parking')).find((d) => d.milestone_id === 'ms-prop');
+    expect(proposal.versions).toHaveLength(1);
+    expect(await link(row)).toMatch(/^blob:/);
+  });
+
+  test('the adviser of another project, and one only invited, can do neither', async () => {
+    const row = await seed();
+    adviserRequests.push({ id: 'ar-test', project_id: 'p-degree', adviser_id: 'u-priya', invited_by: 'u-alexis', status: 'accepted' });
+    for (const notTheirs of ['u-priya', 'u-luis']) {
+      as(notTheirs);
+      await expect(getDeliverables('p-parking')).rejects.toThrow(
+        'Only this team, its adviser and admins can see its deliverables'
+      );
+      expect(await link(row)).toBeNull();
+    }
+    // u-luis is only invited to p-degree, so not even that one opens up.
+    as('u-luis');
+    await expect(getDeliverables('p-degree')).rejects.toThrow(
+      'Only this team, its adviser and admins can see its deliverables'
+    );
   });
 
   test('a path nobody uploaded reads the same as one you may not see', async () => {
     as('u-jose');
-    await expect(getDeliverableFileUrl('p-parking/ms-prop/nope.pdf', 'nope.pdf')).rejects.toThrow(
-      "That file isn't available to you"
-    );
+    const ghost = { id: 'v-ghost', kind: 'file', file_path: 'p-parking/ms-prop/nope.pdf', file_name: 'nope.pdf' };
+    expect(await getDeliverableFileUrls([ghost])).toEqual({ 'v-ghost': null });
   });
 });
 
@@ -259,11 +291,86 @@ describe('the thread', () => {
   test('another team cannot comment, and an empty comment is refused', async () => {
     as('u-alexis');
     await expect(postDeliverableComment('p-parking', 'ms-prop', 'Nice')).rejects.toThrow(
-      'Only members of this team can comment on its deliverables'
+      'Only this team and its adviser can comment on its deliverables'
     );
     as('u-jose');
     await expect(postDeliverableComment('p-parking', 'ms-prop', ' \n ')).rejects.toThrow('Write a comment first');
     expect(deliverableComments).toHaveLength(0);
+  });
+
+  test('the adviser comments, and the whole team is told; a member replying tells nobody', async () => {
+    as('u-dana');
+    await postDeliverableComment('p-parking', 'ms-prop', 'Add the camera costs.');
+    expect(notifications.filter((n) => n.kind === 'deliverable_feedback').map((n) => n.user_id).sort()).toEqual([
+      'u-jose',
+      'u-nicolas',
+    ]);
+    as('u-jose');
+    await postDeliverableComment('p-parking', 'ms-prop', 'On it.');
+    expect(notifications.filter((n) => n.kind === 'deliverable_feedback')).toHaveLength(2);
+  });
+});
+
+describe('the adviser’s review', () => {
+  async function twoVersions() {
+    as('u-jose');
+    await submitDeliverable('p-parking', 'ms-prop', { link: 'https://docs.example.edu/1' });
+    await submitDeliverable('p-parking', 'ms-prop', { link: 'https://docs.example.edu/2' });
+  }
+  const proposal = async () => (await getDeliverables('p-parking')).find((d) => d.milestone_id === 'ms-prop');
+
+  test('only the project’s adviser can decide — not a member, the owner, an admin, or another project’s adviser', async () => {
+    await twoVersions();
+    adviserRequests.push({ id: 'ar-test', project_id: 'p-degree', adviser_id: 'u-priya', invited_by: 'u-alexis', status: 'accepted' });
+    for (const who of ['u-jose', 'u-nicolas', 'u-instructor', 'u-priya', 'u-luis']) {
+      as(who);
+      await expect(reviewDeliverable('p-parking', 'ms-prop', 2, 'approved')).rejects.toThrow(
+        "Only the project's adviser can approve or request changes"
+      );
+    }
+    as('u-jose');
+    expect((await proposal()).status).toBe('submitted');
+    expect(notifications.filter((n) => n.kind === 'deliverable_feedback')).toEqual([]);
+  });
+
+  test('Changes requested needs a note, and a stale version is refused', async () => {
+    await twoVersions();
+    as('u-dana');
+    await expect(reviewDeliverable('p-parking', 'ms-prop', 2, 'changes_requested', ' ')).rejects.toThrow(
+      'Say what needs to change'
+    );
+    await expect(reviewDeliverable('p-parking', 'ms-prop', 1, 'approved')).rejects.toThrow(
+      'A newer version has been submitted since — review that one'
+    );
+    await expect(reviewDeliverable('p-parking', 'ms-final-missing', 2, 'approved')).rejects.toThrow('Milestone not found');
+  });
+
+  test('nothing submitted means nothing to review', async () => {
+    as('u-dana');
+    await expect(reviewDeliverable('p-parking', 'ms-prop', 1, 'approved')).rejects.toThrow(
+      'Nothing has been submitted to review yet'
+    );
+  });
+
+  test('the adviser requests changes, then approves the resubmission; the team hears each time', async () => {
+    await twoVersions();
+    as('u-dana');
+    await reviewDeliverable('p-parking', 'ms-prop', 2, 'changes_requested', 'Split the risks by owner.');
+    let p = await proposal();
+    expect(p.status).toBe('changes_requested');
+    expect(p.versions.map((v) => [v.version, v.status])).toEqual([[2, 'changes_requested'], [1, 'submitted']]);
+    expect(p.comments.at(-1)).toMatchObject({ decision: 'changes_requested', body: 'Split the risks by owner.', version: 2 });
+
+    as('u-jose');
+    await submitDeliverable('p-parking', 'ms-prop', { link: 'https://docs.example.edu/3' });
+    expect((await proposal()).status).toBe('submitted');
+
+    as('u-dana');
+    await reviewDeliverable('p-parking', 'ms-prop', 3, 'approved');
+    p = await proposal();
+    expect(p.status).toBe('approved');
+    expect(p.comments.at(-1)).toMatchObject({ decision: 'approved', body: '', version: 3 });
+    expect(notifications.filter((n) => n.kind === 'deliverable_feedback')).toHaveLength(4);
   });
 });
 
