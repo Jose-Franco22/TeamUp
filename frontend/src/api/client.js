@@ -3332,7 +3332,14 @@ function mockAdviserDashboardRow(project, now) {
     next_milestone_due_at: next?.due_at ?? null,
     next_deliverable_status: next?.requires_deliverable ? latestStatus(next.id) ?? 'not_submitted' : null,
     overdue_deliverables: milestones.filter(
-      (m) => m.requires_deliverable && new Date(m.due_at) < now && latestStatus(m.id) === null
+      (m) =>
+        m.requires_deliverable &&
+        new Date(m.due_at) < now &&
+        // Only milestones from the team's formation on: the rest closed
+        // before it existed. A team still forming has none.
+        team?.formed_at &&
+        new Date(m.due_at) >= new Date(team.formed_at) &&
+        latestStatus(m.id) === null
     ).length,
     changes_requested: milestones.filter((m) => latestStatus(m.id) === 'changes_requested').length,
     last_commit_at: repoActivityFor(project.id)?.last_commit_at ?? null,

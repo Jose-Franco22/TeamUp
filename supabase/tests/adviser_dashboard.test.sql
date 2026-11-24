@@ -9,6 +9,8 @@
 --   newest check-ins   S2's (last week) has a blocker  S3 had one last week,
 --                                                      cleared this week
 --   past milestone     nothing submitted (overdue)     submitted
+--   before forming     a milestone that closed before both teams formed:
+--                      nothing submitted, and not counted as overdue
 --   next milestone     v2 sent back (changes req.)     approved, so the next
 --                                                      one after it is shown
 --   repository         last commit recorded            none linked
@@ -33,6 +35,10 @@ select set_config('tests.p2', tests.create_full_team(current_setting('tests.s3')
 select set_config('tests.p3', tests.create_full_team(current_setting('tests.s5')::uuid, current_setting('tests.s6')::uuid)::text, true);
 update public.projects set title = 'Alpha parking'  where id = current_setting('tests.p1')::uuid;
 update public.projects set title = 'Beta scheduler' where id = current_setting('tests.p2')::uuid;
+-- Formed a month ago, so the 10-days-ago proposal falls after formation and
+-- the 40-days-ago kickoff before it.
+update public.teams set formed_at = now() - interval '30 days'
+ where project_id in (current_setting('tests.p1')::uuid, current_setting('tests.p2')::uuid);
 
 insert into public.adviser_requests (project_id, adviser_id, invited_by, status) values
   (current_setting('tests.p1')::uuid, current_setting('tests.adv')::uuid,   current_setting('tests.s1')::uuid, 'accepted'),
@@ -58,9 +64,10 @@ insert into public.check_ins (project_id, user_id, week_start, did, doing_next, 
    'Did a thing.', 'Next thing.', null, now() - interval '2 hours');
 
 -- --- milestones and deliverables ---------------------------------------------
--- Nothing else in this transaction is due, so these three are the schedule.
+-- Nothing else in this transaction is due, so these four are the schedule.
 delete from public.milestones;
 insert into public.milestones (id, name, due_at, requires_deliverable) values
+  (gen_random_uuid(), 'Kickoff', now() - interval '40 days', true),
   (gen_random_uuid(), 'Proposal', now() - interval '10 days', true),
   (gen_random_uuid(), 'Design doc', now() + interval '5 days', true),
   (gen_random_uuid(), 'Demo day', now() + interval '20 days', false);
@@ -124,7 +131,7 @@ select is((select open_blockers from dash where project_id = current_setting('te
 select is((select last_check_in_at from dash where project_id = current_setting('tests.p1')::uuid), now(),
   'P1: the last check-in is S1''s, this week');
 select is((select overdue_deliverables from dash where project_id = current_setting('tests.p1')::uuid), 1,
-  'P1: the proposal is past due with nothing submitted');
+  'P1: the proposal is past due with nothing submitted; the kickoff that closed before it formed is not counted');
 select is((select changes_requested from dash where project_id = current_setting('tests.p1')::uuid), 1,
   'P1: the design doc''s newest version was sent back');
 select is((select (next_milestone_id, next_deliverable_status)::text from dash where project_id = current_setting('tests.p1')::uuid),
@@ -144,7 +151,7 @@ select is((select open_blockers from dash where project_id = current_setting('te
 select is((select last_check_in_at from dash where project_id = current_setting('tests.p2')::uuid), now() - interval '1 hour',
   'P2: the last check-in is the newest of the two this week');
 select is((select (overdue_deliverables, changes_requested)::text from dash where project_id = current_setting('tests.p2')::uuid),
-  '(0,0)', 'P2: nothing overdue and nothing sent back');
+  '(0,0)', 'P2: nothing overdue and nothing sent back, though it never handed in the kickoff that closed before it formed');
 select is((select (next_milestone_id, next_deliverable_status)::text from dash where project_id = current_setting('tests.p2')::uuid),
   (current_setting('tests.demo')::uuid, null::text)::text,
   'P2: the approved design doc is done, so next up is demo day, which takes no deliverable');

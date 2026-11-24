@@ -37,7 +37,10 @@
 --     milestone, 'not_submitted' when there is none, null when the milestone
 --     takes no deliverable.
 --   * overdue_deliverables — milestones that take a deliverable, are past
---     due, and have nothing submitted.
+--     due, and have nothing submitted, counting only those due on or after
+--     the team formed. Milestones are class-wide, so without that a team
+--     formed last week would be flagged for every milestone that closed
+--     before it existed. A team that has not formed has none.
 --   * changes_requested — deliverables whose newest version the adviser sent
 --     back. A resubmission starts at 'submitted' again (45_, decision 7), so
 --     this clears itself once the team responds.
@@ -128,6 +131,7 @@ as $$
        from public.milestones m
       where m.requires_deliverable
         and m.due_at < now()
+        and m.due_at >= a.formed_at
         and not exists (
           select 1 from public.deliverable_submissions s
            where s.project_id = a.project_id and s.milestone_id = m.id
