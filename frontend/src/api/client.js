@@ -1967,7 +1967,7 @@ export async function setAdviserDigest(enabled) {
 
 // --- Advising: expertise and capacity (issue #60) ----------------------
 //
-// Shaped by supabase/47_adviser_expertise.sql. The one thing worth knowing
+// Shaped by supabase/48_adviser_expertise.sql. The one thing worth knowing
 // here is why `myAdvising()` exists at all rather than two more fields on
 // getCurrentUser(): the browser cannot work out whether you are faculty.
 // faculty_directory revokes everything from `authenticated` by design, and

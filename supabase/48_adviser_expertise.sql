@@ -4,6 +4,14 @@
 -- 40_respond_to_adviser_request.sql (accepting), both of whose functions this
 -- file replaces whole. Nothing here depends on file order beyond that.
 --
+-- Numbered 48 and not 47: #56's open PR (#103) claimed 47 first, for
+-- 47_adviser_dashboard.sql. Two files with one number is nobody's problem
+-- until it is everybody's — on the live database they are applied by hand, in
+-- order, by a person reading the numbers. Against an open PR the number is
+-- not settled, so this takes the first one above every claim rather than
+-- arguing for 47. Nothing in the two files touches the other's functions, so
+-- either order loads.
+--
 -- The story is a faculty member's: "I want to list the areas I advise in and
 -- the most teams I'll take so that I get requests from projects I'm a good
 -- fit for and don't get more than I can handle." It came from the faculty

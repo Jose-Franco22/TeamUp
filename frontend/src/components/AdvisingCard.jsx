@@ -17,7 +17,7 @@ import SkillPicker from './SkillPicker';
 // adviser was any TeamUp account. #99 then made advising faculty-only, so a
 // student with this card would be setting a maximum nobody could reach and
 // listing areas nobody could search — a control that looks like it works and
-// does nothing. The whole argument is in supabase/47_adviser_expertise.sql.
+// does nothing. The whole argument is in supabase/48_adviser_expertise.sql.
 //
 // Nothing here guesses at who is faculty: myAdvising() answers it, because
 // faculty_directory is revoked from `authenticated` and the browser has no

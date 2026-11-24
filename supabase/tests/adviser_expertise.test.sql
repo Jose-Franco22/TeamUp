@@ -1,5 +1,5 @@
 -- Issue #60 — the areas an adviser advises in, and the cap on how many teams
--- they take. 47_adviser_expertise.sql.
+-- they take. 48_adviser_expertise.sql.
 --
 -- Two of this file's cases are the ones the issue text would not have asked
 -- for, and they are the reason the migration reads the way it does:

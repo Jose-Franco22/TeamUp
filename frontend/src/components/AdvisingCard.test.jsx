@@ -5,7 +5,7 @@
 // advise", and this card appears for faculty only — because #99 made advising
 // faculty-only after that criterion was written, so a student setting a
 // maximum would be setting one nobody can reach and listing areas nobody can
-// search. The reasoning is in supabase/47_adviser_expertise.sql; what is
+// search. The reasoning is in supabase/48_adviser_expertise.sql; what is
 // pinned here is that the card is absent, not merely inert.
 //
 // The third is #60's own UI criterion: the fields appear only while the

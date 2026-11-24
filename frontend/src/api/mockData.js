@@ -57,7 +57,7 @@ const skillById = Object.fromEntries(skills.map((s) => [s.id, s]));
 // only these accounts can be asked to advise. It is not a users column.
 //
 // advising_available and advising_max_teams ARE columns
-// (47_adviser_expertise.sql, issue #60). Available is on by default and the
+// (48_adviser_expertise.sql, issue #60). Available is on by default and the
 // maximum is null for "none set", which matches the database's defaults, so
 // nothing in mock mode has to list them to behave like a real account.
 export const users = [
@@ -420,7 +420,7 @@ export const adviserRequests = [
 ];
 
 // --- ADVISER_EXPERTISE -------------------------------------------------
-// public.adviser_expertise (47_adviser_expertise.sql, issue #60): the areas
+// public.adviser_expertise (48_adviser_expertise.sql, issue #60): the areas
 // an adviser advises in, as skill ids. Its own table and not userSkills, for
 // the reason the migration gives — userSkills is what the matching engine
 // scores a student on, and resume import writes it.

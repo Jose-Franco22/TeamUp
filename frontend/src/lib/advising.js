@@ -1,7 +1,7 @@
 // Issue #60 — reading an adviser's capacity and expertise.
 //
 // Pure, and deliberately small: the rules themselves live in
-// supabase/47_adviser_expertise.sql, which is the boundary. Everything here
+// supabase/48_adviser_expertise.sql, which is the boundary. Everything here
 // is about *saying* what the server already decided, in the two places that
 // show it — the Profile card for your own settings, and the owner's search
 // results in AdviserPanel.

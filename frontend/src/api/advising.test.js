@@ -1,6 +1,6 @@
 // Issue #60 — expertise and capacity, through the client.
 //
-// supabase/47_adviser_expertise.sql is the boundary. These exist because mock
+// supabase/48_adviser_expertise.sql is the boundary. These exist because mock
 // mode is what the components and the demo run against, so a rule the
 // database has and mock mode does not is how #47 shipped broken: the panel
 // goes on working in the demo and 403s in production.

@@ -10,7 +10,7 @@ export const AVAILABILITY_MIN = 0;
 export const AVAILABILITY_MAX = 40;
 
 // How many teams an adviser will advise at once (issue #60). Mirrored by
-// users_advising_max_teams_range_check in supabase/47_adviser_expertise.sql.
+// users_advising_max_teams_range_check in supabase/48_adviser_expertise.sql.
 // There is no zero: an adviser who will take no teams turns the Available to
 // advise switch off, which is a different statement and has a different
 // effect — it hides them from search instead of showing them as full.
