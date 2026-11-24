@@ -5,6 +5,7 @@ import Avatar from './Avatar';
 import StatusPill from './StatusPill';
 import CheckIns from './CheckIns';
 import Deliverables from './Deliverables';
+import { Empty, ErrorState, Loading } from './States';
 
 // The teams you advise, on the team page (issue #54).
 //
@@ -18,31 +19,46 @@ import Deliverables from './Deliverables';
 // This sits beside "Your team" rather than replacing it, because advising is
 // not membership: somebody can advise two projects and be on a team of their
 // own, and the page has to show both without implying either is the other.
-export default function AdvisedTeams() {
-  const { data, loading, error, setData } = useAsync(getAdvisedProjects, []);
+//
+// With `projectId` it is a page of its own instead — the one a card on the
+// Advising dashboard opens (#56) — showing just that team, with loading and
+// error states, since nothing else is on the page to fall back to.
+export default function AdvisedTeams({ projectId = null }) {
+  const { data, loading, error, reload, setData } = useAsync(getAdvisedProjects, []);
   // project id -> 'confirming' | 'leaving' | an error message
   const [state, setState] = useState({});
 
-  async function stepDown(projectId) {
-    setState((s) => ({ ...s, [projectId]: 'leaving' }));
+  async function stepDown(id) {
+    setState((s) => ({ ...s, [id]: 'leaving' }));
     try {
-      await stepDownAsAdviser(projectId);
-      setData((list) => list.filter((p) => p.id !== projectId));
-      setState((s) => ({ ...s, [projectId]: undefined }));
+      await stepDownAsAdviser(id);
+      setData((list) => list.filter((p) => p.id !== id));
+      setState((s) => ({ ...s, [id]: undefined }));
     } catch (err) {
-      setState((s) => ({ ...s, [projectId]: err.message || 'Something went wrong.' }));
+      setState((s) => ({ ...s, [id]: err.message || 'Something went wrong.' }));
     }
   }
 
-  // One section of somebody else's page: a failure here shows nothing rather
-  // than taking the roster above it down.
-  if (loading || error) return null;
-  const projects = data || [];
-  if (projects.length === 0) return null;
+  if (projectId) {
+    if (loading) return <Loading label="Loading the team" />;
+    if (error) return <ErrorState error={error} onRetry={reload} />;
+  } else if (loading || error) {
+    // One section of somebody else's page: a failure here shows nothing
+    // rather than taking the roster above it down.
+    return null;
+  }
+  const projects = (data || []).filter((p) => !projectId || p.id === projectId);
+  if (projects.length === 0) {
+    return projectId ? (
+      <Empty title="You don't advise this team.">
+        <p>Only a team's accepted adviser can open it from here.</p>
+      </Empty>
+    ) : null;
+  }
 
   return (
     <>
-      <h2 className="section">Teams you advise</h2>
+      {!projectId && <h2 className="section">Teams you advise</h2>}
       {projects.map((p) => {
         const s = state[p.id];
         return (

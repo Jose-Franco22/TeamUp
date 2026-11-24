@@ -1403,3 +1403,23 @@ button:disabled { opacity: 0.45; cursor: default; }
 .deliverables .deliverable { scroll-margin-top: 76px; }
 .deliverable-head h3:focus { outline: none; }
 .deliverable-head h3:focus-visible { outline: 2px solid var(--open); outline-offset: 2px; border-radius: 4px; }
+
+/* ---------- adviser dashboard (#56) ---------- */
+.advising-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.advising-card { display: block; height: 100%; margin-bottom: 0; color: inherit; text-decoration: none; }
+.advising-card:hover, .advising-card:focus-visible { border-color: var(--slate); }
+.advising-card.flagged { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.advising-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.advising-head h2 { overflow-wrap: anywhere; }
+.advising-head .pill { flex: none; }
+.attention-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.attention-list li { font-size: 12.5px; padding: 3px 8px; border-radius: 6px; color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.advising-stats { margin: 16px 0 0; gap: 14px 26px; }
+.advising-stats dt { font-size: 11.5px; color: var(--mute); margin-bottom: 2px; }
+.advising-stats dd { margin: 0; font-size: 14px; color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.advising-stats dd .pill { margin-left: 6px; vertical-align: 1px; }
+.advising-due { font-weight: 400; color: var(--slate); }
+.advised-back { display: inline-block; margin-bottom: 14px; font-size: 13.5px; }
+@media (max-width: 760px) {
+  .advising-list { grid-template-columns: minmax(0, 1fr); }
+}
