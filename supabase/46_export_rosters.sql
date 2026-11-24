@@ -1,7 +1,8 @@
 -- Export every team and its roster (issue #40). Run after
 -- 41_github_activity.sql, which adds projects.github_repo — the Teams sheet
 -- names it as a column — and after 39_project_advisers.sql, which is where
--- the adviser columns come from.
+-- the adviser columns come from, and after 44_faculty_advisers.sql, whose
+-- faculty_directory keeps advisers out of the Unplaced sheet.
 --
 -- 46 because 45 is claimed by #95 (`45_milestone_deliverables.sql`), which is
 -- open. #91 learned the hard way that a number an open PR has claimed is not
@@ -183,6 +184,10 @@ begin
           from public.users u
          where not u.is_admin
            and not exists (select 1 from public.team_members tm where tm.user_id = u.id)
+           -- Faculty are not students either: an adviser has no team by
+           -- design, and listing them here is noise for the instructor.
+           and not exists (select 1 from public.faculty_directory fd
+                            where fd.email = lower(u.email))
       ) unplaced;
   else
     v_unplaced := '[]'::jsonb;

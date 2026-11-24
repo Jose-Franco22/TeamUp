@@ -16,7 +16,7 @@
 --     advise and has not answered. A pending invitation is not advising.
 
 begin;
-select plan(39);
+select plan(40);
 
 select set_config('tests.admin',     tests.sign_in_with_microsoft('instructor40@utrgv.edu', 'Instructor')::text, true);
 select set_config('tests.owner_a',   tests.sign_in_with_microsoft('ownera40@utrgv.edu', 'Olivia Owner')::text, true);
@@ -109,6 +109,10 @@ select is(jsonb_array_length(current_setting('tests.admin_export')::jsonb -> 'me
   'every member of every team');
 select is(jsonb_array_length(current_setting('tests.admin_export')::jsonb -> 'unplaced_students'), 2,
   'and every student who is not on one');
+select is((select count(*)::int
+             from jsonb_array_elements(current_setting('tests.admin_export')::jsonb -> 'unplaced_students') s
+            where s->>'email' in ('adviser40@utrgv.edu', 'asked40@utrgv.edu')), 0,
+  'but not the faculty, who have no team by design');
 
 -- THE RULE THAT IS EASY TO LOSE: an instructor is not a student. 18_'s
 -- trigger keeps admins off rosters, and admin_team_json() leaves them out of
