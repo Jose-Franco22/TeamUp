@@ -208,6 +208,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 .head > div { min-width: 0; }
 .head h1 { overflow-wrap: anywhere; margin: 0 0 3px; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
 .head p { margin: 0; font-size: 14px; color: var(--slate); }
+/* More than one control in a page header (#40 put Export beside Refresh).
+   Wraps rather than squashing, since an inline error can land beside them. */
+.head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 .section { font-size: 15px; font-weight: 600; margin: 26px 0 10px; }
 .section:first-of-type { margin-top: 0; }

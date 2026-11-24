@@ -204,6 +204,113 @@ export async function getAdminDashboard() {
   return data;
 }
 
+/**
+ * Every team, member and unplaced student, for the Excel export (#40).
+ *
+ * Shaped by supabase/46_export_rosters.sql, which is also where the rule
+ * about who sees what lives. The mock restates that rule in the same order
+ * the function checks it — signed in, then admin, then an *accepted*
+ * adviser, then refused — because a refusal spelled differently on the two
+ * sides means the button works in the demo and 403s in production.
+ *
+ * An adviser gets their teams and no unplaced students. The empty array is
+ * deliberate on both sides: the workbook still draws the sheet, so a reader
+ * sees "none" rather than wondering whether the export broke.
+ */
+export async function exportRosters() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const isAdmin = Boolean(users.find((u) => u.id === id)?.is_admin);
+    const advisedProjectIds = adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'accepted')
+      .map((r) => r.project_id);
+    if (!isAdmin && advisedProjectIds.length === 0) {
+      throw new Error('Only an admin or an adviser can export rosters');
+    }
+    const inScope = (projectId) => isAdmin || advisedProjectIds.includes(projectId);
+
+    const teamRows = teams
+      .filter((t) => inScope(t.project_id))
+      .map((t) => {
+        const project = projects.find((p) => p.id === t.project_id);
+        const owner = users.find((u) => u.id === project.creator_id);
+        const open = adviserFor(t.project_id);
+        const adviser = open ? users.find((u) => u.id === open.adviser_id) : null;
+        return {
+          team_id: t.id,
+          project_id: project.id,
+          team_name: project.title,
+          status: project.status,
+          owner_name: owner.name,
+          owner_email: owner.email,
+          member_count: teamMembers.filter(
+            (m) => m.team_id === t.id && !users.find((u) => u.id === m.user_id)?.is_admin
+          ).length,
+          team_size_target: project.team_size_target,
+          adviser_status: open ? open.status : 'none',
+          adviser_name: open?.status === 'accepted' ? adviser.name : null,
+          adviser_email: open?.status === 'accepted' ? adviser.email : null,
+          github_repo: project.github_repo ?? '',
+        };
+      })
+      .sort((a, b) => a.team_name.localeCompare(b.team_name) || a.team_id.localeCompare(b.team_id));
+
+    const memberRows = teamMembers
+      .map((m) => {
+        const team = teams.find((t) => t.id === m.team_id);
+        const project = projects.find((p) => p.id === team.project_id);
+        const user = users.find((u) => u.id === m.user_id);
+        return { m, team, project, user };
+      })
+      .filter(({ project, user }) => !user.is_admin && inScope(project.id))
+      .map(({ m, team, project, user }) => ({
+        user_id: user.id,
+        team_id: team.id,
+        team_name: project.title,
+        name: user.name,
+        email: user.email,
+        role_name: allRoles.find((r) => r.id === m.role_id)?.name ?? '',
+        is_owner: project.creator_id === user.id,
+        github_url: user.github_url ?? '',
+        joined_at: m.joined_at ?? null,
+      }))
+      .sort(
+        (a, b) =>
+          a.team_name.localeCompare(b.team_name) ||
+          a.name.localeCompare(b.name) ||
+          a.user_id.localeCompare(b.user_id)
+      );
+
+    const unplacedRows = !isAdmin
+      ? []
+      : users
+          .filter((u) => !u.is_admin && !teamMembers.some((m) => m.user_id === u.id))
+          .map((u) => ({
+            user_id: u.id,
+            name: u.name,
+            email: u.email,
+            skills: skillsForUser(u.id).map((sk) => sk.name),
+            has_pending_request: joinRequests.some(
+              (r) => r.user_id === u.id && r.status === 'pending'
+            ),
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name) || a.user_id.localeCompare(b.user_id));
+
+    return {
+      scope: isAdmin ? 'admin' : 'adviser',
+      generated_at: new Date().toISOString(),
+      teams: teamRows,
+      members: memberRows,
+      unplaced_students: unplacedRows,
+    };
+  }
+
+  const { data, error } = await supabase.rpc('export_rosters');
+  if (error) throw error;
+  return data;
+}
+
 export async function getAdminTeam(teamId) {
   if (USE_MOCKS) {
     await delay();

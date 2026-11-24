@@ -5,6 +5,7 @@ import { formatDue } from '../components/Milestones';
 import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
 import StatusPill from '../components/StatusPill';
+import ExportRosters from '../components/ExportRosters';
 
 export function PendingProjectLinks({ requests }) {
   if (requests.length === 0) return <span className="desc">No pending requests</span>;
@@ -207,7 +208,13 @@ export default function Admin() {
           <h1>Administration</h1>
           <p>Track team formation and find students who still need a team.</p>
         </div>
-        <button className="btn ghost" onClick={reload}>Refresh</button>
+        <div className="head-actions">
+          {/* #40: the rosters an instructor needs for grading, records and
+              emailing teams. export_rosters() narrows by who is asking, so
+              the same button serves the Advising dashboard (#56). */}
+          <ExportRosters />
+          <button className="btn ghost" onClick={reload}>Refresh</button>
+        </div>
       </div>
 
       <dl className="admin-summary" aria-label="Formation summary">
