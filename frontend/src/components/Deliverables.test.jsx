@@ -560,7 +560,8 @@ describe('arriving from "Hand it in"', () => {
   });
 
   test('a refresh after a write does not scroll the page back', async () => {
-    client.getDeliverables.mockResolvedValue(TWO_MILESTONES);
+    // A fresh array each time, as a real refresh returns, so the list really re-renders.
+    client.getDeliverables.mockImplementation(async () => TWO_MILESTONES.map((d) => ({ ...d })));
     const user = userEvent.setup();
     renderAt('/team#deliverable-ms-final');
     await waitFor(() => expect(scrolled).toHaveLength(1));
@@ -571,6 +572,22 @@ describe('arriving from "Hand it in"', () => {
     await waitFor(() => expect(client.getDeliverables).toHaveBeenCalledTimes(2));
 
     expect(scrolled).toHaveLength(1);
+  });
+
+  // The real Team page shows the student's own team and, below it, the teams
+  // they advise — the same milestones in both. Only their own card may answer.
+  test('with an advised team on the same page, only the student’s own card scrolls', async () => {
+    client.getDeliverables.mockResolvedValue(TWO_MILESTONES);
+    render(
+      <MemoryRouter initialEntries={['/team#deliverable-ms-final']}>
+        <Deliverables projectId="p-parking" />
+        <Deliverables projectId="p-degree" asAdviser />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getAllByRole('article', { name: 'Final report' })).toHaveLength(2));
+    await waitFor(() => expect(scrolled).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(scrolled).toEqual([{ id: 'deliverable-ms-final', options: { behavior: 'smooth', block: 'start' } }]);
   });
 
   test('the adviser’s view of a team carries no anchors, so it is never the target', async () => {
