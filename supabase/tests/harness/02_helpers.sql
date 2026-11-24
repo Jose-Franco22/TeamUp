@@ -76,5 +76,27 @@ begin
 end;
 $$;
 
+-- What the Storage server writes when a file is uploaded: the object row,
+-- inserted as the caller, so the bucket's insert policy on storage.objects
+-- decides. Deliberately not SECURITY DEFINER — a helper that ran as its
+-- owner would sail past the very policy the tests are about. Metadata is
+-- the size and MIME type Storage records from the upload; nothing checks
+-- the bucket's limits here, because Postgres doesn't (see 00_supabase_stub).
+create or replace function tests.upload_to_storage(
+  p_bucket   text,
+  p_name     text,
+  p_size     bigint,
+  p_mimetype text
+)
+returns void
+language plpgsql
+as $$
+begin
+  insert into storage.objects (bucket_id, name, owner, metadata)
+  values (p_bucket, p_name, auth.uid(),
+          jsonb_build_object('size', p_size, 'mimetype', p_mimetype));
+end;
+$$;
+
 grant usage on schema tests to authenticated, anon;
 grant execute on all functions in schema tests to authenticated, anon;

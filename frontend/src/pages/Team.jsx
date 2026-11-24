@@ -19,6 +19,7 @@ import { TeamChecklist } from '../components/NextSteps';
 import AdviserPanel from '../components/AdviserPanel';
 import AdvisedTeams from '../components/AdvisedTeams';
 import CheckIns from '../components/CheckIns';
+import Deliverables from '../components/Deliverables';
 import RepoActivity from '../components/RepoActivity';
 
 export default function Team() {
@@ -258,6 +259,10 @@ export default function Team() {
           viewerId={user?.id}
         />
       )}
+      {/* Not gated on the team being full, unlike the checklist: any member
+          can hand in a deliverable (issue #57), and a proposal can be due
+          before the roster fills. Renders nothing until a milestone needs one. */}
+      <Deliverables projectId={data.id} />
 
       <div className="rows">
         <div className="row hd">

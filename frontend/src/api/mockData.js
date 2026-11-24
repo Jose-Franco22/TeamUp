@@ -480,6 +480,20 @@ export const notifications = [];
 
 export const adminActions = [];
 
+// --- DELIVERABLES (#57) ------------------------------------------------
+// See supabase/45_milestone_deliverables.sql. A milestone takes a
+// deliverable when its requires_deliverable is true (a missing flag reads
+// as false, as the column's default does). deliverableSubmissions: id,
+// project_id, milestone_id, version, kind ('file' | 'link'), file_path,
+// file_name, file_size, file_type, link_url, is_late, status,
+// submitted_by, submitted_at — append-only, one row per version.
+// deliverableComments: id, project_id, milestone_id, submission_id,
+// author_id, body, decision, created_at. deliverableFiles stands in for
+// the Storage bucket: path -> { size, mimetype, url }.
+export const deliverableSubmissions = [];
+export const deliverableComments = [];
+export const deliverableFiles = new Map();
+
 // --- NEXT STEPS --------------------------------------------------------
 // See supabase/33_next_steps.sql. nextSteps: id, title, due_at (or null),
 // sort_order (1..n, the order teams see), seeded with the same starting

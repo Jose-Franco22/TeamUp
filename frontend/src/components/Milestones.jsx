@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { deleteMilestone, getMilestones, saveMilestone } from '../api/client';
 import { MILESTONE_MESSAGE_MAX, ValidationError, charCount, validateMilestone } from '../lib/validation';
 import { formatCountdown, isDueSoon } from '../lib/deadlines';
+import { setMilestoneRequiresDeliverable } from '../api/client';
 
 // The class schedule (issue #38). Admins keep it on the dashboard; students
 // see what's coming up in a banner on every page.
@@ -17,6 +18,39 @@ export function toLocalInput(iso) {
   const d = new Date(iso);
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// --- Deliverables on the schedule (#57) ---------------------------------------
+// A milestone that takes a deliverable says so wherever the schedule is
+// shown, and offers students the way to hand it in. Without this, a student
+// reading the deadline had no way to know there was anything to submit, or
+// that the form lives in the Deliverables card on their team page.
+
+export function DeliverableTag() {
+  return <span className="pill info">Deliverable</span>;
+}
+
+// The hash names the milestone, and the Deliverables card on the team page
+// scrolls that one into view once it has loaded, so nobody has to go
+// looking for it below the roster.
+export function deliverableAnchor(milestoneId) {
+  return `deliverable-${milestoneId}`;
+}
+
+export function HandItInButton({ milestoneId, milestoneName }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      className="btn ghost hand-it-in"
+      onClick={() => navigate(`/team#${deliverableAnchor(milestoneId)}`)}
+      // Starts with the visible words, so speech input still finds it, and
+      // names the milestone, since a list can hold several of these.
+      aria-label={`Hand it in: ${milestoneName}`}
+    >
+      Hand it in
+    </button>
+  );
 }
 
 // --- Student banner --------------------------------------------------------
@@ -85,9 +119,12 @@ export function MilestoneBanner({ limit = 3 }) {
               <span className="milestone-name">
                 {m.name}
                 {m.is_formation_deadline && <span className="pill warn">Rosters lock</span>}
+                {m.requires_deliverable && <DeliverableTag />}
               </span>
               <span className="milestone-due">{formatDue(m.due_at)}</span>
               {m.message && <p className="milestone-message">{m.message}</p>}
+              {/* The banner only ever shows to students (App.jsx). */}
+              {m.requires_deliverable && <HandItInButton milestoneId={m.id} milestoneName={m.name} />}
             </li>
           ))}
         </ul>
@@ -119,6 +156,8 @@ export function MilestoneManager() {
   const [saving, setSaving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(null);
   const [message, setMessage] = useState(null);
+  // The milestone whose deliverable switch is saving.
+  const [flagging, setFlagging] = useState(null);
 
   async function load() {
     try {
@@ -183,6 +222,29 @@ export function MilestoneManager() {
     }
   }
 
+  // Its own call rather than a field on the form (issue #57): the switch
+  // saves on its own, so turning it on doesn't depend on re-saving the name
+  // and date, and set_milestone_requires_deliverable() can refuse turning it
+  // off once teams have submitted.
+  async function handleRequiresDeliverable(m, requires) {
+    setFlagging(m.id);
+    setServerError(null);
+    setMessage(null);
+    try {
+      const saved = await setMilestoneRequiresDeliverable(m.id, requires);
+      setList((rows) => rows.map((r) => (r.id === m.id ? { ...r, requires_deliverable: saved.requires_deliverable } : r)));
+      setMessage(
+        saved.requires_deliverable
+          ? `Teams now hand in a deliverable for “${m.name}”.`
+          : `“${m.name}” no longer takes a deliverable.`
+      );
+    } catch (err) {
+      setServerError(err.message);
+    } finally {
+      setFlagging(null);
+    }
+  }
+
   async function handleDelete(m) {
     setConfirmingDelete(null);
     try {
@@ -213,6 +275,16 @@ export function MilestoneManager() {
                   {m.is_formation_deadline && <span className="pill warn">Formation deadline</span>}
                   <span className="admin-secondary">{formatDue(m.due_at)}</span>
                   {m.message && <p className="milestone-message">{m.message}</p>}
+                  <label className="switch milestone-deliverable">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(m.requires_deliverable)}
+                      disabled={flagging === m.id}
+                      onChange={(e) => handleRequiresDeliverable(m, e.target.checked)}
+                      aria-label={`${m.name} needs a deliverable`}
+                    />
+                    Needs a deliverable — each team hands in a file or link on its team page
+                  </label>
                 </div>
                 <span className="acts">
                   {confirmingDelete === m.id ? (
