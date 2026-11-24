@@ -1,12 +1,14 @@
 name: Tests
 
-# Runs every test suite on each pull request and on every push to main.
+# Runs every test suite on each pull request and on every push to main or
+# Testing. Testing is where branches first meet, so it can go red even when
+# every PR was green on its own (see #101); running on its pushes catches that.
 # Make "Tests" a required check (Settings → Branches → main) so a pull
 # request can't merge while anything here is failing.
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, Testing]
 
 jobs:
   frontend:
