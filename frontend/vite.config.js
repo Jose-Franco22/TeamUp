@@ -18,6 +18,7 @@ export default defineConfig({
   // tests run against the mock API unless a test stubs VITE_USE_MOCKS itself.
   test: {
     environment: 'jsdom',
+    globalSetup: ['./src/test/globalTimezone.js'],
     setupFiles: ['./src/test/setup.js'],
     include: ['src/**/*.test.{js,jsx}'],
     env: { VITE_USE_MOCKS: 'true' },

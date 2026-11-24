@@ -19,6 +19,7 @@ import { TeamChecklist } from '../components/NextSteps';
 import AdviserPanel from '../components/AdviserPanel';
 import AdvisedTeams from '../components/AdvisedTeams';
 import CheckIns from '../components/CheckIns';
+import RepoActivity from '../components/RepoActivity';
 
 export default function Team() {
   const { data, loading, error, reload, setData } = useAsync(getMyTeam, []);
@@ -360,6 +361,17 @@ export default function Team() {
             : `Removing a member reopens their seat and notifies them.${deadline ? ` Rosters lock on ${deadline.toLocaleDateString()} — after that only an admin can remove a member.` : ''}`}
         </p>
       )}
+
+      {/* Below the roster, because it is about the work rather than the
+          people, and above the danger zone, because leaving or deleting the
+          team is the last thing on the page (#58). */}
+      <RepoActivity
+        projectId={data.id}
+        isOwner={isOwner}
+        members={data.members}
+        repo={data.github_repo ?? ''}
+        viewerId={user?.id}
+      />
 
       {!isOwner && (
         <section className="card danger-zone">
