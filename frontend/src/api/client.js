@@ -30,9 +30,11 @@ import {
   evidenceForUser,
   adviserRequests,
   adviserFor,
+  checkIns,
   repoActivity,
   repoActivityFor,
 } from './mockData';
+import { validateCheckIn, weekStart } from '../lib/checkIns';
 import { supabase } from '../lib/supabaseClient';
 import { isOpenProject } from '../lib/browseFilters';
 import { JOIN_BLOCKED, isPastDeadline } from '../lib/joinRequests';
@@ -244,13 +246,51 @@ function recordAdminAction(action) {
   });
 }
 
+// The trigger pair in 40_respond_to_adviser_request.sql: the accepted adviser
+// of a project holds no seat on it, whichever end you arrive from. In SQL that
+// is one trigger on team_members and one on join_requests, which between them
+// cover all eight statements that seat somebody. Mock mode has no triggers, so
+// the same question is asked at each place that seats or requests.
+//
+// WHERE IN THE ORDER. Server-side the trigger fires on the insert, so every
+// refusal the calling function has of its own is reached first. createJoinRequest
+// and respondToJoinRequest below match that exactly. Admin placement does not,
+// and deliberately: adminMoveStudent takes the student off their old team before
+// seating them on the new one, and a mock has no transaction to roll that back,
+// so the question is asked up front in mockPlacementTarget instead. That is the
+// same reason respondToJoinRequest runs every check before it mutates anything.
+// The refusal is the same either way; only how much else is checked first
+// differs, and only for a path no student can reach.
+//
+// Advising a *different* project is untouched: #54 says advising doesn't stop
+// you from being on a team of your own.
+function mockAdvisesProject(userId, projectId) {
+  return adviserRequests.some(
+    (r) => r.project_id === projectId && r.adviser_id === userId && r.status === 'accepted'
+  );
+}
+
+// The membership half of the same question, and now shared: #58's
+// repo_activity select policy and project_repo_for_refresh() ask it too, so
+// the refresh section below calls this rather than keeping a second copy.
+// It was written identically in both branches on purpose, so that whichever
+// merged second could delete rather than rename. #54 merged first.
+function mockOnProjectTeam(projectId, userId) {
+  const team = teams.find((t) => t.project_id === projectId);
+  return Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === userId));
+}
+
+const NOT_THE_ADVISER = 'The adviser of a project cannot also hold a seat on it';
+
 // Checks shared by assign and move, in the same order as the SQL.
 function mockPlacementTarget(userId, teamId, roleId) {
   if (!roleId || !allRoles.some((r) => r.id === roleId)) throw new Error('Pick a role');
   if (!users.some((u) => u.id === userId && !u.is_admin)) throw new Error('Student not found');
   const team = teams.find((t) => t.id === teamId);
   if (!team) throw new Error('Team not found');
-  return { team, project: projects.find((p) => p.id === team.project_id) };
+  const project = projects.find((p) => p.id === team.project_id);
+  if (mockAdvisesProject(userId, project.id)) throw new Error(NOT_THE_ADVISER);
+  return { team, project };
 }
 
 function mockAssertOpenSeat(team, project) {
@@ -262,7 +302,7 @@ function mockAssertOpenSeat(team, project) {
 // private.seat(): the membership, the role's seat taken, fill state, and
 // every request the student still has out declined.
 function mockSeat(userId, team, project, roleId) {
-  const membership = { team_id: team.id, user_id: userId, role_id: roleId };
+  const membership = { team_id: team.id, user_id: userId, role_id: roleId, joined_at: new Date().toISOString() };
   teamMembers.push(membership);
   const need = projectRolesNeeded.find((n) => n.project_id === project.id && n.role_id === roleId);
   if (need && need.quantity_needed > 0) need.quantity_needed -= 1;
@@ -769,7 +809,7 @@ const PROJECT_SELECT = `
   id, creator_id, title, description, team_size_target, status, created_at, github_repo,
   creator:users!creator_id ( name ),
   project_roles_needed ( role_id, skill_id, quantity_needed, roles ( name ), skills ( name, category ) ),
-  teams ( id, formed_at, team_members ( user_id, role_id, roles ( name ), users ( name, availability_hours ) ) )
+  teams ( id, formed_at, team_members ( user_id, role_id, joined_at, roles ( name ), users ( name, availability_hours ) ) )
 `;
 
 function pickViewerStatus(rows) {
@@ -841,6 +881,9 @@ function composeProject(row, viewerId, viewerRequestsByProject, guestMemberCount
       name: tm.users.name,
       role_id: tm.role_id,
       role: tm.roles?.name ?? null,
+      // When they took the seat, so check-ins (#55) don't count them missing
+      // for weeks before they were on the team.
+      joined_at: tm.joined_at ?? null,
     }));
     member_count = members.length;
     avg_availability_hours = members.length
@@ -1000,7 +1043,7 @@ export async function createProject({
 
     const teamId = `t-${Date.now()}`;
     teams.push({ id: teamId, project_id: projectId, formed_at: null });
-    teamMembers.push({ team_id: teamId, user_id: id, role_id: creator_role_id });
+    teamMembers.push({ team_id: teamId, user_id: id, role_id: creator_role_id, joined_at: new Date().toISOString() });
 
     for (const r of roles_needed) {
       projectRolesNeeded.push({
@@ -1306,7 +1349,7 @@ export async function removeSkill(skillId) {
 // test in client.test.js that reads 07_profile_evidence.sql and asserts this
 // nesting, so the two cannot drift again.
 export const USER_SELECT =
-  'id, email, name, bio, availability_hours, github_url, is_admin, email_notifications, ' +
+  'id, email, name, bio, availability_hours, github_url, is_admin, email_notifications, adviser_digest, ' +
   'user_skills ( source, skills ( id, name, category ), profile_evidence ( months, projects ) )';
 
 // PostgREST returns an embedded child as an object when it can tell the
@@ -1383,6 +1426,24 @@ export async function setEmailNotifications(enabled) {
   }
   const viewerId = requireViewerId(await getViewerId());
   const { error } = await supabase.from('users').update({ email_notifications: value }).eq('id', viewerId);
+  if (error) throw error;
+  return value;
+}
+
+// Turns the Monday email digest of the teams they advise on or off for the
+// signed-in adviser (issue #59). Saved on its own, like the student email
+// setting above. Only advisers see the switch; the digest job only reads it
+// for them (supabase/38_adviser_digest.sql).
+export async function setAdviserDigest(enabled) {
+  const value = Boolean(enabled);
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    users.find((x) => x.id === id).adviser_digest = value;
+    return value;
+  }
+  const viewerId = requireViewerId(await getViewerId());
+  const { error } = await supabase.from('users').update({ adviser_digest: value }).eq('id', viewerId);
   if (error) throw error;
   return value;
 }
@@ -1546,6 +1607,10 @@ export async function createJoinRequest(projectId, message = '') {
       throw new Error(JOIN_BLOCKED.full);
     }
     if (isPastDeadline(formationDeadline())) throw new Error(JOIN_BLOCKED.deadline);
+    // Last, because in SQL this is the trigger firing on the insert rather
+    // than a check inside create_join_request() — so every one of the
+    // function's own refusals is reached first.
+    if (mockAdvisesProject(id, projectId)) throw new Error(NOT_THE_ADVISER);
     const row = {
       id: `jr-${Date.now()}`,
       project_id: projectId,
@@ -1655,6 +1720,11 @@ export async function respondToRequest(requestId, status, roleId) {
       if (teamMembers.some((tm) => tm.user_id === r.user_id)) {
         throw new Error('That student has already joined a team');
       }
+      // Alongside the admin check above, and for the same reason: both are
+      // triggers on team_members server-side, so both fire on the insert.
+      // Reachable in one order only — ask to join, then accept an invitation
+      // to advise the same project, which takes no seat and so is allowed.
+      if (mockAdvisesProject(r.user_id, r.project_id)) throw new Error(NOT_THE_ADVISER);
     }
 
     r.status = status;
@@ -1662,7 +1732,7 @@ export async function respondToRequest(requestId, status, roleId) {
     // Accepting adds the person to the roster, and fills the project once
     // it reaches team_size_target. The backend does this in a transaction.
     if (status === 'accepted') {
-      teamMembers.push({ team_id: team.id, user_id: r.user_id, role_id: roleId });
+      teamMembers.push({ team_id: team.id, user_id: r.user_id, role_id: roleId, joined_at: new Date().toISOString() });
       const count = teamMembers.filter((tm) => tm.team_id === team.id).length;
       if (count >= project.team_size_target) {
         const previousStatus = project.status;
@@ -1768,7 +1838,7 @@ export async function getMyTeam() {
   // unlike the plain project views — see TODO-backend.md.
   const { data: memberRows, error: membersErr } = await supabase
     .from('team_members')
-    .select('user_id, role_id, roles ( name ), users ( name, availability_hours, github_url, user_skills ( skills ( name ) ) )')
+    .select('user_id, role_id, joined_at, roles ( name ), users ( name, availability_hours, github_url, user_skills ( skills ( name ) ) )')
     .eq('team_id', membership.team_id);
   if (membersErr) throw membersErr;
 
@@ -1780,6 +1850,7 @@ export async function getMyTeam() {
       name: tm.users.name,
       role_id: tm.role_id,
       role: tm.roles?.name ?? null,
+      joined_at: tm.joined_at ?? null,
       availability_hours: tm.users.availability_hours,
       skills: (tm.users.user_skills || []).map((us) => us.skills.name),
       // #58 matches commits to members by this (lib/github.js:matchContributor).
@@ -1812,12 +1883,9 @@ async function fetchLeaveRules() {
 // { ok: false, reason } the way lib/matching/judge.js does, and the page
 // shows a sentence beside the table instead of replacing it with an error.
 
-// Mock-mode only: the membership test that `repo_activity`'s select policy
-// and project_repo_for_refresh() both make server-side.
-function mockOnProjectTeam(projectId, userId) {
-  const team = teams.find((t) => t.project_id === projectId);
-  return Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === userId));
-}
+// The membership test that `repo_activity`'s select policy and
+// project_repo_for_refresh() both make server-side is mockOnProjectTeam(),
+// defined with the adviser helpers above — #54 got there first.
 
 /**
  * Links a repository, changes it, or unlinks with ''.
@@ -2225,8 +2293,8 @@ function mockIsOnProjectTeam(projectId, userId) {
 
 // Who the owner may ask, by name or email. Two characters minimum, so an
 // empty box doesn't return the student body; ten at most, ordered by name.
-// Excluded: the owner, the team, admin accounts (18_admin_access.sql keeps
-// them out of student teams), and whoever already holds an open invitation.
+// Only CS faculty (the faculty directory, 44_faculty_advisers.sql) are offered.
+// Excluded: the owner, the team, and whoever already holds an open invitation.
 // Somebody who declined earlier is still listed — asking again is allowed.
 export async function searchAdvisers(projectId, query) {
   const trimmed = (query ?? '').trim();
@@ -2241,7 +2309,7 @@ export async function searchAdvisers(projectId, query) {
     return users
       .filter(
         (u) =>
-          !u.is_admin &&
+          u.is_faculty &&
           u.id !== id &&
           (u.name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle)) &&
           !mockIsOnProjectTeam(projectId, u.id) &&
@@ -2318,12 +2386,13 @@ export async function inviteAdviser(projectId, adviserId) {
     const adviser = users.find((u) => u.id === adviserId);
     if (!adviser) throw new Error('That account does not exist');
     // `adviser.is_admin` is deliberately not checked: advising is not tied to
-    // the flag (39_project_advisers.sql, decision 1). searchAdvisers() above
-    // still leaves admins out, so the only way here is by id.
+    // the flag (39_project_advisers.sql, decision 1). Being CS faculty is
+    // (44_faculty_advisers.sql), checked after the team, as there.
     if (adviserId === id) throw new Error('You cannot invite yourself to advise your own project');
     if (mockIsOnProjectTeam(projectId, adviserId)) {
       throw new Error('They are already on this team, so they cannot advise it');
     }
+    if (!adviser.is_faculty) throw new Error('Only Computer Science faculty can advise a project');
 
     const open = mockOpenAdviserRow(projectId);
     if (open) {
@@ -2397,6 +2466,240 @@ export async function removeAdviser(projectId) {
 
   const { error } = await supabase.rpc('remove_adviser', { p_project_id: projectId });
   if (error) throw error;
+}
+
+// --- Answering an invitation to advise (issue #54) -----------------------
+//
+// #53 is the owner asking; this is the other person's answer, and what they
+// get afterwards. Nothing here writes to team_members or touches a project's
+// fill state — accepting is the moment that would be tempting, and the seat
+// rule is the same one 39_project_advisers.sql is built around.
+
+// The invitations waiting for the caller's answer. Pending only: an answered
+// one is not waiting for anything, and a withdrawn one stops being offered.
+export async function getMyAdviserRequests() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'pending')
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((r) => {
+        const project = projects.find((p) => p.id === r.project_id);
+        const owner = users.find((u) => u.id === project.creator_id);
+        return {
+          id: r.id,
+          project_id: r.project_id,
+          project_title: project.title,
+          project_description: project.description,
+          owner_id: owner.id,
+          owner_name: owner.name,
+          created_at: r.created_at,
+        };
+      });
+  }
+
+  const { data, error } = await supabase.rpc('my_adviser_requests');
+  if (error) throw error;
+  return data ?? [];
+}
+
+// accept === false declines. The two share a function because they are one
+// answer with two values, and because only one of them may ever be given.
+export async function respondToAdviserRequest(requestId, accept) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (accept !== true && accept !== false) {
+      throw new Error('Answer the invitation with accept or decline');
+    }
+    const row = adviserRequests.find((r) => r.id === requestId);
+    if (!row) throw new Error('Adviser request not found');
+    if (row.adviser_id !== id) {
+      throw new Error('Only the person who was asked can answer this invitation');
+    }
+    if (row.status !== 'pending') throw new Error('That adviser request has already been answered');
+    // Only accepting. Someone on the team holding an open invitation can still
+    // decline it, and should — same order as the SQL, which asks this after
+    // the pending check and before it writes the status.
+    if (accept && mockOnProjectTeam(row.project_id, id)) {
+      throw new Error('You are on this team, so you cannot also advise it');
+    }
+
+    const project = projects.find((p) => p.id === row.project_id);
+    row.status = accept ? 'accepted' : 'declined';
+    row.responded_at = new Date().toISOString();
+    mockNotify({
+      user_id: project.creator_id,
+      kind: accept ? 'adviser_accepted' : 'adviser_declined',
+      project_id: project.id,
+      actor_id: id,
+    });
+    return row;
+  }
+
+  const { data, error } = await supabase.rpc('respond_to_adviser_request', {
+    p_request_id: requestId,
+    p_accept: accept,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// The mirror of removeAdviser(): same end state, opposite direction, and the
+// notification goes the other way. The row lands on 'cancelled' either way —
+// which of the two it was lives in the notification, not the status.
+export async function stepDownAsAdviser(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+    const row = adviserRequests.find(
+      (r) => r.project_id === projectId && r.adviser_id === id && r.status === 'accepted'
+    );
+    if (!row) throw new Error('You are not the adviser for this project');
+    row.status = 'cancelled';
+    row.responded_at = new Date().toISOString();
+    mockNotify({
+      user_id: project.creator_id,
+      kind: 'adviser_stepped_down',
+      project_id: projectId,
+      actor_id: id,
+    });
+    return;
+  }
+
+  const { error } = await supabase.rpc('step_down_as_adviser', { p_project_id: projectId });
+  if (error) throw error;
+}
+
+// The projects the caller advises, shaped exactly like every other project
+// view: the ids come from the database, the projects themselves come through
+// the same select Browse uses, so there is no second composition to drift.
+export async function getAdvisedProjects() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    return adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'accepted')
+      .map((r) => projects.find((p) => p.id === r.project_id))
+      .filter(Boolean)
+      .map((p) => buildProject(p, id));
+  }
+
+  const viewerId = requireViewerId(await getViewerId());
+  const { data: ids, error: idsErr } = await supabase.rpc('advised_project_ids');
+  if (idsErr) throw idsErr;
+  const projectIds = (ids ?? []).map((row) => (typeof row === 'string' ? row : row.advised_project_ids));
+  if (projectIds.length === 0) return [];
+
+  const [{ data: rows, error }, requestMap] = await Promise.all([
+    supabase.from('projects').select(PROJECT_SELECT).in('id', projectIds),
+    fetchViewerRequestMap(viewerId),
+  ]);
+  if (error) throw error;
+  const advisers = await fetchProjectAdvisers(viewerId, rows);
+  return rows.map((row) => composeProject(row, viewerId, requestMap, undefined, advisers));
+}
+
+// --- Weekly check-ins (#55) -------------------------------------------------
+// One per member per Monday–Sunday Central week, once the team is formed.
+// The team and its accepted adviser read them; a member writes only their
+// own, only this week. supabase/42_check_ins.sql holds every rule as RLS.
+
+const CHECK_IN_SELECT =
+  'id, project_id, user_id, week_start, did, doing_next, blockers, created_at, updated_at, users ( name )';
+
+function mockCanReadCheckIns(projectId, viewerId) {
+  const team = teams.find((t) => t.project_id === projectId);
+  const onTeam = Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === viewerId));
+  const advises = adviserRequests.some(
+    (r) => r.project_id === projectId && r.adviser_id === viewerId && r.status === 'accepted'
+  );
+  return onTeam || advises;
+}
+
+// What the database's refusals mean to the person who hit them.
+function checkInError(error) {
+  if (error?.code === '23505') {
+    return new Error("You've already checked in this week. Reload the page to edit it.");
+  }
+  if (error?.code === '42501') {
+    return new Error('Only members of a formed team can check in, and only for the current week.');
+  }
+  return error;
+}
+
+// The project's check-ins, every week, newest week first. Each row carries
+// user_name so the list doesn't need the roster to say who wrote it.
+export async function getCheckIns(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    if (!mockCanReadCheckIns(projectId, id)) {
+      throw new Error("Only this team and its adviser can see the team's check-ins");
+    }
+    return checkIns
+      .filter((c) => c.project_id === projectId)
+      .map((c) => ({ ...c, user_name: users.find((u) => u.id === c.user_id)?.name ?? null }))
+      .sort((a, b) => b.week_start.localeCompare(a.week_start));
+  }
+
+  const { data, error } = await supabase
+    .from('check_ins')
+    .select(CHECK_IN_SELECT)
+    .eq('project_id', projectId)
+    .order('week_start', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(({ users: author, ...c }) => ({ ...c, user_name: author?.name ?? null }));
+}
+
+// Posts this week's check-in, or edits it if `checkInId` is the one already
+// posted this week. Returns the project's check-ins afterwards.
+export async function saveCheckIn(projectId, fields, checkInId = null) {
+  const { values, errors, isValid } = validateCheckIn(fields);
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const team = teams.find((t) => t.project_id === projectId);
+    const onTeam = Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === id));
+    if (!onTeam || !team.formed_at) throw checkInError({ code: '42501' });
+    const week = weekStart();
+    const existing = checkIns.find((c) => c.project_id === projectId && c.user_id === id && c.week_start === week);
+    const now = new Date().toISOString();
+    if (checkInId) {
+      if (!existing || existing.id !== checkInId) throw checkInError({ code: '42501' });
+      Object.assign(existing, values, { updated_at: now });
+    } else {
+      if (existing) throw checkInError({ code: '23505' });
+      checkIns.push({
+        id: `ci-${Date.now()}-${checkIns.length}`,
+        project_id: projectId,
+        user_id: id,
+        week_start: week,
+        ...values,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+    return getCheckIns(projectId);
+  }
+
+  // user_id and week_start come from the column defaults (auth.uid() and the
+  // current Central week), so the browser's clock never picks the week.
+  const { error } = checkInId
+    ? await supabase.from('check_ins').update(values).eq('id', checkInId).select('id').single()
+    : await supabase.from('check_ins').insert({ project_id: projectId, ...values }).select('id').single();
+  if (error) {
+    // An update of a row that's no longer editable (its week ended while the
+    // form was open) matches nothing, which .single() reports as PGRST116.
+    if (error.code === 'PGRST116') throw new Error('That week has ended, so its check-in can no longer be edited.');
+    throw checkInError(error);
+  }
+  return getCheckIns(projectId);
 }
 
 // Accepted advisers for a page of Browse cards, in one call — the same shape

@@ -395,13 +395,18 @@ formation deadline (`formation_deadline()`) has passed. The sentences it raises 
 ### Email notifications
 
 Email goes out from the `notify-email` Edge Function (`supabase/functions/notify-email/`, issues
-#26 and #21). Two database webhooks call it:
+#26, #21 and #59). Three database webhooks call it:
 
 - **every new `notifications` row** — it emails that one recipient if `email.js` knows the kind:
   `join_request`, `request_accepted`, `request_declined`, `team_complete` (the "team full" email),
   and `deadline_reminder`, which #43's reminder job will write. Every other kind stays in-app only.
 - **every new `announcements` row** — it emails everyone except the admin who posted it, one email
   per person, in Resend batches of 100. Edits are not re-sent.
+- **every new `adviser_digests` row** — it emails that adviser their weekly digest (#59,
+  `digest.js`). The rows come from `private.send_adviser_digests()`, which pg_cron runs Mondays at
+  13:00 and 14:00 UTC and which only acts at 8:00 AM Central (`38_adviser_digest.sql`). Advisers
+  turn it off on their profile (`users.adviser_digest`). It goes to everyone with an accepted
+  adviser request (`private.advised_teams()`, `43_advised_teams.sql`) who advises at least one team.
 
 Students can turn off the non-essential ones on their profile (`users.email_notifications`, from
 `36_email_preferences.sql`). Deadline reminders and announcements ignore that flag
@@ -427,9 +432,42 @@ One-time setup, with the Supabase CLI linked to the project:
 4. Dashboard → **Database → Webhooks → Create a new hook**: table `public.notifications`, event
    **Insert**, type **Supabase Edge Functions**, function `notify-email`, method POST. Keep the
    `Authorization` header it adds and add `x-webhook-secret: <the same random string>`.
-5. Create a second hook the same way for table `public.announcements`, event **Insert**.
+5. Create a second hook the same way for table `public.announcements`, event **Insert**, and a
+   third for `public.adviser_digests`, event **Insert**.
 6. Check: request to join a project from a second account and the owner gets the email; post an
    announcement and a student gets it. Failures show under **Edge Functions → notify-email → Logs**.
+
+## Who can advise — the CS faculty directory (`44_faculty_advisers.sql`)
+
+Only Computer Science faculty can be asked to advise a project. "Faculty" means the account's
+email is listed on the [CS faculty directory](https://www.utrgv.edu/cecs/departments/csci/faculty/index.htm).
+That page loads its people from a public JSON endpoint (`GetDMList?search=Department of Computer
+Science`) and shows each one as `<username>@utrgv.edu`; `public.faculty_directory` stores exactly
+those emails.
+
+- `invite_adviser()` refuses anyone not on the list ("Only Computer Science faculty can advise a
+  project"), and `search_advisers()` only offers people on it. A faculty member who is also an
+  admin is offered too, since their name is already public.
+- A faculty member has to have signed in to TeamUp once before they can be found or asked.
+- Leaving the list doesn't remove anyone from teams they already advise; they just can't be asked
+  again. Pending invitations to anyone not on the list are cancelled, both when the migration
+  runs and whenever a sync removes someone, so they can't be accepted afterwards.
+- The migration seeds the 37 emails listed on 2026-11-23, so the rule works right away.
+
+The `sync-faculty` Edge Function (`supabase/functions/sync-faculty/`) keeps the list current: it
+reads the directory and replaces the table via `sync_faculty_directory()`. If the directory is
+down, lists nobody, or lists fewer than half the people currently on file, the current list is
+kept (a real change that big is applied by hand with
+`select sync_faculty_directory(array[...], p_allow_shrink => true)`). One-time setup:
+
+1. `supabase secrets set SYNC_FACULTY_SECRET=<any long random string>` (e.g. `openssl rand -hex 32`)
+2. `supabase functions deploy sync-faculty --no-verify-jwt`. The flag matters: the Cron job sends
+   only the shared secret, and with JWT verification on, Supabase refuses it with a 401 before the
+   function runs.
+3. Dashboard → **Integrations → Cron → Create job**: weekly (e.g. `0 9 * * 1`), type **Supabase
+   Edge Function**, function `sync-faculty`, method POST, header `x-sync-secret: <the same string>`.
+4. Check: run the job once and look under **Edge Functions → sync-faculty → Logs** for
+   "N faculty listed".
 
 ## Accepting a join request — one transaction, `respond_to_join_request()`
 

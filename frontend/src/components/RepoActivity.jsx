@@ -242,8 +242,8 @@ export default function RepoActivity({ projectId, isOwner, members = [], repo = 
           {loading && !activity ? (
             <p className="hint">Checking GitHub…</p>
           ) : (
-            <div className="data-table-wrap">
-              <table className="data-table">
+            <div className="repo-table-wrap">
+              <table className="repo-table">
                 <thead>
                   <tr>
                     <th scope="col">Member</th>

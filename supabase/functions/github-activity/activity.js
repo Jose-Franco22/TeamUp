@@ -36,7 +36,7 @@ const PER_PAGE = 100;
 const API = 'https://api.github.com';
 
 // Mirrors CANONICAL_REPO_PATTERN in frontend/src/lib/github.js, and
-// projects_github_repo_format_check in supabase/42_github_activity.sql.
+// projects_github_repo_format_check in supabase/45_github_activity.sql.
 //
 // Strict on purpose. The lenient reading of whatever somebody pasted happens
 // once, in the browser, and set_project_repo() stores only the canonical

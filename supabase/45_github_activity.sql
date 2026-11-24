@@ -4,12 +4,17 @@
 -- the one thing #58 could not state until #88 had merged, and it has.
 -- Nothing here depends on 40 or above.
 --
--- 42 RATHER THAN 41, which #93 (`41_check_ins.sql`) also claimed. Jose's
--- #91 review asked for one of the two to move; this is the one that was
--- blocked on conflicts, so this is the one that moves. A number is only an
--- ordering and gaps are already normal here — 25 and 38 are both absent
--- from Testing — so moving costs nothing, while waiting to agree costs a
--- round trip.
+-- 45, AND THIS IS THE SECOND MOVE. Jose's #91 review asked for one of this
+-- file and #93 to give up 41, and since #91 was the blocked one, this file
+-- moved to 42. Then #93 merged as `42_check_ins.sql` and took that too,
+-- followed by 43 and 44. So it moves again, to the first number above
+-- everything on Testing.
+--
+-- The lesson is not "pick a bigger number", it is that a number claimed by
+-- an open PR is not claimed at all until it merges. Nothing here depends on
+-- anything above 39, so this file is correct at any number above it, and
+-- taking the highest free one is simply the choice that needs no argument
+-- with whoever merges next. Gaps are normal: 25, 38 and 41 are all absent.
 --
 -- Three pieces:
 --

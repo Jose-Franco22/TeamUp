@@ -221,6 +221,29 @@ describe('when the delete is refused', () => {
   });
 });
 
+// --- editing the project --------------------------------------------------
+
+describe('editing the project', () => {
+  test('the owner gets an Edit project button that opens the edit page', async () => {
+    const user = userEvent.setup();
+    await renderTeam();
+
+    expect(screen.getByText(/description, team size target, or the roles/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit project' }));
+
+    expect(navigate).toHaveBeenCalledWith('/projects/p-1/edit');
+  });
+
+  test('a member who is not the owner is not offered it', async () => {
+    session = { status: 'authenticated', user: { id: 'u-other' } };
+    client.getMyTeam.mockResolvedValue(team({ members: [CREATOR, OTHER], member_count: 2 }));
+    await renderTeam();
+
+    expect(screen.queryByRole('button', { name: 'Edit project' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/description, team size target, or the roles/)).not.toBeInTheDocument();
+  });
+});
+
 // --- the page around it ---------------------------------------------------
 
 describe('the team page', () => {

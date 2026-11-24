@@ -143,7 +143,7 @@ export default function AdviserPanel({ projectId, isOwner }) {
       {!adviser && (
         <p className="hint">
           {isOwner
-            ? 'Nobody is advising this project yet. Ask a student to be your team’s contact — an adviser takes no seat on the roster.'
+            ? 'Nobody is advising this project yet. Ask a Computer Science faculty member to be your team’s contact — an adviser takes no seat on the roster.'
             : 'Nobody is advising this project yet.'}
         </p>
       )}
@@ -198,7 +198,7 @@ export default function AdviserPanel({ projectId, isOwner }) {
             type="search"
             value={query}
             autoComplete="off"
-            placeholder="e.g. Dana, or dkim01@utrgv.edu"
+            placeholder="A CS faculty member’s name or email"
             onChange={(e) => setQuery(e.target.value)}
           />
 

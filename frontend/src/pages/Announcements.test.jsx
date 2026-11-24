@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Announcements from './Announcements';
 import { setSessionUserId } from '../api/client';
 import { announcements, announcementsSeenAt, milestones } from '../api/mockData';
@@ -28,7 +28,16 @@ function seed() {
 function renderPage(as) {
   viewer = as;
   setSessionUserId(as.id);
-  render(<MemoryRouter><Announcements /></MemoryRouter>);
+  // The Milestones route is a stand-in, there so a test can see the page
+  // actually move rather than trusting a mocked navigate().
+  render(
+    <MemoryRouter initialEntries={['/announcements']}>
+      <Routes>
+        <Route path="/announcements" element={<Announcements />} />
+        <Route path="/admin/milestones" element={<h1>Milestones page</h1>} />
+      </Routes>
+    </MemoryRouter>
+  );
 }
 
 // The admin form shows before the feed and deadlines load, so wait for both
@@ -87,6 +96,21 @@ test('empty states', async () => {
   expect(await screen.findByText('No upcoming deadlines.')).toBeInTheDocument();
   expect(await screen.findByText('No announcements yet.')).toBeInTheDocument();
   expect(screen.queryByRole('list', { name: 'Past deadlines' })).not.toBeInTheDocument();
+  // Students can't manage milestones, so they get no way to the admin tab.
+  expect(screen.getByText("Deadlines appear here as soon as they're set.")).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Manage milestones' })).not.toBeInTheDocument();
+});
+
+test('with no upcoming deadlines, an admin gets a button to the Milestones tab', async () => {
+  const user = userEvent.setup();
+  milestones.length = 0;
+  renderPage(ADMIN);
+
+  const button = await screen.findByRole('button', { name: 'Manage milestones' });
+  expect(screen.getByText('Add them on the Milestones tab.')).toBeInTheDocument();
+  await user.click(button);
+
+  expect(await screen.findByRole('heading', { name: 'Milestones page' })).toBeInTheDocument();
 });
 
 test('an admin posts an announcement, and it shows at the top with their name', async () => {

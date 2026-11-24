@@ -43,6 +43,13 @@ select set_config('tests.r_be', (select id from public.roles where name = 'Backe
 -- refuses the `authenticated` role outright.
 update public.users set is_admin = true where id = current_setting('tests.admin')::uuid;
 
+-- Only accounts on the CS faculty directory can be asked to advise
+-- (44_faculty_advisers.sql), and the adviser below is asked through
+-- invite_adviser() rather than inserted by hand, so the fixture has to say
+-- so. The same line adviser_requests.test.sql carries. Everyone else here
+-- stays a student, which is what they are.
+insert into public.faculty_directory (email) values ('adviser58@utrgv.edu');
+
 -- The project under test, with the owner and one member on it.
 select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select set_config('tests.project', (select (public.create_project(

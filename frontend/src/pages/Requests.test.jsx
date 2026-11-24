@@ -144,7 +144,12 @@ describe('list updates', () => {
     await waitFor(() => expect(screen.queryByLabelText('Role for Adan Barrera')).not.toBeInTheDocument());
     expect(screen.getByLabelText('Role for Rita Cano')).toBeInTheDocument();
     expect(client.respondToRequest).toHaveBeenCalledWith('jr-1', 'accepted', 'r-design');
-    expect(teamMembers).toContainEqual({ team_id: 't-parking', user_id: 'u-adan', role_id: 'r-design' });
+    expect(teamMembers).toContainEqual({
+      team_id: 't-parking',
+      user_id: 'u-adan',
+      role_id: 'r-design',
+      joined_at: expect.any(String), // stamped like the column's default, for #55's check-ins
+    });
     expect(notifications).toEqual([
       expect.objectContaining({
         user_id: 'u-adan',

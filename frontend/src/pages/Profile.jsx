@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getCurrentUser, removeSkill, setEmailNotifications, updateCurrentUser } from '../api/client';
+import { getCurrentUser, removeSkill, setAdviserDigest, setEmailNotifications, updateCurrentUser } from '../api/client';
 import {
   AVAILABILITY_MAX,
   AVAILABILITY_MIN,
@@ -197,6 +197,14 @@ export default function Profile() {
         />
       )}
 
+      {/* Anyone can be asked to advise a team (39_project_advisers.sql), so
+          everyone gets the switch; the digest itself only goes to people who
+          advise at least one team. */}
+      <DigestPreference
+        enabled={data.adviser_digest !== false}
+        onSaved={(on) => setData({ ...data, adviser_digest: on })}
+      />
+
       {!data.is_admin && <section className="card">
         <h2>Skills</h2>
         <p className="desc">
@@ -266,6 +274,44 @@ function EmailPreference({ enabled, onSaved }) {
         Email me about join requests, answers to my requests, and when my team is complete
       </label>
       <p className="hint">Deadline reminders and announcements from your instructor are always emailed.</p>
+      {error && <p className="inline-error" role="alert">{error}</p>}
+    </section>
+  );
+}
+
+// Issue #59: the Monday digest of the teams someone advises. Saves as soon
+// as it's flipped, like EmailPreference, and puts the box back on failure.
+function DigestPreference({ enabled, onSaved }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function toggle(e) {
+    const next = e.target.checked;
+    setSaving(true);
+    setError(null);
+    try {
+      onSaved(await setAdviserDigest(next));
+    } catch (err) {
+      setError(err.message || 'Could not save your digest setting. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h2>Adviser digest</h2>
+      <p className="desc">
+        Sent to your UTRGV address every Monday at 8:00 AM Central, only while you advise at least one team.
+      </p>
+      <label className="switch">
+        <input type="checkbox" checked={enabled} disabled={saving} onChange={toggle} />
+        Email me a weekly digest of the teams I advise
+      </label>
+      <p className="hint">
+        One email per week with check-ins, blockers, deliverables waiting for review, and what’s due, for every
+        team you advise.
+      </p>
       {error && <p className="inline-error" role="alert">{error}</p>}
     </section>
   );

@@ -8,6 +8,7 @@
   --open: #cb4900;
   --open-bg: #fbe9df;
   --open-line: #e8ab86;
+  --link: #c14500;
   --warn: #8a6212;
   --warn-bg: #fbf2de;
   --danger: #9b2c2c;
@@ -25,6 +26,7 @@
   --open: #e2590c;
   --open-bg: #3a2414;
   --open-line: #7a4018;
+  --link: #ee5e0d;
   --warn: #e0a94a;
   --warn-bg: #3a2f14;
   --danger: #e2685f;
@@ -67,6 +69,18 @@ body,
 
 button { font-family: inherit; font-size: 14px; cursor: pointer; }
 button:disabled { opacity: 0.45; cursor: default; }
+
+/* Without a rule, links fall back to the browser's #0000EE (#551A8B once
+   visited): about 1.6:1 on dark mode's --paper. Visited links look the same
+   on purpose. :where() keeps this at zero specificity, so class rules
+   (.btn, .nav a, .mark, .guest-note…) still win, visited or not.
+   --link, not --open: --open is 4.29:1 on light --canvas and 4.18:1 on dark
+   --paper, short of AA's 4.5:1 for text. --link is the same hue and
+   saturation with only the lightness moved, the least that clears 4.5:1 on
+   both backgrounds in both themes (light 5.10 / 4.68, dark 4.61 / 5.22) —
+   and so on the admin table's row tint, which is a mix of the two.
+   styles.test.js recomputes these from this file. */
+:where(a:link, a:visited) { color: var(--link); }
 
 /* ---------- top bar ---------- */
 .bar {
@@ -201,35 +215,262 @@ button:disabled { opacity: 0.45; cursor: default; }
 .switch { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--slate); cursor: pointer; }
 .switch input { accent-color: var(--open); width: 15px; height: 15px; margin: 0; }
 
-/* ---------- cards ---------- */
-/* Admin tables scroll within the page on small screens. */
-.admin-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0 0 24px; }
-.admin-summary > div { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
-.admin-summary dt { font-size: 13px; color: var(--slate); }
-.admin-summary dd { margin: 8px 0 0; font-size: 28px; font-weight: 600; }
-/* .data-table is the same table, under a name that is not about admin: the
-   repository activity on the team page uses it (#58). */
-.admin-table-wrap, .data-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 24px; }
-.admin-table, .data-table { width: 100%; border-collapse: collapse; background: var(--paper); text-align: left; font-size: 13.5px; }
-.admin-table th, .admin-table td, .data-table th, .data-table td { padding: 16px; vertical-align: top; border-bottom: 1px solid var(--line); }
-.admin-table thead, .data-table thead { background: var(--canvas); color: var(--slate); }
-.admin-table th, .data-table th { font-weight: 500; }
-.admin-table tbody tr:last-child > *, .data-table tbody tr:last-child > * { border-bottom: 0; }
-.admin-table .pill { margin-left: 0; }
+/* ---------- admin dashboard ---------- */
+/* The formation counts: one compact row. "Students unplaced" is the number
+   an instructor acts on, so the whole segment jumps to that table. */
+.admin-summary {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 24px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.admin-summary > div { display: flex; align-items: baseline; gap: 10px; padding: 9px 16px; }
+.admin-summary > div + div { border-left: 1px solid var(--line); }
+.admin-summary dt { font-size: 13.5px; color: var(--slate); }
+.admin-summary dd { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.35; color: var(--ink); font-variant-numeric: tabular-nums; }
+.summary-jump { position: relative; border-radius: 0 9px 9px 0; }
+.summary-jump a { display: inline-flex; align-items: center; gap: 4px; color: inherit; text-decoration: none; }
+/* Stretch the link over its segment: a target far bigger than one digit. */
+.summary-jump a::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.summary-jump a:focus-visible { outline: none; }
+.summary-jump a:focus-visible::after { outline: 2px solid var(--open); outline-offset: -2px; }
+.summary-jump svg { fill: none; stroke: var(--open); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.summary-jump:hover { background: var(--canvas); }
+.summary-jump:hover dt { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+/* Clear the sticky top bar when the summary jumps here. */
+.section[id] { scroll-margin-top: 76px; }
+
+/* Data table in four slots: toolbar, header, body, footer. The container
+   has no overflow, so the header can stick to the page as it scrolls. */
+.data-table { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 24px; }
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.table-control { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; color: var(--slate); }
+.table-control select {
+  min-width: 0;
+  min-height: 32px;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 8px;
+}
+.table-control select:focus-visible { outline: 2px solid var(--open); outline-offset: -1px; }
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+  padding: 0 2px 0 11px;
+  border: 1px solid var(--open-line);
+  border-radius: 14px;
+  background: var(--open-bg);
+  color: var(--ink);
+  font-size: 13px;
+}
+.filter-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--slate);
+}
+.filter-chip button:hover { color: var(--ink); background: color-mix(in srgb, var(--open-line) 45%, transparent); }
+.filter-chip button:focus-visible { outline: 2px solid var(--open); outline-offset: 0; }
+.filter-chip svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.table-foot { margin: 0; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--slate); }
+.data-table .empty-state { border: 0; border-radius: 0; background: transparent; }
+.data-table .empty-state .btn { margin-top: 12px; }
+
+/* Cells: 8px vertical padding, 16px at the table's edges and 6 + 6 = 12px
+   between columns, 1px row separators. Type stays at 13.5px. */
+/* `.repo-table` is the same table as the admin one, under a name that is
+   not about admin: the repository activity on the team page (#58). It is
+   not called `.data-table` because #97 took that name for the admin
+   dashboard's container div, which wraps a toolbar, a table and a footer —
+   a different thing at a different level. */
+.admin-table-wrap, .repo-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 24px; }
+.admin-table, .repo-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--paper);
+  text-align: left;
+  font-size: 13.5px;
+  line-height: 20px;
+}
+.admin-table th, .admin-table td,
+.repo-table th, .repo-table td { padding: 8px 6px; vertical-align: top; border-bottom: 1px solid var(--line); }
+.admin-table :is(th, td):first-child,
+.repo-table :is(th, td):first-child { padding-left: 16px; }
+.admin-table :is(th, td):last-child,
+.repo-table :is(th, td):last-child { padding-right: 16px; }
+.admin-table thead th,
+.repo-table thead th { background: var(--canvas); color: var(--slate); font-weight: 500; }
+.admin-table th, .repo-table th { font-weight: 500; }
+.admin-table tbody tr:last-child > *,
+.repo-table tbody tr:last-child > * { border-bottom: 0; }
+
 /* Numbers read better right-aligned, but the member column must not be. */
-.data-table td + td, .data-table th + th { text-align: right; }
-.data-table .tag { margin-left: 8px; }
-.data-table .sub { font-size: 12.5px; color: var(--slate); margin-top: 3px; }
+.repo-table td + td, .repo-table th + th { text-align: right; }
+.repo-table .tag { margin-left: 8px; }
+.repo-table .sub { font-size: 12.5px; color: var(--slate); margin-top: 3px; }
+/* #97 turned the admin tables into cards at phone width. This one has four
+   short columns and keeps the simpler answer: scroll it inside its wrap. */
+@media (max-width: 620px) {
+  .repo-table { min-width: 540px; }
+}
+.admin-table .pill { margin-left: 0; }
+.admin-table .desc { color: var(--slate); }
+.admin-table .numeric { text-align: right; }
+
+.teams-table { table-layout: fixed; }
+.teams-table .col-team { width: 28%; }
+.teams-table .col-seats { width: 136px; }
+.teams-table .col-status { width: 96px; }
+.teams-table .col-next { width: 140px; }
+/* The header sticks under the 60px top bar, above the scrolling cells. */
+.teams-table thead th { position: sticky; top: 60px; z-index: 1; }
+.teams-table tbody th { font-weight: 500; }
+/* Members is the one column that wraps; every other cell is one line. */
+.teams-table :is(.cell-team, .cell-seats, .cell-status, .cell-next) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.admin-table a { text-decoration: none; padding-block: 2px; }
+.admin-table a:hover,
+.admin-table a:focus-visible,
+.teams-table tbody tr:hover .cell-team a { text-decoration: underline; text-underline-offset: 3px; }
+/* Row hover: a light tint plus an edge. The tint is mixed light enough that
+   links on it keep their contrast. */
+.teams-table tbody tr:is(:hover, :focus-within) > * { background: color-mix(in srgb, var(--canvas) 40%, var(--paper)); }
+.teams-table tbody tr:is(:hover, :focus-within) > :first-child { box-shadow: inset 2px 0 0 var(--open); }
+
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  margin: -2px -4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+}
+.sort-button:hover, th[aria-sort] .sort-button { color: var(--ink); }
+.sort-button:focus-visible { outline: 2px solid var(--open); outline-offset: 0; }
+.numeric .sort-button { flex-direction: row-reverse; }
+.sort-icon { flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+.sort-icon.on { opacity: 1; }
+.sort-button:is(:hover, :focus-visible) .sort-icon:not(.on) { opacity: 0.6; }
+
+/* Each link is a 24px-tall target (WCAG 2.2), so wrapped lines need no gap. */
+.member-list { display: flex; flex-wrap: wrap; gap: 0 14px; }
+.member-list li { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; }
+.teams-table .member-list li + li { margin-top: 0; }
+.member-list a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-role {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--canvas);
+  color: var(--slate);
+  font-size: 12.5px;
+  line-height: 19px;
+  white-space: nowrap;
+}
+
+/* Seats filled: a short bar, the number right beside it. */
+.seat-fill { display: inline-flex; align-items: center; gap: 8px; vertical-align: top; }
+.seat-fill-bar { flex: none; width: 44px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.seat-fill-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--open); }
+.seat-fill-bar.full > span { background: var(--slate); }
+.seat-fill-count { min-width: 3.6em; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Status: colour is not the only signal. Open seats are a ring, a full team
+   a filled disc, and the text is --ink/--slate rather than --open on
+   --open-bg (3.9:1). */
+.admin-table .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; line-height: 18px; vertical-align: top; }
+.admin-table .pill::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; }
+.admin-table .pill.good { color: var(--ink); background: var(--open-bg); box-shadow: inset 0 0 0 1px var(--open-line); }
+.admin-table .pill.good::before { border: 1.5px solid var(--open); }
+.admin-table .pill.quiet { color: var(--slate); }
+.admin-table .pill.quiet::before { background: var(--slate); }
+
 .admin-list { list-style: none; padding: 0; margin: 0; }
 .admin-list li + li { margin-top: 10px; }
 .card > .admin-list { margin-top: 12px; }
 .admin-secondary { display: block; margin-top: 3px; font-weight: 400; font-size: 12.5px; color: var(--slate); }
 .admin-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 620px) {
-  .admin-summary { grid-template-columns: 1fr; gap: 8px; }
-  .admin-table, .data-table { min-width: 540px; }
+
+/* Phone width: each row becomes a card (Vercel's project list is the
+   model). It is the same <table>, restyled; nothing scrolls sideways. */
+@media (max-width: 760px) {
+  .admin-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: auto; }
+  .admin-summary > div { flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 12px; }
+  .admin-summary dt { font-size: 13px; line-height: 1.3; }
+
+  .table-toolbar { padding: 10px 12px; gap: 8px 12px; }
+  /* Two controls side by side down to ~480px, then one per line. */
+  .table-control { flex: 1 1 220px; }
+  .table-control label { flex: none; min-width: 52px; }
+  .table-control select { flex: 1; min-height: 36px; }
+
+  .admin-table-wrap { overflow-x: visible; }
+  .admin-table,
+  .admin-table tbody,
+  .admin-table tr,
+  .admin-table th,
+  .admin-table td { display: block; }
+  /* Column headers stay for screen readers. Keyboard focus on a sort
+     button shows them as a row of sort controls. */
+  .admin-table thead:not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .admin-table thead:focus-within { display: block; }
+  .admin-table thead tr { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 12px; background: var(--canvas); border-bottom: 1px solid var(--line); }
+  .admin-table thead th { position: static; padding: 0; border: 0; background: none; }
+  .admin-table tbody tr { padding: 12px; border-bottom: 1px solid var(--line); }
+  .admin-table tbody tr:last-child { border-bottom: 0; }
+  .admin-table tbody :is(th, td) { padding: 0; border: 0; }
+  .admin-table tbody :is(th, td):is(:first-child, :last-child) { padding: 0; }
+  .admin-table td[data-label] { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
+  .admin-table td[data-label]::before { content: attr(data-label); content: attr(data-label) / ''; color: var(--slate); }
+
+  .teams-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .teams-table tbody :is(.cell-team, .cell-seats, .cell-status, .cell-next) { white-space: normal; overflow: visible; }
+  .teams-table .cell-team { font-size: 15px; font-weight: 600; line-height: 22px; overflow-wrap: anywhere; }
+  .teams-table .cell-status { grid-column: 2; grid-row: 1; }
+  .teams-table :is(.cell-members, .cell-seats, .cell-next) { grid-column: 1 / -1; }
+  .teams-table .member-list a { white-space: normal; overflow-wrap: anywhere; }
+  .teams-table tbody tr:is(:hover, :focus-within) > :first-child { box-shadow: none; }
+  .teams-table tbody tr:is(:hover, :focus-within) { box-shadow: inset 2px 0 0 var(--open); background: color-mix(in srgb, var(--canvas) 40%, var(--paper)); }
+
+  .unplaced-table tbody tr { display: grid; gap: 6px; }
 }
 
+/* ---------- cards ---------- */
 .card {
   background: var(--paper);
   border: 1px solid var(--line);
@@ -613,6 +854,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .empty-title { font-size: 15px; font-weight: 500; color: var(--ink); margin: 0 0 4px; }
 .empty-state p { margin: 0; font-size: 13.5px; color: var(--slate); }
+/* Those paragraphs have no margin, so a button under one needs its own. */
+.empty-state .empty-action { margin-top: 12px; }
 
 /* ---------- login hero ---------- */
 .hero { padding: 40px 0 8px; max-width: 640px; }
@@ -838,6 +1081,9 @@ button:disabled { opacity: 0.45; cursor: default; }
   gap: 10px;
   flex-wrap: wrap;
 }
+/* The Team page puts this right under .card .desc, which has no bottom
+   margin; a bordered button needs the room a line of text didn't. */
+.hint.edit-project { margin-top: 12px; }
 
 /* ---------- join request (issue #32) ---------- */
 .hint.blocked { margin: 8px 0 0; font-size: 12.5px; color: var(--mute); }
@@ -1070,3 +1316,24 @@ button:disabled { opacity: 0.45; cursor: default; }
 .adviser-results .nm { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .adviser-results .sub { font-size: 12.5px; color: var(--slate); overflow-wrap: anywhere; }
 .adviser-results button { padding: 6px 12px; font-size: 13px; border-radius: 6px; }
+
+/* ---------- weekly check-ins (#55) ---------- */
+.check-ins .check-in-form { margin: 14px 0 6px; }
+.check-ins .field label .sub { font-weight: 400; color: var(--mute); }
+.check-in-week { margin-top: 18px; }
+.check-in-week h3 { font-size: 14px; margin: 0 0 8px; }
+.check-in-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.check-in { border: 1px solid var(--line, rgba(127, 127, 127, 0.25)); border-radius: 8px; padding: 10px 12px; }
+.check-in .nm { font-weight: 600; margin-bottom: 4px; }
+.check-in dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 0; font-size: 13.5px; }
+.check-in dt { color: var(--mute); }
+.check-in dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A blocker is the one thing the adviser should not miss. */
+.check-in.blocked { border-color: var(--warn); background: var(--warn-bg); border-left-width: 4px; }
+.check-in .blocker-text { color: var(--warn); font-weight: 500; }
+.tag.blocker { margin-left: 7px; padding: 1px 6px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em; background: var(--warn); color: var(--warn-bg); }
+.check-in-week .missing { font-size: 13px; color: var(--mute); margin: 8px 0 0; }
+@media (max-width: 520px) {
+  .check-in dl { grid-template-columns: 1fr; }
+  .check-in dt { margin-top: 4px; }
+}

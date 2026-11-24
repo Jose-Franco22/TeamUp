@@ -136,7 +136,14 @@ describe('NotificationBell', () => {
     // hold no seat, so there is no team page of theirs to open.
     adviser_invited: '/requests',
     adviser_removed: '/browse',
+    // The owner's three (#54). Their team page is where the adviser shows,
+    // and where they would invite somebody else.
+    adviser_accepted: '/team',
+    adviser_declined: '/team',
+    adviser_stepped_down: '/team',
     deadline_reminder: '/browse',
+    // The check-in form is on the team page (#55).
+    check_in_reminder: '/team',
     join_request: '/requests',
     member_left: '/team',
     member_removed: '/browse',
@@ -275,5 +282,52 @@ describe('a deadline reminder', () => {
     await waitFor(() => expect(bell()).toHaveAccessibleName('Notifications'));
     act(() => addMockNotification(reminder()));
     expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
+  });
+});
+
+// --- advising (#53, #54) ---------------------------------------------------
+// Five kinds between the two stories, and the thing worth asserting is that
+// none of them reads like a join request. "Ada asked you" has to mean
+// something different here, and the two that leave a project without an
+// adviser have to say what the owner can do next.
+describe('the adviser kinds', () => {
+  const adviserNote = (kind) =>
+    note({ kind, actor_name: 'Ada Adviser', project_title: 'Campus parking tracker' });
+
+  async function textOf(kind) {
+    renderBell([adviserNote(kind)]);
+    expect(await screen.findByTestId('bell-badge')).toHaveTextContent('1');
+    await userEvent.click(bell());
+    return screen.getByRole('region', { name: 'Notifications' }).textContent;
+  }
+
+  test('an invitation says it is to advise, not to join', async () => {
+    const text = await textOf('adviser_invited');
+    expect(text).toContain('asked you to advise');
+    expect(text).toContain('not a seat on it');
+    expect(text).not.toContain('asked to join');
+  });
+
+  test('an acceptance names who is now advising', async () => {
+    expect(await textOf('adviser_accepted')).toContain('accepted and is now advising');
+  });
+
+  test('a decline tells the owner they can ask someone else', async () => {
+    const text = await textOf('adviser_declined');
+    expect(text).toContain('turned down advising');
+    expect(text).toContain('you can ask someone else');
+  });
+
+  test('and so does a stepping-down, which leaves the same gap', async () => {
+    const text = await textOf('adviser_stepped_down');
+    expect(text).toContain('stepped down as adviser');
+    expect(text).toContain('you can ask someone else');
+  });
+
+  // The adviser's own side: being dropped is not phrased as a refusal.
+  test('being removed does not read as having declined', async () => {
+    const text = await textOf('adviser_removed');
+    expect(text).toContain('no longer the adviser');
+    expect(text).not.toMatch(/declin|turned down/i);
   });
 });
