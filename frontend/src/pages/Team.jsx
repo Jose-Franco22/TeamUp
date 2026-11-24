@@ -243,7 +243,7 @@ export default function Team() {
 
       {/* Above the roster, and not in it: an adviser holds no seat (issue
           #53), so listing them among the members would imply they do. */}
-      <AdviserPanel projectId={data.id} isOwner={isOwner} />
+      <AdviserPanel projectId={data.id} isOwner={isOwner} rolesNeeded={data.roles_needed} />
 
       {/* The checklist is for complete teams (issue #30); set_next_step_done()
           refuses a team that's still forming. */}

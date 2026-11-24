@@ -9,6 +9,16 @@ export const BIO_MAX = 500;
 export const AVAILABILITY_MIN = 0;
 export const AVAILABILITY_MAX = 40;
 
+// How many teams an adviser will advise at once (issue #60). Mirrored by
+// users_advising_max_teams_range_check in supabase/47_adviser_expertise.sql.
+// There is no zero: an adviser who will take no teams turns the Available to
+// advise switch off, which is a different statement and has a different
+// effect — it hides them from search instead of showing them as full.
+export const ADVISING_MAX_MIN = 1;
+export const ADVISING_MAX_MAX = 20;
+export const ADVISING_MAX_RANGE =
+  `The most teams you'll advise has to be between ${ADVISING_MAX_MIN} and ${ADVISING_MAX_MAX}`;
+
 // Project fields (issue #23). Mirrored by CHECK constraints in
 // supabase/16_project_validation.sql and by the raises in create_project()
 // and update_project(), which are the real boundary.
@@ -55,6 +65,18 @@ function checkAvailability(raw) {
   return { value: hours };
 }
 
+// Empty means "no limit I've set", which the database stores as null and
+// every reader treats as never full. That is a real answer rather than a
+// missing one, so it is not an error.
+function checkAdvisingMaxTeams(raw) {
+  const text = typeof raw === 'number' ? String(raw) : String(raw ?? '').trim();
+  if (text === '') return { value: null };
+  if (!/^\d+$/.test(text)) return { error: 'The most teams you’ll advise must be a whole number' };
+  const teams = Number(text);
+  if (teams < ADVISING_MAX_MIN || teams > ADVISING_MAX_MAX) return { error: ADVISING_MAX_RANGE };
+  return { value: teams };
+}
+
 function checkGithubUrl(raw) {
   const url = String(raw ?? '').trim();
   if (url === '') return { value: '' };
@@ -74,6 +96,7 @@ const PROFILE_CHECKS = {
   bio: checkBio,
   github_url: checkGithubUrl,
   availability_hours: checkAvailability,
+  advising_max_teams: checkAdvisingMaxTeams,
 };
 
 // Validates whichever profile fields are present in `input` (so a partial
@@ -240,6 +263,7 @@ const CONSTRAINT_FIELDS = {
   users_github_url_format_check: ['github_url', 'Use your GitHub profile link, like https://github.com/your-username'],
   users_availability_hours_range_check: ['availability_hours', `Hours must be between ${AVAILABILITY_MIN} and ${AVAILABILITY_MAX}`],
   users_availability_hours_check: ['availability_hours', `Hours must be between ${AVAILABILITY_MIN} and ${AVAILABILITY_MAX}`],
+  users_advising_max_teams_range_check: ['advising_max_teams', ADVISING_MAX_RANGE],
   projects_title_length_check: ['title', TITLE_RANGE],
   projects_description_length_check: ['description', DESCRIPTION_RANGE],
   projects_team_size_target_check: ['team_size_target', TEAM_SIZE_RANGE],

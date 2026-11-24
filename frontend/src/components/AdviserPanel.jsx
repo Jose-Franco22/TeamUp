@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   cancelAdviserRequest,
   getProjectAdviser,
@@ -8,6 +8,7 @@ import {
 } from '../api/client';
 import useAsync from './useAsync';
 import Avatar from './Avatar';
+import { isFull, matchingExpertise, orderAdvisers, spotsLabel } from '../lib/advising';
 
 // The project's adviser, on the team page (issue #53).
 //
@@ -34,7 +35,12 @@ import Avatar from './Avatar';
 const MIN_QUERY = 2;
 const DEBOUNCE_MS = 250;
 
-export default function AdviserPanel({ projectId, isOwner }) {
+// `rolesNeeded` is the project's open roles, only ever used to pick out which
+// of a candidate's areas of expertise this project actually needs (issue
+// #60). It is optional: with none passed, the areas still show, just without
+// anything highlighted — which is also what happens for a project whose roles
+// have all been filled.
+export default function AdviserPanel({ projectId, isOwner, rolesNeeded = [] }) {
   const loadAdviser = useCallback(() => getProjectAdviser(projectId), [projectId]);
   const { data: adviser, loading, error, setData } = useAsync(loadAdviser, [projectId]);
 
@@ -80,6 +86,13 @@ export default function AdviserPanel({ projectId, isOwner }) {
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [query, projectId]);
+
+  // #60's order: whoever can say yes, best fit first. search_advisers() has
+  // already put full advisers last, and orderAdvisers() does it again on
+  // purpose — the expertise half of the comparison can only happen here, so
+  // the whole ordering lives in one place and mock mode cannot disagree with
+  // the database about the first row.
+  const ordered = useMemo(() => orderAdvisers(results, rolesNeeded), [results, rolesNeeded]);
 
   function resetSearch() {
     setQuery('');
@@ -214,20 +227,57 @@ export default function AdviserPanel({ projectId, isOwner }) {
             </p>
           )}
 
-          {results.length > 0 && (
+          {ordered.length > 0 && (
             <ul className="adviser-results">
-              {results.map((u) => (
-                <li key={u.id}>
-                  <Avatar name={u.name} size={28} />
-                  <span>
-                    <span className="nm">{u.name}</span>
-                    <span className="sub">{u.email}</span>
-                  </span>
-                  <button className="btn" onClick={() => invite(u.id)} disabled={busy !== null}>
-                    {busy === 'inviting' ? 'Asking…' : 'Ask to advise'}
-                  </button>
-                </li>
-              ))}
+              {ordered.map((u) => {
+                const matches = matchingExpertise(u, rolesNeeded);
+                const matchedBy = new Map(matches.map((m) => [m.id, m.basis]));
+                const full = isFull(u);
+                return (
+                  <li key={u.id} className={full ? 'is-full' : undefined}>
+                    <Avatar name={u.name} size={28} />
+                    <span>
+                      <span className="nm">
+                        {u.name}
+                        {full && <span className="tag">Full</span>}
+                      </span>
+                      <span className="sub">{u.email}</span>
+                      {/* Its own element, not appended to the email: the
+                          email is one fact a caller may want to read on its
+                          own, and joining them makes every assertion about
+                          it a substring match. */}
+                      <span className="sub spots">{spotsLabel(u)}</span>
+                      {(u.expertise?.length ?? 0) > 0 && (
+                        <span className="areas">
+                          {u.expertise.map((area) => (
+                            <span
+                              key={area.id}
+                              className={matchedBy.has(area.id) ? 'area match' : 'area'}
+                              title={
+                                matchedBy.get(area.id) === 'has-skill'
+                                  ? 'This project asks for this'
+                                  : matchedBy.has(area.id)
+                                    ? 'Close to something this project asks for'
+                                    : undefined
+                              }
+                            >
+                              {area.name}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      className="btn"
+                      onClick={() => invite(u.id)}
+                      disabled={busy !== null || full}
+                      title={full ? 'They are already advising as many teams as they take on' : undefined}
+                    >
+                      {busy === 'inviting' ? 'Asking…' : 'Ask to advise'}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
