@@ -318,15 +318,22 @@ export const repoActivity = [
 export const repoActivityFor = (projectId) =>
   repoActivity.find((r) => r.project_id === projectId) ?? null;
 
+// joined_at is on every row because it is on every real row: the column has
+// a `not null default now()` in the baseline schema, and the mock's own
+// joining paths have always stamped it (createProject, respondToJoinRequest,
+// adminAssignStudent). Only the seeded rows were missing one, which showed
+// up the moment #40 put a Joined column in the roster export — blank in mock
+// mode, filled in production. Owners joined when their project was created;
+// the rest a few days later.
 export const teamMembers = [
-  { team_id: 't-parking', user_id: 'u-nicolas', role_id: 'r-backend' },
-  { team_id: 't-parking', user_id: 'u-jose', role_id: 'r-data' },
-  { team_id: 't-degree', user_id: 'u-alexis', role_id: 'r-fullstack' },
-  { team_id: 't-scam', user_id: 'u-maria', role_id: 'r-data' },
-  { team_id: 't-scam', user_id: 'u-luis', role_id: 'r-backend' },
-  { team_id: 't-scam', user_id: 'u-dana', role_id: 'r-data' },
-  { team_id: 't-lab', user_id: 'u-omar', role_id: 'r-backend' },
-  { team_id: 't-lab', user_id: 'u-priya', role_id: 'r-design' },
+  { team_id: 't-parking', user_id: 'u-nicolas', role_id: 'r-backend', joined_at: '2026-09-29T14:05:00Z' },
+  { team_id: 't-parking', user_id: 'u-jose', role_id: 'r-data', joined_at: '2026-10-03T18:20:00Z' },
+  { team_id: 't-degree', user_id: 'u-alexis', role_id: 'r-fullstack', joined_at: '2026-09-30T10:15:00Z' },
+  { team_id: 't-scam', user_id: 'u-maria', role_id: 'r-data', joined_at: '2026-10-01T09:40:00Z' },
+  { team_id: 't-scam', user_id: 'u-luis', role_id: 'r-backend', joined_at: '2026-10-06T13:00:00Z' },
+  { team_id: 't-scam', user_id: 'u-dana', role_id: 'r-data', joined_at: '2026-10-08T11:30:00Z' },
+  { team_id: 't-lab', user_id: 'u-omar', role_id: 'r-backend', joined_at: '2026-10-09T15:45:00Z' },
+  { team_id: 't-lab', user_id: 'u-priya', role_id: 'r-design', joined_at: '2026-10-14T16:00:00Z' },
 ];
 
 // --- JOIN_REQUESTS -----------------------------------------------------
