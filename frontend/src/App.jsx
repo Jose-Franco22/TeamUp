@@ -13,6 +13,8 @@ import AdminStudent from './pages/AdminStudent';
 import AdminMilestones from './pages/AdminMilestones';
 import AdminNextSteps from './pages/AdminNextSteps';
 import Announcements from './pages/Announcements';
+import Advising from './pages/Advising';
+import AdvisedTeam from './pages/AdvisedTeam';
 import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
 import Walkthrough from './components/Walkthrough';
@@ -20,6 +22,7 @@ import NotificationBell from './components/NotificationBell';
 import { PendingBadge, RequestNotices, useRequestAlerts } from './components/RequestAlerts';
 import { MilestoneBanner } from './components/Milestones';
 import { useUnseenAnnouncements } from './components/AnnouncementAlerts';
+import useIsAdviser from './components/useIsAdviser';
 import { useSession } from './auth/SessionContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 
@@ -43,15 +46,20 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const signedIn = status === 'authenticated';
   const isAdmin = user?.is_admin === true;
+  // Only people who advise at least one team get the Advising tab (#56).
+  // Admins too: one on the faculty list can advise (44_faculty_advisers.sql).
+  const advises = useIsAdviser(signedIn, user?.id);
+  const advisingTab = advises ? [{ to: '/advising', label: 'Advising' }] : [];
   const tabs = !signedIn ? [] : isAdmin
     ? [
         { to: '/admin', label: 'Admin' },
         { to: '/admin/milestones', label: 'Milestones' },
         { to: '/admin/next-steps', label: 'Next steps' },
+        ...advisingTab,
         { to: '/announcements', label: 'Announcements' },
         { to: '/profile', label: 'Your profile' },
       ]
-    : TABS;
+    : [...TABS.slice(0, 5), ...advisingTab, ...TABS.slice(5)];
   // Admins are never on a team, so they never own a project to hear about.
   const requestAlerts = useRequestAlerts(signedIn && !isAdmin);
   // Admins post the announcements, so only students get the "new" count.
@@ -156,6 +164,8 @@ export default function App() {
               <Route path="/admin/students/:studentId" element={<AdminStudent />} />
               <Route path="/admin/*" element={<p className="empty">Page not found.</p>} />
             </Route>
+            <Route path="/advising" element={<Advising />} />
+            <Route path="/advising/:projectId" element={<AdvisedTeam />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/announcements" element={<Announcements />} />
             <Route path="*" element={<p className="empty">Page not found.</p>} />

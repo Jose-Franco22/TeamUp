@@ -3124,6 +3124,89 @@ export async function getAdvisedProjects() {
   return rows.map((row) => composeProject(row, viewerId, requestMap, undefined, advisers));
 }
 
+// --- Adviser dashboard (#56) -------------------------------------------------
+// One row per team the caller advises, with the figures each card shows —
+// the shape adviser_dashboard() returns (supabase/47_adviser_dashboard.sql).
+// Which teams need attention is decided in lib/adviserDashboard.js, not here.
+
+function mockAdviserDashboardRow(project, now) {
+  const team = teams.find((t) => t.project_id === project.id);
+  const memberRows = team ? teamMembers.filter((tm) => tm.team_id === team.id) : [];
+  const members = memberRows
+    .map((tm) => ({ user_id: tm.user_id, name: users.find((u) => u.id === tm.user_id)?.name ?? null }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const projectCheckIns = checkIns.filter((c) => c.project_id === project.id);
+  const week = weekStart(now);
+  const newest = (userId) =>
+    projectCheckIns
+      .filter((c) => c.user_id === userId)
+      .sort((a, b) => b.week_start.localeCompare(a.week_start))[0];
+  const latestStatus = (milestoneId) =>
+    deliverableSubmissions
+      .filter((s) => s.project_id === project.id && s.milestone_id === milestoneId)
+      .sort((a, b) => b.version - a.version)[0]?.status ?? null;
+  const next = milestones
+    .filter((m) => new Date(m.due_at) >= now)
+    .filter((m) => !(m.requires_deliverable && latestStatus(m.id) === 'approved'))
+    .sort((a, b) => new Date(a.due_at) - new Date(b.due_at) || a.name.localeCompare(b.name))[0];
+
+  return {
+    project_id: project.id,
+    title: project.title,
+    team_id: team?.id ?? null,
+    formed_at: team?.formed_at ?? null,
+    members,
+    check_ins_submitted: memberRows.filter((tm) =>
+      projectCheckIns.some((c) => c.user_id === tm.user_id && c.week_start === week)
+    ).length,
+    check_ins_expected: memberRows.length,
+    open_blockers: memberRows.filter((tm) => Boolean(newest(tm.user_id)?.blockers?.trim())).length,
+    last_check_in_at:
+      projectCheckIns.map((c) => c.created_at).sort((a, b) => b.localeCompare(a))[0] ?? null,
+    next_milestone_id: next?.id ?? null,
+    next_milestone_name: next?.name ?? null,
+    next_milestone_due_at: next?.due_at ?? null,
+    next_deliverable_status: next?.requires_deliverable ? latestStatus(next.id) ?? 'not_submitted' : null,
+    overdue_deliverables: milestones.filter(
+      (m) => m.requires_deliverable && new Date(m.due_at) < now && latestStatus(m.id) === null
+    ).length,
+    changes_requested: milestones.filter((m) => latestStatus(m.id) === 'changes_requested').length,
+    last_commit_at: repoActivityFor(project.id)?.last_commit_at ?? null,
+  };
+}
+
+export async function getAdviserDashboard() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const now = new Date();
+    return adviserRequests
+      .filter((r) => r.adviser_id === id && r.status === 'accepted')
+      .map((r) => projects.find((p) => p.id === r.project_id))
+      .filter(Boolean)
+      .map((p) => mockAdviserDashboardRow(p, now))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  const { data, error } = await supabase.rpc('adviser_dashboard');
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Whether the caller advises anything: what the header asks before showing
+// the Advising link. The same accepted-rows question as the dashboard, but
+// ids only, since it runs on every page.
+export async function isAdviser() {
+  if (USE_MOCKS) {
+    if (!sessionUserId) return false;
+    return adviserRequests.some((r) => r.adviser_id === sessionUserId && r.status === 'accepted');
+  }
+
+  const { data, error } = await supabase.rpc('advised_project_ids');
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
 // --- Weekly check-ins (#55) -------------------------------------------------
 // One per member per Monday–Sunday Central week, once the team is formed.
 // The team and its accepted adviser read them; a member writes only their
