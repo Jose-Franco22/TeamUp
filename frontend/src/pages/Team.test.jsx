@@ -201,9 +201,14 @@ describe('when the delete is refused', () => {
     await user.click(within(section).getByRole('button', { name: 'Delete team' }));
     await user.click(within(section).getByRole('button', { name: 'Yes, delete it' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Remove everyone else from the team before deleting it'
-    );
+    // By text, not by role. This file mocks four client functions and lets
+    // the rest of the Team page's children — the adviser panel, check-ins,
+    // repo activity — call the real mock client with no session user set, so
+    // they reject with "Not signed in" and one of them renders its own
+    // role="alert". findByRole('alert') is singular and throws on two, so it
+    // raced: it passed whenever the delete's alert won and failed whenever
+    // the suite was loaded enough for the other to land first.
+    expect(await screen.findByText('Remove everyone else from the team before deleting it')).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -216,7 +221,7 @@ describe('when the delete is refused', () => {
     await user.click(within(section).getByRole('button', { name: 'Delete team' }));
     await user.click(within(section).getByRole('button', { name: 'Yes, delete it' }));
 
-    await screen.findByRole('alert');
+    await screen.findByText('Network down');
     expect(screen.getByRole('heading', { name: /Campus parking tracker/ })).toBeInTheDocument();
   });
 });

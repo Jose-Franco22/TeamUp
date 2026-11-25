@@ -68,10 +68,22 @@ describe('who sees it', () => {
     expect(screen.queryByRole('checkbox', { name: /Available to advise/ })).not.toBeInTheDocument();
   });
 
-  test('says so quietly when the settings cannot be read, rather than taking over the page', async () => {
-    client.myAdvising.mockRejectedValue(new Error('network'));
-    render(<AdvisingCard />);
-    expect(await screen.findByText(/Could not load your advising settings/)).toBeInTheDocument();
+  // This used to render "Could not load your advising settings", and that was
+  // wrong for the failure that actually happens (#104 review). The migration
+  // behind my_advising() is applied by hand, so between a frontend deploy and
+  // that migration the call rejects for *every* account — and a student would
+  // read an error about advising settings they can never have, on every page
+  // load, until somebody ran the SQL. A failure is the one case where the
+  // card cannot tell who is looking, so it renders nothing.
+  test('renders nothing when the read fails, because it cannot tell who is asking', async () => {
+    client.myAdvising.mockRejectedValue(new Error('function my_advising does not exist'));
+    const { container } = render(<AdvisingCard />);
+
+    await waitFor(() => expect(client.myAdvising).toHaveBeenCalled());
+
+    expect(screen.queryByRole('region', { name: 'Advising' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Could not load/i)).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 });
 

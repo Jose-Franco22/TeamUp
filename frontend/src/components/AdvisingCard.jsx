@@ -28,31 +28,35 @@ import SkillPicker from './SkillPicker';
 // there is nothing here you would want to change and then abandon.
 export default function AdvisingCard() {
   const [state, setState] = useState(null);
-  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let live = true;
+    // A failed read renders nothing, exactly as a non-faculty account does.
+    //
+    // It used to say "Could not load your advising settings", which was wrong
+    // in the case that actually happens (#104 review). This card is faculty
+    // only, and a failure is precisely the case where we do not know who is
+    // looking — so the only safe answer is the one that is correct for
+    // everyone who should not see the card at all.
+    //
+    // And the realistic failure is not a flaky network. The migration behind
+    // my_advising() is applied by hand, so between a frontend deploy and that
+    // migration the function does not exist and this rejects for *every*
+    // account. A student would have been reading an error about advising
+    // settings they can never have, on every page load, until somebody ran
+    // the SQL.
     myAdvising().then(
-      (data) => live && setState(data),
-      () => live && setFailed(true)
+      (data) => {
+        if (live) setState(data);
+      },
+      () => {}
     );
     return () => {
       live = false;
     };
   }, []);
 
-  // Not faculty, still loading, or the read failed: no card. A faculty member
-  // whose settings could not be loaded is the one case worth a word, but it
-  // is one line of a profile page that otherwise works, so it says so quietly
-  // rather than taking over the page — the same choice AdviserPanel makes.
-  if (failed) {
-    return (
-      <section className="card" aria-label="Advising">
-        <h2>Advising</h2>
-        <p className="hint">Could not load your advising settings just now.</p>
-      </section>
-    );
-  }
+  // Not faculty, still loading, or the read failed: no card.
   if (!state || !state.is_faculty) return null;
 
   return (
