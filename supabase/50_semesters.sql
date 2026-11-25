@@ -2153,10 +2153,11 @@ as $$
      and p.semester_id = public.current_semester_id();
 $$;
 
--- 47_adviser_dashboard.sql's, as #105 left it (overdue counts only milestones
--- due on or after the team formed), plus: the teams are this semester's, and
--- so are the milestones. Without the second half a new semester's dashboard
--- would show last semester's milestones as overdue.
+-- 49_overdue_after_formed.sql's (#105): overdue counts only milestones due
+-- on or after the team FIRST formed (teams.first_formed_at, which survives a
+-- member leaving). Plus: the teams are this semester's, and so are the
+-- milestones. Without the second half a new semester's dashboard would show
+-- last semester's milestones as overdue. Body otherwise unchanged.
 create or replace function public.adviser_dashboard()
 returns table (
   project_id              uuid,
@@ -2182,7 +2183,7 @@ security definer
 set search_path = ''
 as $$
   with advised as (
-    select p.id as project_id, p.title, t.id as team_id, t.formed_at
+    select p.id as project_id, p.title, t.id as team_id, t.formed_at, t.first_formed_at
       from public.adviser_requests ar
       join public.projects p on p.id = ar.project_id
       left join public.teams t on t.project_id = p.id
@@ -2239,7 +2240,7 @@ as $$
       where m.semester_id = public.current_semester_id()
         and m.requires_deliverable
         and m.due_at < now()
-        and m.due_at >= a.formed_at
+        and m.due_at >= a.first_formed_at
         and not exists (
           select 1 from public.deliverable_submissions s
            where s.project_id = a.project_id and s.milestone_id = m.id
