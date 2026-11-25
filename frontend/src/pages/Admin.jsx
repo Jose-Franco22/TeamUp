@@ -211,7 +211,8 @@ export default function Admin() {
         <div className="head-actions">
           {/* #40: the rosters an instructor needs for grading, records and
               emailing teams. export_rosters() narrows by who is asking, so
-              the same button serves the Advising dashboard (#56). */}
+              the same button serves the Advising dashboard (#56) — which it
+              now does: pages/Advising.jsx mounts this component. */}
           <ExportRosters />
           <button className="btn ghost" onClick={reload}>Refresh</button>
         </div>

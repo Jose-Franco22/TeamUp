@@ -3,6 +3,7 @@ import { getAdviserDashboard } from '../api/client';
 import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
 import { ATTENTION, attentionReasons, daysSince, sortAdvisedTeams } from '../lib/adviserDashboard';
+import ExportRosters from '../components/ExportRosters';
 import { DELIVERABLE_STATUS } from '../lib/deliverables';
 
 // The adviser dashboard (issue #56): every team I advise on one page, the
@@ -117,6 +118,27 @@ export default function Advising() {
                 }`}
           </p>
         </div>
+        {/* #40's last criterion: "advisers get the same export limited to the
+            teams they advise, from the Advising dashboard (#56)". The same
+            component as the admin's, which is why it takes a label —
+            export_rosters() narrows by who is asking, so there is nothing
+            adviser-specific to build on this side.
+
+            Hidden with no teams, because an adviser who has stepped down
+            would otherwise get a button that export_rosters() refuses: it
+            rejects a caller who is neither an admin nor an accepted adviser.
+
+            One wrinkle worth knowing: an admin who also advises gets the
+            *admin* scope here — every team, not only theirs — because
+            export_rosters() checks admin first. That is the function's whole
+            design (it answers by who is asking, as admin_dashboard() does),
+            so the button keeps the neutral label rather than promising
+            "my teams" and handing an instructor the whole class. */}
+        {teams.length > 0 && (
+          <div className="head-actions">
+            <ExportRosters />
+          </div>
+        )}
       </div>
 
       {teams.length === 0 ? (
