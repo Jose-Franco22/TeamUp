@@ -351,6 +351,64 @@ export function validateMilestone({ name, due_at, message }) {
   return { values, errors, isValid: Object.keys(errors).length === 0 };
 }
 
+// --- Semesters (#61) -------------------------------------------------------
+// Mirrored by start_semester() in supabase/50_semesters.sql, which is the
+// real boundary. Same name rules as a milestone, 40 characters at most, since
+// the name is what an admin types to close the semester. The formation
+// deadline has to be in the future (a past one would lock every roster the
+// day the semester opened) and fall on or before the semester's last day,
+// as a Central-time date — the class's timezone, which the server uses too.
+export const SEMESTER_NAME_MAX = 40;
+export const SEMESTER_DATE_MIN = '2000-01-01';
+export const SEMESTER_DATE_MAX = '2100-01-01';
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// "2026-12-12" for the Central-time calendar day `when` falls on.
+export function centralDate(when) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(when);
+}
+
+export function validateSemester({ name, starts_on, ends_on, formation_deadline }, { now = new Date() } = {}) {
+  const errors = {};
+  const values = {};
+
+  const trimmed = String(name ?? '').trim();
+  if (trimmed === '') errors.name = 'Give the semester a name';
+  else if (charCount(trimmed) > SEMESTER_NAME_MAX) {
+    errors.name = `Keep the semester name to ${SEMESTER_NAME_MAX} characters or fewer`;
+  } else if (/[\x00-\x1F\x7F-\x9F]/.test(trimmed) || INVISIBLE.test(trimmed)) {
+    errors.name = "The semester name can't contain line breaks, hidden or control characters";
+  } else if (!HAS_WORDS.test(trimmed)) {
+    errors.name = 'The semester name has to include letters or numbers';
+  } else values.name = trimmed;
+
+  const checkDate = (raw, field, missing) => {
+    const text = String(raw ?? '').trim();
+    if (!ISO_DATE.test(text) || Number.isNaN(new Date(`${text}T00:00:00Z`).getTime())) {
+      errors[field] = missing;
+    } else if (text < SEMESTER_DATE_MIN || text >= SEMESTER_DATE_MAX) {
+      errors[field] = 'Pick dates between 2000 and 2099';
+    } else values[field] = text;
+  };
+  checkDate(starts_on, 'starts_on', 'Give the semester a start date');
+  checkDate(ends_on, 'ends_on', 'Give the semester an end date');
+  if (values.starts_on && values.ends_on && values.ends_on <= values.starts_on) {
+    errors.ends_on = 'The semester has to end after it starts';
+    delete values.ends_on;
+  }
+
+  const when = formation_deadline ? new Date(formation_deadline) : null;
+  if (!when || Number.isNaN(when.getTime())) errors.formation_deadline = 'Set the team formation deadline';
+  else if (when <= now) errors.formation_deadline = 'The team formation deadline has to be in the future';
+  else if (values.ends_on && centralDate(when) > values.ends_on) {
+    errors.formation_deadline = "The team formation deadline has to fall on or before the semester's last day";
+  } else values.formation_deadline = when.toISOString();
+
+  return { values, errors, isValid: Object.keys(errors).length === 0 };
+}
+
 // --- Next steps -----------------------------------------------------------
 // Mirrored by the next_steps CHECK constraints and the raises in
 // save_next_step() (supabase/33_next_steps.sql). The text follows the

@@ -14,6 +14,12 @@ import { DASHBOARD } from '../test/adminFixtures';
 vi.mock('../api/client', () => ({
   getAdminDashboard: vi.fn(),
   getAdminActions: vi.fn(),
+  // The Semester panel and Past semesters (#61), which this page now holds.
+  getSemesterClosePreview: vi.fn(async () => ({
+    semester_id: 'sem-fall-2026', name: 'Fall 2026', starts_on: '2026-08-24', ends_on: '2026-12-12',
+    teams: 2, students: 3, pending_join_requests: 1, pending_adviser_requests: 0, adviser_links: 1,
+  })),
+  getPastSemesters: vi.fn(async () => []),
 }));
 
 let style;

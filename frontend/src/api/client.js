@@ -40,6 +40,18 @@ import {
   deliverableFiles,
   repoActivity,
   repoActivityFor,
+  semesters,
+  currentSemester,
+  isCurrentProject,
+  isCurrentTeam,
+  inCurrentSemester,
+  currentMembership,
+  assertOpenSemester,
+  assertOpenProject,
+  requireCurrentSemesterId,
+  rowSemesterId,
+  projectSemesterId,
+  teamSemesterId,
 } from './mockData';
 import { validateCheckIn, weekStart } from '../lib/checkIns';
 import { supabase } from '../lib/supabaseClient';
@@ -70,6 +82,7 @@ import {
   validateNextStep,
   validateProfile,
   validateProject,
+  validateSemester,
 } from '../lib/validation';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
@@ -176,13 +189,14 @@ function mockAdminTeam(team) {
     // private.admin_team_next_steps() in 33_next_steps.sql.
     next_steps: {
       done: nextStepCompletions.filter((c) => c.team_id === team.id).length,
-      total: nextSteps.length,
+      total: nextSteps.filter((s) => rowSemesterId(s) === teamSemesterId(team.id)).length,
     },
   };
 }
 
 function mockAdminStudent(student) {
-  const membership = teamMembers.find((m) => m.user_id === student.id);
+  // This semester's seat (private.current_team_id(), #61).
+  const membership = currentMembership(student.id);
   const team = membership && teams.find((t) => t.id === membership.team_id);
   const project = team && projects.find((p) => p.id === team.project_id);
   return {
@@ -207,9 +221,9 @@ export async function getAdminDashboard() {
   if (USE_MOCKS) {
     await delay();
     requireAdminSessionUserId();
-    const teamList = teams.map(mockAdminTeam).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+    const teamList = teams.filter((t) => isCurrentTeam(t.id)).map(mockAdminTeam).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
     const unplaced = users
-      .filter((u) => !u.is_admin && !teamMembers.some((m) => m.user_id === u.id))
+      .filter((u) => !u.is_admin && !currentMembership(u.id))
       .map(mockAdminStudent)
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     return {
@@ -245,12 +259,14 @@ export async function exportRosters() {
     const id = requireSessionUserId();
     const isAdmin = Boolean(users.find((u) => u.id === id)?.is_admin);
     const advisedProjectIds = adviserRequests
-      .filter((r) => r.adviser_id === id && r.status === 'accepted')
+      .filter((r) => r.adviser_id === id && r.status === 'accepted' && isCurrentProject(r.project_id))
       .map((r) => r.project_id);
     if (!isAdmin && advisedProjectIds.length === 0) {
       throw new Error('Only an admin or an adviser can export rosters');
     }
-    const inScope = (projectId) => isAdmin || advisedProjectIds.includes(projectId);
+    // This semester's teams only (50_semesters.sql).
+    const inScope = (projectId) =>
+      isCurrentProject(projectId) && (isAdmin || advisedProjectIds.includes(projectId));
 
     const teamRows = teams
       .filter((t) => inScope(t.project_id))
@@ -307,7 +323,7 @@ export async function exportRosters() {
     const unplacedRows = !isAdmin
       ? []
       : users
-          .filter((u) => !u.is_admin && !teamMembers.some((m) => m.user_id === u.id))
+          .filter((u) => !u.is_admin && !currentMembership(u.id))
           .map((u) => ({
             user_id: u.id,
             name: u.name,
@@ -431,6 +447,8 @@ function mockAssertOpenSeat(team, project) {
 // private.seat(): the membership, the role's seat taken, fill state, and
 // every request the student still has out declined.
 function mockSeat(userId, team, project, roleId) {
+  // The archive guard, on the team_members insert.
+  assertOpenProject(project.id);
   const membership = { team_id: team.id, user_id: userId, role_id: roleId, joined_at: new Date().toISOString() };
   teamMembers.push(membership);
   const need = projectRolesNeeded.find((n) => n.project_id === project.id && n.role_id === roleId);
@@ -450,7 +468,7 @@ export async function adminAssignStudent(userId, teamId, roleId) {
     const adminId = requireAdminSessionUserId();
     const { team, project } = mockPlacementTarget(userId, teamId, roleId);
     mockAssertOpenSeat(team, project);
-    if (teamMembers.some((tm) => tm.user_id === userId)) {
+    if (currentMembership(userId)) {
       throw new Error('That student is already on a team — move them instead');
     }
     const membership = mockSeat(userId, team, project, roleId);
@@ -477,7 +495,7 @@ export async function adminMoveStudent(userId, teamId, roleId) {
     const adminId = requireAdminSessionUserId();
     if (!roleId || !allRoles.some((r) => r.id === roleId)) throw new Error('Pick a role');
     if (!users.some((u) => u.id === userId && !u.is_admin)) throw new Error('Student not found');
-    const current = teamMembers.find((tm) => tm.user_id === userId);
+    const current = currentMembership(userId);
     if (!current) throw new Error('That student is not on a team — assign them instead');
     if (current.team_id === teamId) throw new Error('That student is already on this team');
     const fromTeam = teams.find((t) => t.id === current.team_id);
@@ -487,6 +505,8 @@ export async function adminMoveStudent(userId, teamId, roleId) {
     }
     const { team, project } = mockPlacementTarget(userId, teamId, roleId);
     mockAssertOpenSeat(team, project);
+    // Checked before anything moves: SQL would roll the unseat back.
+    assertOpenProject(project.id);
 
     teamMembers.splice(teamMembers.indexOf(current), 1);
     const old = projectRolesNeeded.find((n) => n.project_id === fromProject.id && n.role_id === current.role_id);
@@ -535,6 +555,314 @@ export async function getAdminActions(limit = 20) {
   return data;
 }
 
+// --- Semesters (#61) -------------------------------------------------------
+// One semester is current; closing it archives everything in it read-only,
+// and the next one is started with its name, dates and formation deadline.
+// supabase/50_semesters.sql holds every rule; the mock restates them in the
+// same order and with the same sentences, because the Admin page shows
+// whatever these throw.
+
+const ONLY_PAST_VIEWERS = 'Only the team, its adviser and admins can see a past team';
+
+function mockSemesterShape(s) {
+  if (!s) return null;
+  const deadline = milestones.find((m) => m.is_formation_deadline && rowSemesterId(m) === s.id);
+  return {
+    id: s.id, name: s.name, starts_on: s.starts_on, ends_on: s.ends_on,
+    formation_deadline: deadline?.due_at ?? null,
+  };
+}
+
+// private.semester_counts(): what closing will archive and cancel.
+function mockSemesterCounts(semesterId) {
+  const s = semesters.find((x) => x.id === semesterId);
+  if (!s) return null;
+  const inSemester = (projectId) => projectSemesterId(projectId) === s.id;
+  const teamIds = teams.filter((t) => inSemester(t.project_id)).map((t) => t.id);
+  return {
+    semester_id: s.id,
+    name: s.name,
+    starts_on: s.starts_on,
+    ends_on: s.ends_on,
+    teams: teamIds.length,
+    students: new Set(teamMembers.filter((tm) => teamIds.includes(tm.team_id)).map((tm) => tm.user_id)).size,
+    pending_join_requests: joinRequests.filter((r) => r.status === 'pending' && inSemester(r.project_id)).length,
+    pending_adviser_requests: adviserRequests.filter((r) => r.status === 'pending' && inSemester(r.project_id)).length,
+    adviser_links: adviserRequests.filter((r) => r.status === 'accepted' && inSemester(r.project_id)).length,
+  };
+}
+
+/** The current semester — name, dates, formation deadline — or null between semesters. */
+export async function getCurrentSemester() {
+  if (USE_MOCKS) {
+    await delay();
+    requireSessionUserId();
+    return mockSemesterShape(currentSemester());
+  }
+  const { data, error } = await supabase.rpc('current_semester');
+  if (error) throw error;
+  return data ?? null;
+}
+
+/**
+ * What the Close semester dialog shows: the current semester and how many
+ * teams, students and pending requests closing it will touch. Admins only;
+ * null when no semester is open.
+ */
+export async function getSemesterClosePreview() {
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const s = currentSemester();
+    return s ? mockSemesterCounts(s.id) : null;
+  }
+  const { data, error } = await supabase.rpc('semester_close_preview');
+  if (error) throw error;
+  return data ?? null;
+}
+
+/**
+ * Closes the semester. `confirmName` is what the admin typed; the server
+ * checks it against the name too, so a disabled button is not the only
+ * thing standing between a slip and an archived class. Resolves to what was
+ * closed, counted before anything was cancelled.
+ */
+export async function closeSemester(semesterId, confirmName) {
+  if (USE_MOCKS) {
+    await delay();
+    const adminId = requireAdminSessionUserId();
+    const s = semesters.find((x) => x.id === semesterId);
+    if (!s) throw new Error('Semester not found');
+    if (s.closed_at) throw new Error(`${s.name} is already closed`);
+    if (confirmName !== s.name) throw new Error('Type the semester name exactly as shown to confirm');
+
+    const summary = mockSemesterCounts(s.id);
+    const inSemester = (projectId) => projectSemesterId(projectId) === s.id;
+    const now = new Date().toISOString();
+    // Nothing is deleted: pending requests are cancelled, the alerts asking
+    // someone to answer them are marked read, and the semester is stamped.
+    joinRequests
+      .filter((r) => r.status === 'pending' && inSemester(r.project_id))
+      .forEach((r) => {
+        r.status = 'cancelled';
+      });
+    adviserRequests
+      .filter((r) => r.status === 'pending' && inSemester(r.project_id))
+      .forEach((r) => {
+        r.status = 'cancelled';
+        r.responded_at = now;
+      });
+    notifications
+      .filter((n) => ['join_request', 'adviser_invited'].includes(n.kind) && !n.read_at && n.project_id && inSemester(n.project_id))
+      .forEach((n) => {
+        n.read_at = now;
+      });
+    s.closed_at = now;
+    s.closed_by = adminId;
+    return { ...summary, closed_at: now };
+  }
+  const { data, error } = await supabase.rpc('close_semester', {
+    p_semester_id: semesterId,
+    p_confirm_name: confirmName,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/** Starts the next semester. Refused while one is still open. */
+export async function startSemester({ name, starts_on, ends_on, formation_deadline }) {
+  const { values, errors, isValid } = validateSemester({ name, starts_on, ends_on, formation_deadline });
+  if (!isValid) throw new ValidationError(errors);
+
+  if (USE_MOCKS) {
+    await delay();
+    requireAdminSessionUserId();
+    const open = currentSemester();
+    if (open) throw new Error(`Close ${open.name} before starting the next semester`);
+    if (semesters.some((x) => x.name.toLowerCase() === values.name.toLowerCase())) {
+      throw new Error(`There is already a semester called ${values.name}`);
+    }
+    const now = new Date().toISOString();
+    const row = {
+      id: `sem-${Date.now()}-${semesters.length}`,
+      name: values.name,
+      starts_on: values.starts_on,
+      ends_on: values.ends_on,
+      created_at: now,
+      closed_at: null,
+      closed_by: null,
+    };
+    semesters.push(row);
+    milestones.push({
+      id: `ms-${Date.now()}-${milestones.length}`,
+      name: 'Team formation deadline',
+      due_at: values.formation_deadline,
+      is_formation_deadline: true,
+      message: '',
+      requires_deliverable: false,
+      updated_at: now,
+      semester_id: row.id,
+    });
+    return mockSemesterShape(row);
+  }
+  const { data, error } = await supabase.rpc('start_semester', {
+    p_name: values.name,
+    p_starts_on: values.starts_on,
+    p_ends_on: values.ends_on,
+    p_formation_deadline: values.formation_deadline,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Undoes a close: the most recently closed semester, and only before the
+ * next one has started (50_semesters.sql, decision 8). Requests the close
+ * cancelled stay cancelled. Resolves to the semester, current again.
+ */
+export async function reopenSemester(semesterId) {
+  if (USE_MOCKS) {
+    await delay();
+    const adminId = requireAdminSessionUserId();
+    const s = semesters.find((x) => x.id === semesterId);
+    if (!s) throw new Error('Semester not found');
+    if (!s.closed_at) throw new Error(`${s.name} is not closed`);
+    const open = currentSemester();
+    if (open) throw new Error(`${open.name} has already started, so ${s.name} can't be reopened`);
+    if (semesters.some((x) => x.created_at > s.created_at)) {
+      throw new Error('Only the most recently closed semester can be reopened');
+    }
+    Object.assign(s, { closed_at: null, closed_by: null, reopened_at: new Date().toISOString(), reopened_by: adminId });
+    return mockSemesterShape(s);
+  }
+  const { data, error } = await supabase.rpc('reopen_semester', { p_semester_id: semesterId });
+  if (error) throw error;
+  return data;
+}
+
+// private.can_see_past_project(): an admin, someone who was on the team, or
+// the adviser who advised it.
+function mockCanSeePastProject(projectId, userId) {
+  return (
+    Boolean(users.find((u) => u.id === userId)?.is_admin) ||
+    mockIsOnProjectTeam(projectId, userId) ||
+    mockIsDeliverableAdviser(projectId, userId)
+  );
+}
+
+function mockPastMembers(teamId) {
+  return teamMembers
+    .filter((tm) => tm.team_id === teamId && !users.find((u) => u.id === tm.user_id)?.is_admin)
+    .map((tm) => ({
+      user_id: tm.user_id,
+      name: users.find((u) => u.id === tm.user_id)?.name ?? null,
+      role_name: allRoles.find((r) => r.id === tm.role_id)?.name ?? null,
+      joined_at: tm.joined_at ?? null,
+    }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)) || a.user_id.localeCompare(b.user_id));
+}
+
+function mockAcceptedAdviser(projectId) {
+  const row = adviserRequests.find((r) => r.project_id === projectId && r.status === 'accepted');
+  return row ? users.find((u) => u.id === row.adviser_id) ?? null : null;
+}
+
+/**
+ * The Past semesters list: every closed semester the caller had a team in,
+ * newest first, each with the teams they may open. An admin gets every
+ * closed semester and every team in it.
+ */
+export async function getPastSemesters() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const isAdmin = Boolean(users.find((u) => u.id === id)?.is_admin);
+    return semesters
+      .filter((s) => s.closed_at)
+      .sort((a, b) => b.closed_at.localeCompare(a.closed_at) || a.name.localeCompare(b.name))
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        starts_on: s.starts_on,
+        ends_on: s.ends_on,
+        closed_at: s.closed_at,
+        teams: projects
+          .filter((p) => projectSemesterId(p.id) === s.id && mockCanSeePastProject(p.id, id))
+          .map((p) => {
+            const team = teams.find((t) => t.project_id === p.id);
+            return { p, team };
+          })
+          .filter(({ team }) => team)
+          .sort((a, b) => a.p.title.localeCompare(b.p.title) || a.p.id.localeCompare(b.p.id))
+          .map(({ p, team }) => ({
+            project_id: p.id,
+            team_id: team.id,
+            title: p.title,
+            formed_at: team.formed_at ?? null,
+            is_member: mockIsOnProjectTeam(p.id, id),
+            is_adviser: mockIsDeliverableAdviser(p.id, id),
+            members: mockPastMembers(team.id).map(({ user_id, name, role_name }) => ({ user_id, name, role_name })),
+            adviser_name: mockAcceptedAdviser(p.id)?.name ?? null,
+          })),
+      }))
+      .filter((s) => isAdmin || s.teams.length > 0);
+  }
+  const { data, error } = await supabase.rpc('past_semesters');
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** One past team, read-only: members, adviser, deliverables and check-ins. */
+export async function getPastTeam(projectId) {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Team not found');
+    const semester = semesters.find((s) => s.id === projectSemesterId(projectId));
+    if (!semester?.closed_at) throw new Error('That team is in the current semester');
+    if (!mockCanSeePastProject(projectId, id)) throw new Error(ONLY_PAST_VIEWERS);
+    const team = teams.find((t) => t.project_id === projectId);
+    const adviser = mockAcceptedAdviser(projectId);
+    return {
+      project_id: project.id,
+      team_id: team?.id ?? null,
+      title: project.title,
+      description: project.description,
+      team_size_target: project.team_size_target,
+      status: project.status,
+      github_repo: project.github_repo ?? '',
+      formed_at: team?.formed_at ?? null,
+      semester: {
+        id: semester.id, name: semester.name, starts_on: semester.starts_on,
+        ends_on: semester.ends_on, closed_at: semester.closed_at,
+      },
+      members: team ? mockPastMembers(team.id) : [],
+      adviser: adviser ? { id: adviser.id, name: adviser.name } : null,
+      deliverables: milestones
+        .filter((m) => m.requires_deliverable && rowSemesterId(m) === semester.id)
+        .sort((a, b) => new Date(a.due_at) - new Date(b.due_at) || a.name.localeCompare(b.name))
+        .map((m) => mockDeliverable(projectId, m)),
+      check_ins: checkIns
+        .filter((c) => c.project_id === projectId)
+        .map((c) => ({
+          id: c.id,
+          user_id: c.user_id,
+          user_name: users.find((u) => u.id === c.user_id)?.name ?? null,
+          week_start: c.week_start,
+          did: c.did,
+          doing_next: c.doing_next,
+          blockers: c.blockers ?? null,
+          updated_at: c.updated_at,
+        }))
+        .sort((a, b) => b.week_start.localeCompare(a.week_start) || String(a.user_name).localeCompare(String(b.user_name))),
+    };
+  }
+  const { data, error } = await supabase.rpc('past_team', { p_project_id: projectId });
+  if (error) throw error;
+  return data;
+}
+
 // --- Milestones (#38) -----------------------------------------------------
 // The class schedule. Everyone can read it; only admins change it, through
 // save_milestone()/delete_milestone() (supabase/26_milestones.sql). The one
@@ -542,10 +870,11 @@ export async function getAdminActions(limit = 20) {
 export async function getMilestones() {
   if (USE_MOCKS) {
     await delay();
+    // milestones_select_current: this semester's schedule (#61).
     return milestones
-      .slice()
+      .filter(inCurrentSemester)
       .sort((a, b) => new Date(a.due_at) - new Date(b.due_at))
-      .map((m) => ({ ...m, requires_deliverable: Boolean(m.requires_deliverable) }));
+      .map(({ semester_id: _semester, ...m }) => ({ ...m, requires_deliverable: Boolean(m.requires_deliverable) }));
   }
   const { data, error } = await supabase
     .from('milestones')
@@ -568,10 +897,14 @@ export async function saveMilestone({ id = null, name, due_at, is_formation_dead
     requireAdminSessionUserId();
     const existing = id ? milestones.find((m) => m.id === id) : null;
     if (id && !existing) throw new Error('Milestone not found');
+    // The archive guard: an archived milestone can't change, and a new one
+    // goes in the current semester or nowhere.
+    const semesterId = existing ? rowSemesterId(existing) : requireCurrentSemesterId();
+    assertOpenSemester(semesterId);
     if (is_formation_deadline) {
-      for (const m of milestones) if (m.id !== id) m.is_formation_deadline = false;
+      for (const m of milestones) if (m.id !== id && inCurrentSemester(m)) m.is_formation_deadline = false;
     }
-    const row = existing ?? { id: `ms-${Date.now()}-${milestones.length}` };
+    const row = existing ?? { id: `ms-${Date.now()}-${milestones.length}`, semester_id: semesterId };
     Object.assign(row, {
       name: values.name,
       due_at: values.due_at,
@@ -606,6 +939,7 @@ export async function deleteMilestone(id) {
     }
     const index = milestones.findIndex((m) => m.id === id);
     if (index === -1) throw new Error('Milestone not found');
+    assertOpenSemester(rowSemesterId(milestones[index]));
     milestones.splice(index, 1);
     return;
   }
@@ -661,6 +995,7 @@ export async function setMilestoneRequiresDeliverable(id, requires) {
     if (!requires && deliverableSubmissions.some((s) => s.milestone_id === id)) {
       throw new Error(MILESTONE_HAS_SUBMISSIONS_UNFLAG);
     }
+    assertOpenSemester(rowSemesterId(row));
     row.requires_deliverable = Boolean(requires);
     row.updated_at = new Date().toISOString();
     return { ...row };
@@ -673,11 +1008,17 @@ export async function setMilestoneRequiresDeliverable(id, requires) {
   return data;
 }
 
-// advised_project_ids() (40_): an accepted request, nothing less.
+// The project's accepted adviser, in any semester: advises_project() (42_),
+// which is who can read a team's deliverables — a past team's included.
 function mockIsDeliverableAdviser(projectId, userId) {
   return adviserRequests.some(
     (r) => r.project_id === projectId && r.adviser_id === userId && r.status === 'accepted'
   );
+}
+
+// Who may write as the adviser: advised_project_ids(), this semester only.
+function mockIsCurrentAdviser(projectId, userId) {
+  return isCurrentProject(projectId) && mockIsDeliverableAdviser(projectId, userId);
 }
 
 // can_see_deliverables(): admins, the team, the accepted adviser.
@@ -753,8 +1094,9 @@ export async function getDeliverables(projectId) {
     const id = requireSessionUserId();
     if (!projects.some((p) => p.id === projectId)) throw new Error('Project not found');
     if (!mockCanSeeDeliverables(projectId, id)) throw new Error(CANNOT_SEE_DELIVERABLES);
+    // The project's own semester's milestones — a past team's, for a past team.
     return milestones
-      .filter((m) => m.requires_deliverable)
+      .filter((m) => m.requires_deliverable && rowSemesterId(m) === projectSemesterId(projectId))
       .sort((a, b) => new Date(a.due_at) - new Date(b.due_at) || a.name.localeCompare(b.name))
       .map((m) => mockDeliverable(projectId, m));
   }
@@ -779,9 +1121,13 @@ function uploadErrorMessage(error) {
 // What the upload policy on storage.objects allows (45_, may_upload_deliverable).
 function mockMayUpload(projectId, milestoneId, userId) {
   return (
-    projects.some((p) => p.id === projectId) &&
+    isCurrentProject(projectId) &&
     mockIsOnProjectTeam(projectId, userId) &&
-    Boolean(milestones.find((m) => m.id === milestoneId)?.requires_deliverable)
+    Boolean(
+      milestones.find(
+        (m) => m.id === milestoneId && rowSemesterId(m) === projectSemesterId(projectId)
+      )?.requires_deliverable
+    )
   );
 }
 
@@ -820,6 +1166,10 @@ export async function submitDeliverable(projectId, milestoneId, { file = null, l
     const milestone = milestones.find((m) => m.id === milestoneId);
     if (!milestone) throw new Error('Milestone not found');
     if (!milestone.requires_deliverable) throw new Error(NOT_A_DELIVERABLE);
+    // The archive guard, then the milestone-in-semester trigger (50_), in
+    // the order Postgres fires them.
+    assertOpenProject(projectId);
+    if (rowSemesterId(milestone) !== projectSemesterId(projectId)) throw new Error('Milestone not found');
 
     const version =
       deliverableSubmissions
@@ -914,11 +1264,15 @@ export async function postDeliverableComment(projectId, milestoneId, body) {
     await delay();
     const id = requireSessionUserId();
     if (!projects.some((p) => p.id === projectId)) throw new Error('Project not found');
-    const adviser = mockIsDeliverableAdviser(projectId, id);
+    const adviser = mockIsCurrentAdviser(projectId, id);
     if (!adviser && !mockIsOnProjectTeam(projectId, id)) throw new Error(ONLY_TEAM_OR_ADVISER_COMMENT);
     const milestone = milestones.find((m) => m.id === milestoneId);
     if (!milestone) throw new Error('Milestone not found');
     if (!milestone.requires_deliverable) throw new Error(NOT_A_DELIVERABLE);
+    // The archive guard, then the milestone-in-semester trigger (50_), in
+    // the order Postgres fires them.
+    assertOpenProject(projectId);
+    if (rowSemesterId(milestone) !== projectSemesterId(projectId)) throw new Error('Milestone not found');
     const latest = deliverableSubmissions
       .filter((s) => s.project_id === projectId && s.milestone_id === milestoneId)
       .sort((a, b) => b.version - a.version)[0];
@@ -959,10 +1313,14 @@ export async function reviewDeliverable(projectId, milestoneId, version, decisio
     await delay();
     const id = requireSessionUserId();
     if (!projects.some((p) => p.id === projectId)) throw new Error('Project not found');
-    if (!mockIsDeliverableAdviser(projectId, id)) throw new Error(ONLY_ADVISER_DECIDES);
+    if (!mockIsCurrentAdviser(projectId, id)) throw new Error(ONLY_ADVISER_DECIDES);
     const milestone = milestones.find((m) => m.id === milestoneId);
     if (!milestone) throw new Error('Milestone not found');
     if (!milestone.requires_deliverable) throw new Error(NOT_A_DELIVERABLE);
+    // The archive guard, then the milestone-in-semester trigger (50_), in
+    // the order Postgres fires them.
+    assertOpenProject(projectId);
+    if (rowSemesterId(milestone) !== projectSemesterId(projectId)) throw new Error('Milestone not found');
     const latest = deliverableSubmissions
       .filter((s) => s.project_id === projectId && s.milestone_id === milestoneId)
       .sort((a, b) => b.version - a.version)[0];
@@ -1006,7 +1364,7 @@ export async function getNextSteps() {
   if (USE_MOCKS) {
     await delay();
     requireSessionUserId();
-    return nextSteps.slice().sort((a, b) => a.sort_order - b.sort_order).map(nextStepRow);
+    return nextSteps.filter(inCurrentSemester).sort((a, b) => a.sort_order - b.sort_order).map(nextStepRow);
   }
   const { data, error } = await supabase
     .from('next_steps')
@@ -1028,6 +1386,7 @@ export async function saveNextStep({ id = null, title, due_at = null }) {
     if (id) {
       const row = nextSteps.find((s) => s.id === id);
       if (!row) throw new Error('Next step not found');
+      assertOpenSemester(rowSemesterId(row));
       Object.assign(row, { title: values.title, due_at: values.due_at });
       return nextStepRow(row);
     }
@@ -1035,7 +1394,9 @@ export async function saveNextStep({ id = null, title, due_at = null }) {
       id: `ns-${Date.now()}-${nextSteps.length}`,
       title: values.title,
       due_at: values.due_at,
-      sort_order: Math.max(0, ...nextSteps.map((s) => s.sort_order)) + 1,
+      // The end of this semester's list, and in this semester (50_).
+      semester_id: requireCurrentSemesterId(),
+      sort_order: Math.max(0, ...nextSteps.filter(inCurrentSemester).map((s) => s.sort_order)) + 1,
     };
     nextSteps.push(row);
     return nextStepRow(row);
@@ -1058,11 +1419,13 @@ export async function deleteNextStep(id) {
     requireAdminSessionUserId();
     const index = nextSteps.findIndex((s) => s.id === id);
     if (index === -1) throw new Error('Next step not found');
+    assertOpenSemester(rowSemesterId(nextSteps[index]));
     nextSteps.splice(index, 1);
     for (let i = nextStepCompletions.length - 1; i >= 0; i -= 1) {
       if (nextStepCompletions[i].step_id === id) nextStepCompletions.splice(i, 1);
     }
     nextSteps
+      .filter(inCurrentSemester)
       .sort((a, b) => a.sort_order - b.sort_order)
       .forEach((s, i) => { s.sort_order = i + 1; });
     return;
@@ -1078,12 +1441,12 @@ export async function reorderNextSteps(ids) {
   if (USE_MOCKS) {
     await delay();
     requireAdminSessionUserId();
-    const known = new Set(nextSteps.map((s) => s.id));
+    const known = new Set(nextSteps.filter(inCurrentSemester).map((s) => s.id));
     if (ids.length !== known.size || new Set(ids).size !== ids.length || !ids.every((id) => known.has(id))) {
       throw new Error('The list has changed since it was loaded — reload and try again');
     }
     ids.forEach((id, i) => { nextSteps.find((s) => s.id === id).sort_order = i + 1; });
-    return nextSteps.slice().sort((a, b) => a.sort_order - b.sort_order).map(nextStepRow);
+    return nextSteps.filter(inCurrentSemester).sort((a, b) => a.sort_order - b.sort_order).map(nextStepRow);
   }
   const { data, error } = await supabase.rpc('reorder_next_steps', { p_ids: ids });
   if (error) throw error;
@@ -1100,7 +1463,7 @@ export async function getAnnouncementFeed() {
     await delay();
     requireSessionUserId();
     return announcements
-      .slice()
+      .filter(inCurrentSemester)
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       .map((a) => ({ ...a, author_name: users.find((u) => u.id === a.author_id)?.name ?? null }));
   }
@@ -1121,6 +1484,7 @@ export async function saveAnnouncement({ id = null, title, body }) {
     if (id) {
       const row = announcements.find((a) => a.id === id);
       if (!row) throw new Error('Announcement not found');
+      assertOpenSemester(rowSemesterId(row));
       Object.assign(row, { title: values.title, body: values.body, updated_at: now });
       return { ...row };
     }
@@ -1131,6 +1495,7 @@ export async function saveAnnouncement({ id = null, title, body }) {
       author_id: adminId,
       created_at: now,
       updated_at: now,
+      semester_id: requireCurrentSemesterId(),
     };
     announcements.push(row);
     return { ...row };
@@ -1150,6 +1515,7 @@ export async function deleteAnnouncement(id) {
     requireAdminSessionUserId();
     const index = announcements.findIndex((a) => a.id === id);
     if (index === -1) throw new Error('Announcement not found');
+    assertOpenSemester(rowSemesterId(announcements[index]));
     announcements.splice(index, 1);
     return;
   }
@@ -1166,7 +1532,8 @@ export async function getUnseenAnnouncementCount() {
     if (users.find((u) => u.id === id)?.is_admin) return 0;
     const seen = announcementsSeenAt[id] ? new Date(announcementsSeenAt[id]) : null;
     const isNew = (row) => !seen || new Date(row.updated_at ?? row.created_at ?? 0) > seen;
-    return announcements.filter(isNew).length + milestones.filter(isNew).length;
+    const fresh = (row) => inCurrentSemester(row) && isNew(row);
+    return announcements.filter(fresh).length + milestones.filter(fresh).length;
   }
   const { data, error } = await supabase.rpc('unseen_announcement_count');
   if (error) throw error;
@@ -1193,8 +1560,9 @@ function mockAssertOnTeam(teamId, viewerId, message) {
 }
 
 function mockChecklist(teamId) {
+  // The team's own semester's steps, so a past team keeps the list it had.
   return nextSteps
-    .slice()
+    .filter((s) => rowSemesterId(s) === teamSemesterId(teamId))
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((s) => {
       const done = nextStepCompletions.find((c) => c.team_id === teamId && c.step_id === s.id);
@@ -1238,7 +1606,10 @@ export async function setNextStepDone(teamId, stepId, done) {
     if (projects.find((p) => p.id === team.project_id)?.status !== 'full') {
       throw new Error('The checklist opens once the team is full');
     }
-    if (!nextSteps.some((s) => s.id === stepId)) throw new Error('Next step not found');
+    if (!nextSteps.some((s) => s.id === stepId && rowSemesterId(s) === teamSemesterId(teamId))) {
+      throw new Error('Next step not found');
+    }
+    assertOpenSemester(teamSemesterId(teamId));
     const index = nextStepCompletions.findIndex((c) => c.team_id === teamId && c.step_id === stepId);
     if (done && index === -1) {
       nextStepCompletions.push({
@@ -1472,7 +1843,8 @@ export async function getProjects({ onlyOpen = true } = {}) {
 
   if (USE_MOCKS) {
     await delay();
-    return keep(projects.map((p) => buildProject(p, sessionUserId)));
+    // projects_select_current: this semester's projects and no others.
+    return keep(projects.filter((p) => isCurrentProject(p.id)).map((p) => buildProject(p, sessionUserId)));
   }
   const viewerId = await getViewerId();
   const [{ data: rows, error }, requestMap] = await Promise.all([
@@ -1490,7 +1862,7 @@ export async function getProjects({ onlyOpen = true } = {}) {
 export async function getProject(id) {
   if (USE_MOCKS) {
     await delay();
-    const p = projects.find((x) => x.id === id);
+    const p = projects.find((x) => x.id === id && isCurrentProject(x.id));
     if (!p) throw new Error('Project not found');
     return buildProject(p, sessionUserId);
   }
@@ -1539,9 +1911,11 @@ export async function createProject({
   if (USE_MOCKS) {
     await delay();
     const id = requireStudentSessionUserId();
-    // A student can only be on one team — same rule as createJoinRequest.
-    const onAnyTeam = teamMembers.some((tm) => tm.user_id === id);
-    if (onAnyTeam) throw new Error('You are already on a team and cannot create another project');
+    // One team per student per semester — same rule as createJoinRequest.
+    if (currentMembership(id)) throw new Error('You are already on a team and cannot create another project');
+    // The archive guard fires before the deadline trigger (its name sorts
+    // first), so with no semester open that is what the student hears.
+    const semesterId = requireCurrentSemesterId();
     assertBeforeFormationDeadline();
 
     const projectId = `p-${Date.now()}`;
@@ -1555,6 +1929,7 @@ export async function createProject({
       team_size_target: values.team_size_target,
       status: 'open',
       created_at: new Date().toISOString(),
+      semester_id: semesterId,
     };
     projects.push(project);
 
@@ -1665,6 +2040,8 @@ export async function updateProject(
       );
     }
 
+    // update_project()'s first write is where the archive guard refuses.
+    assertOpenProject(projectId);
     const previousStatus = project.status;
     Object.assign(project, {
       // The validated, trimmed values — update_project() btrims server-side.
@@ -2107,7 +2484,7 @@ export async function getRequests() {
   if (USE_MOCKS) {
     await delay();
     const id = requireSessionUserId();
-    const myProjectIds = projects.filter((p) => p.creator_id === id).map((p) => p.id);
+    const myProjectIds = projects.filter((p) => p.creator_id === id && isCurrentProject(p.id)).map((p) => p.id);
 
     const incoming = joinRequests
       .filter((r) => myProjectIds.includes(r.project_id) && r.status === 'pending')
@@ -2128,7 +2505,7 @@ export async function getRequests() {
       .sort(byOldest);
 
     const outgoing = joinRequests
-      .filter((r) => r.user_id === id)
+      .filter((r) => r.user_id === id && isCurrentProject(r.project_id))
       .map((r) => {
         const p = buildProject(projects.find((x) => x.id === r.project_id), id);
         return {
@@ -2202,7 +2579,7 @@ export async function getPendingRequestCount() {
   if (USE_MOCKS) {
     await delay();
     const id = requireSessionUserId();
-    const myProjectIds = projects.filter((p) => p.creator_id === id).map((p) => p.id);
+    const myProjectIds = projects.filter((p) => p.creator_id === id && isCurrentProject(p.id)).map((p) => p.id);
     return joinRequests.filter((r) => myProjectIds.includes(r.project_id) && r.status === 'pending').length;
   }
 
@@ -2231,13 +2608,13 @@ export async function createJoinRequest(projectId, message = '') {
     const id = requireStudentSessionUserId();
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new Error('Project not found');
+    assertOpenProject(projectId);
     if (project.creator_id === id) throw new Error(JOIN_BLOCKED.own);
     const team = teams.find((t) => t.project_id === projectId);
     const isMember = team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === id);
     if (isMember) throw new Error("You're already on this team");
     // A student can only be on one team at a time.
-    const onAnyTeam = teamMembers.some((tm) => tm.user_id === id);
-    if (onAnyTeam) throw new Error(JOIN_BLOCKED.onTeam);
+    if (currentMembership(id)) throw new Error(JOIN_BLOCKED.onTeam);
     const existing = joinRequests.find(
       (r) => r.project_id === projectId && r.user_id === id && r.status === 'pending'
     );
@@ -2357,7 +2734,7 @@ export async function respondToRequest(requestId, status, roleId) {
       }
       // team_members.user_id is the primary key, so a stale request would
       // otherwise fail the insert with a raw constraint violation.
-      if (teamMembers.some((tm) => tm.user_id === r.user_id)) {
+      if (currentMembership(r.user_id)) {
         throw new Error('That student has already joined a team');
       }
       // Alongside the admin check above, and for the same reason: both are
@@ -2423,7 +2800,7 @@ export async function getMyTeam() {
   if (USE_MOCKS) {
     await delay();
     const id = requireSessionUserId();
-    const membership = teamMembers.find((tm) => tm.user_id === id);
+    const membership = currentMembership(id);
     if (!membership) return null;
     const team = teams.find((t) => t.id === membership.team_id);
     const project = buildProject(projects.find((p) => p.id === team.project_id), id);
@@ -2560,6 +2937,7 @@ export async function setProjectRepo(projectId, repo) {
     if (project.creator_id !== id) {
       throw new Error('Only the project creator can link a repository');
     }
+    assertOpenProject(projectId);
     // Same as the migration: pointing somewhere else throws away an answer
     // that was about the old repository.
     if (url !== (project.github_repo ?? '')) {
@@ -2742,6 +3120,8 @@ export async function deleteTeam(teamId) {
     if (roster.length > 1) {
       throw new Error('Remove everyone else from the team before deleting it');
     }
+    // The delete is refused by the guard, which rolls back the notices too.
+    assertOpenProject(project.id);
 
     // Everyone still waiting is told before their request disappears with
     // the project (issue #25). project_id is left out on purpose: in the
@@ -2786,7 +3166,7 @@ export async function leaveTeam() {
   if (USE_MOCKS) {
     await delay();
     const id = requireSessionUserId();
-    const membership = teamMembers.find((tm) => tm.user_id === id);
+    const membership = currentMembership(id);
     if (!membership) throw new Error('You are not on a team');
     const team = teams.find((t) => t.id === membership.team_id);
     const project = projects.find((p) => p.id === team.project_id);
@@ -2828,7 +3208,7 @@ export async function removeMember(userId) {
     const id = requireSessionUserId();
     const isAdmin = Boolean(users.find((u) => u.id === id)?.is_admin);
     if (userId === id) throw new Error('You cannot remove yourself — delete the team instead');
-    const membership = teamMembers.find((tm) => tm.user_id === userId);
+    const membership = currentMembership(userId);
     if (!membership) throw new Error('That student is not on a team');
     const team = teams.find((t) => t.id === membership.team_id);
     const project = projects.find((p) => p.id === team.project_id);
@@ -2876,7 +3256,7 @@ export async function setMemberRole(userId, roleId) {
     await delay();
     const id = requireSessionUserId();
     if (!roleId || !allRoles.some((r) => r.id === roleId)) throw new Error('Pick a role');
-    const membership = teamMembers.find((tm) => tm.user_id === userId);
+    const membership = currentMembership(userId);
     if (!membership) throw new Error('That student is not on a team');
     const team = teams.find((t) => t.id === membership.team_id);
     const project = projects.find((p) => p.id === team.project_id);
@@ -3080,6 +3460,7 @@ export async function inviteAdviser(projectId, adviserId) {
       );
     }
 
+    assertOpenProject(projectId);
     const row = {
       id: `ar-${Date.now()}-${adviserRequests.length}`,
       project_id: projectId,
@@ -3269,7 +3650,7 @@ export async function getAdvisedProjects() {
     await delay();
     const id = requireSessionUserId();
     return adviserRequests
-      .filter((r) => r.adviser_id === id && r.status === 'accepted')
+      .filter((r) => r.adviser_id === id && r.status === 'accepted' && isCurrentProject(r.project_id))
       .map((r) => projects.find((p) => p.id === r.project_id))
       .filter(Boolean)
       .map((p) => buildProject(p, id));
@@ -3311,8 +3692,9 @@ function mockAdviserDashboardRow(project, now) {
     deliverableSubmissions
       .filter((s) => s.project_id === project.id && s.milestone_id === milestoneId)
       .sort((a, b) => b.version - a.version)[0]?.status ?? null;
+  // This semester's milestones, the same as the teams (50_).
   const next = milestones
-    .filter((m) => new Date(m.due_at) >= now)
+    .filter((m) => inCurrentSemester(m) && new Date(m.due_at) >= now)
     .filter((m) => !(m.requires_deliverable && latestStatus(m.id) === 'approved'))
     .sort((a, b) => new Date(a.due_at) - new Date(b.due_at) || a.name.localeCompare(b.name))[0];
 
@@ -3333,7 +3715,7 @@ function mockAdviserDashboardRow(project, now) {
     next_milestone_name: next?.name ?? null,
     next_milestone_due_at: next?.due_at ?? null,
     next_deliverable_status: next?.requires_deliverable ? latestStatus(next.id) ?? 'not_submitted' : null,
-    overdue_deliverables: milestones.filter(
+    overdue_deliverables: milestones.filter(inCurrentSemester).filter(
       (m) =>
         m.requires_deliverable &&
         new Date(m.due_at) < now &&
@@ -3355,7 +3737,7 @@ export async function getAdviserDashboard() {
     const id = requireSessionUserId();
     const now = new Date();
     return adviserRequests
-      .filter((r) => r.adviser_id === id && r.status === 'accepted')
+      .filter((r) => r.adviser_id === id && r.status === 'accepted' && isCurrentProject(r.project_id))
       .map((r) => projects.find((p) => p.id === r.project_id))
       .filter(Boolean)
       .map((p) => mockAdviserDashboardRow(p, now))
@@ -3373,7 +3755,9 @@ export async function getAdviserDashboard() {
 export async function isAdviser() {
   if (USE_MOCKS) {
     if (!sessionUserId) return false;
-    return adviserRequests.some((r) => r.adviser_id === sessionUserId && r.status === 'accepted');
+    return adviserRequests.some(
+      (r) => r.adviser_id === sessionUserId && r.status === 'accepted' && isCurrentProject(r.project_id)
+    );
   }
 
   const { data, error } = await supabase.rpc('advised_project_ids');
@@ -3418,6 +3802,9 @@ export async function getCheckIns(projectId) {
     if (!mockCanReadCheckIns(projectId, id)) {
       throw new Error("Only this team and its adviser can see the team's check-ins");
     }
+    // The select policy's chain: an archived project's check-ins read as
+    // none through the table. past_team() is where they are read.
+    if (!isCurrentProject(projectId)) return [];
     return checkIns
       .filter((c) => c.project_id === projectId)
       .map((c) => ({ ...c, user_name: users.find((u) => u.id === c.user_id)?.name ?? null }))
@@ -3445,6 +3832,7 @@ export async function saveCheckIn(projectId, fields, checkInId = null) {
     const team = teams.find((t) => t.project_id === projectId);
     const onTeam = Boolean(team && teamMembers.some((tm) => tm.team_id === team.id && tm.user_id === id));
     if (!onTeam || !team.formed_at) throw checkInError({ code: '42501' });
+    assertOpenProject(projectId);
     const week = weekStart();
     const existing = checkIns.find((c) => c.project_id === projectId && c.user_id === id && c.week_start === week);
     const now = new Date().toISOString();

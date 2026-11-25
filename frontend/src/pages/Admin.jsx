@@ -6,6 +6,8 @@ import useAsync from '../components/useAsync';
 import { Empty, ErrorState, Loading } from '../components/States';
 import StatusPill from '../components/StatusPill';
 import ExportRosters from '../components/ExportRosters';
+import SemesterPanel from '../components/SemesterPanel';
+import PastSemesters from '../components/PastSemesters';
 
 export function PendingProjectLinks({ requests }) {
   if (requests.length === 0) return <span className="desc">No pending requests</span>;
@@ -231,6 +233,10 @@ export default function Admin() {
         </div>
       </dl>
 
+      {/* #61: close this semester and start the next. Closing archives every
+          team below, so the dashboard reloads to the semester now current. */}
+      <SemesterPanel onChange={reload} />
+
       <section aria-labelledby="all-teams-heading">
         <h2 className="section" id="all-teams-heading">All teams</h2>
         {total === 0 ? (
@@ -339,6 +345,8 @@ export default function Admin() {
       </section>
 
       <RecentChanges />
+
+      <PastSemesters />
     </>
   );
 }
