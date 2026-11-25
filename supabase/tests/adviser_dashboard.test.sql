@@ -1,4 +1,4 @@
--- The adviser dashboard (issue #56): 47_adviser_dashboard.sql.
+-- The adviser dashboard (issue #56): 47_adviser_dashboard.sql, as replaced by 49_overdue_after_formed.sql.
 --
 -- Ana advises two formed teams, P1 and P2, and was declined on P3, where
 -- Otto's invitation is still pending. The two teams are seeded to differ on

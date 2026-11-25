@@ -3290,7 +3290,7 @@ export async function getAdvisedProjects() {
 
 // --- Adviser dashboard (#56) -------------------------------------------------
 // One row per team the caller advises, with the figures each card shows —
-// the shape adviser_dashboard() returns (supabase/47_adviser_dashboard.sql).
+// the shape adviser_dashboard() returns (supabase/47_adviser_dashboard.sql, as replaced by 49_overdue_after_formed.sql).
 // Which teams need attention is decided in lib/adviserDashboard.js, not here.
 
 function mockAdviserDashboardRow(project, now) {
