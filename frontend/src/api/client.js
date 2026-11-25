@@ -1559,7 +1559,7 @@ export async function createProject({
     projects.push(project);
 
     const teamId = `t-${Date.now()}`;
-    teams.push({ id: teamId, project_id: projectId, formed_at: null });
+    teams.push({ id: teamId, project_id: projectId, formed_at: null, first_formed_at: null });
     teamMembers.push({ team_id: teamId, user_id: id, role_id: creator_role_id, joined_at: new Date().toISOString() });
 
     for (const r of roles_needed) {
@@ -1674,6 +1674,7 @@ export async function updateProject(
       status: roster.length >= team_size_target ? 'full' : 'open',
     });
     team.formed_at = roster.length >= team_size_target ? team.formed_at || new Date().toISOString() : null;
+    team.first_formed_at = team.first_formed_at ?? team.formed_at;
     mockNotifyIfTeamCompleted(previousStatus, project, team);
 
     const mine = roster.find((tm) => tm.user_id === id);
@@ -2377,6 +2378,7 @@ export async function respondToRequest(requestId, status, roleId) {
         const previousStatus = project.status;
         project.status = 'full';
         team.formed_at = new Date().toISOString();
+        team.first_formed_at = team.first_formed_at ?? team.formed_at;
         mockNotifyIfTeamCompleted(previousStatus, project, team);
       }
 
@@ -3290,7 +3292,7 @@ export async function getAdvisedProjects() {
 
 // --- Adviser dashboard (#56) -------------------------------------------------
 // One row per team the caller advises, with the figures each card shows —
-// the shape adviser_dashboard() returns (supabase/47_adviser_dashboard.sql).
+// the shape adviser_dashboard() returns (supabase/47_adviser_dashboard.sql, as replaced by 49_overdue_after_formed.sql).
 // Which teams need attention is decided in lib/adviserDashboard.js, not here.
 
 function mockAdviserDashboardRow(project, now) {
@@ -3332,7 +3334,15 @@ function mockAdviserDashboardRow(project, now) {
     next_milestone_due_at: next?.due_at ?? null,
     next_deliverable_status: next?.requires_deliverable ? latestStatus(next.id) ?? 'not_submitted' : null,
     overdue_deliverables: milestones.filter(
-      (m) => m.requires_deliverable && new Date(m.due_at) < now && latestStatus(m.id) === null
+      (m) =>
+        m.requires_deliverable &&
+        new Date(m.due_at) < now &&
+        // Only milestones from the team's FIRST formation on: the rest closed
+        // before it existed. first_formed_at is set once and survives a member
+        // leaving, unlike formed_at. A team that never filled has none.
+        team?.first_formed_at &&
+        new Date(m.due_at) >= new Date(team.first_formed_at) &&
+        latestStatus(m.id) === null
     ).length,
     changes_requested: milestones.filter((m) => latestStatus(m.id) === 'changes_requested').length,
     last_commit_at: repoActivityFor(project.id)?.last_commit_at ?? null,
@@ -3672,5 +3682,6 @@ function syncProjectFillState(project, team) {
   const previousStatus = project.status;
   project.status = full ? 'full' : 'open';
   team.formed_at = full ? team.formed_at || new Date().toISOString() : null;
+  team.first_formed_at = team.first_formed_at ?? team.formed_at;
   mockNotifyIfTeamCompleted(previousStatus, project, team);
 }
