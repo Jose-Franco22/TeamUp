@@ -58,7 +58,9 @@ describe('needsAttention', () => {
     expect(needsAttention(healthy({ formed_at: daysAgo(3), last_check_in_at: null }), NOW)).toBe(false);
   });
 
-  test('but a forming team with an overdue deliverable still is', () => {
+  // A team that lost a member is forming again (formed_at null) but keeps the
+  // overdue work it already owed, since the count runs from first_formed_at.
+  test('but a team that is forming again with an overdue deliverable still is', () => {
     expect(needsAttention(healthy({ formed_at: null, overdue_deliverables: 1 }), NOW)).toBe(true);
   });
 });

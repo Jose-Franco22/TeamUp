@@ -289,10 +289,11 @@ export const projectRolesNeeded = [
 // them is accepted. The fixtures below must never contradict this: no
 // user_id here should also appear on a 'pending' row in joinRequests.
 export const teams = [
-  { id: 't-parking', project_id: 'p-parking', formed_at: null },
-  { id: 't-degree', project_id: 'p-degree', formed_at: null },
-  { id: 't-scam', project_id: 'p-scam', formed_at: null },
-  { id: 't-lab', project_id: 'p-lab', formed_at: '2026-10-14T16:00:00Z' },
+  // first_formed_at: set the first time a team fills and never cleared (49_).
+  { id: 't-parking', project_id: 'p-parking', formed_at: null, first_formed_at: null },
+  { id: 't-degree', project_id: 'p-degree', formed_at: null, first_formed_at: null },
+  { id: 't-scam', project_id: 'p-scam', formed_at: null, first_formed_at: null },
+  { id: 't-lab', project_id: 'p-lab', formed_at: '2026-10-14T16:00:00Z', first_formed_at: '2026-10-14T16:00:00Z' },
 ];
 
 // --- REPO_ACTIVITY -----------------------------------------------------

@@ -15,11 +15,15 @@
 --                                                      one after it is shown
 --   repository         last commit recorded            none linked
 --
+-- The last section adds P4 (formed exactly when the proposal fell due, then
+-- lost a member and refilled) and P5 (never formed), for the rule that
+-- overdue work counts from first_formed_at (49_), not from formed_at.
+--
 -- Check-ins and submissions are written as the test's superuser: last
 -- week's rows can't be written any other way, and how they're written is
 -- 42_'s and 45_'s business, with tests of their own.
 begin;
-select plan(20);
+select plan(24);
 
 select set_config('tests.adv',   tests.sign_in_with_microsoft('dashadv@utrgv.edu', 'Ana Adviser')::text, true);
 select set_config('tests.other', tests.sign_in_with_microsoft('dashoth@utrgv.edu', 'Otto Other')::text, true);
@@ -29,6 +33,10 @@ select set_config('tests.s3',    tests.sign_in_with_microsoft('dashs3@utrgv.edu'
 select set_config('tests.s4',    tests.sign_in_with_microsoft('dashs4@utrgv.edu', 'Sal Four')::text, true);
 select set_config('tests.s5',    tests.sign_in_with_microsoft('dashs5@utrgv.edu', 'Sky Five')::text, true);
 select set_config('tests.s6',    tests.sign_in_with_microsoft('dashs6@utrgv.edu', 'Sol Six')::text, true);
+select set_config('tests.s7',    tests.sign_in_with_microsoft('dashs7@utrgv.edu', 'Sia Seven')::text, true);
+select set_config('tests.s8',    tests.sign_in_with_microsoft('dashs8@utrgv.edu', 'Seb Eight')::text, true);
+select set_config('tests.s9',    tests.sign_in_with_microsoft('dashs9@utrgv.edu', 'Sun Nine')::text, true);
+select set_config('tests.s10',   tests.sign_in_with_microsoft('dashs10@utrgv.edu', 'Sky Ten')::text, true);
 
 select set_config('tests.p1', tests.create_full_team(current_setting('tests.s1')::uuid, current_setting('tests.s2')::uuid)::text, true);
 select set_config('tests.p2', tests.create_full_team(current_setting('tests.s3')::uuid, current_setting('tests.s4')::uuid)::text, true);
@@ -37,7 +45,7 @@ update public.projects set title = 'Alpha parking'  where id = current_setting('
 update public.projects set title = 'Beta scheduler' where id = current_setting('tests.p2')::uuid;
 -- Formed a month ago, so the 10-days-ago proposal falls after formation and
 -- the 40-days-ago kickoff before it.
-update public.teams set formed_at = now() - interval '30 days'
+update public.teams set formed_at = now() - interval '30 days', first_formed_at = now() - interval '30 days'
  where project_id in (current_setting('tests.p1')::uuid, current_setting('tests.p2')::uuid);
 
 insert into public.adviser_requests (project_id, adviser_id, invited_by, status) values
@@ -169,6 +177,53 @@ select results_eq(
   $$ select project_id from public.adviser_dashboard() $$,
   $$ values (current_setting('tests.p1')::uuid) $$,
   'stepping down or being removed takes the team off the dashboard');
+select tests.clear_authentication();
+
+-- =========================================================================
+-- OVERDUE COUNTS FROM THE FIRST TIME A TEAM FORMED
+-- =========================================================================
+-- The schedule here is Kickoff (40 days ago), Proposal (10 days ago, nothing
+-- submitted by these teams), Design doc and Demo day (still to come).
+
+select set_config('tests.p4', tests.create_full_team(current_setting('tests.s7')::uuid, current_setting('tests.s8')::uuid)::text, true);
+select set_config('tests.p5', tests.create_full_team(current_setting('tests.s9')::uuid, current_setting('tests.s10')::uuid)::text, true);
+insert into public.adviser_requests (project_id, adviser_id, invited_by, status) values
+  (current_setting('tests.p4')::uuid, current_setting('tests.adv')::uuid, current_setting('tests.s7')::uuid, 'accepted'),
+  (current_setting('tests.p5')::uuid, current_setting('tests.adv')::uuid, current_setting('tests.s9')::uuid, 'accepted');
+
+-- P4 first formed at the very instant the proposal fell due. now() is fixed
+-- within the transaction, so the two timestamps are equal, which pins down
+-- that a milestone due exactly then is counted (>=, not >).
+update public.teams set formed_at = now() - interval '10 days', first_formed_at = now() - interval '10 days'
+ where project_id = current_setting('tests.p4')::uuid;
+
+-- P5 never formed: the trigger in 49_ keeps first_formed_at once it is set,
+-- so it is switched off to build a team that never had one.
+alter table public.teams disable trigger teams_keep_first_formed_at;
+update public.teams set formed_at = null, first_formed_at = null
+ where project_id = current_setting('tests.p5')::uuid;
+alter table public.teams enable trigger teams_keep_first_formed_at;
+
+select tests.authenticate_as(current_setting('tests.adv')::uuid);
+select is((select overdue_deliverables from public.adviser_dashboard() where project_id = current_setting('tests.p4')::uuid), 1,
+  'P4: a milestone due exactly when the team first formed is counted; the kickoff before it is not');
+select is((select overdue_deliverables from public.adviser_dashboard() where project_id = current_setting('tests.p5')::uuid), 0,
+  'P5: an advised team that never formed has nothing overdue');
+select tests.clear_authentication();
+
+-- P4 loses a member: formed_at goes back to null, as in 05_membership.sql.
+select tests.authenticate_as(current_setting('tests.s8')::uuid);
+select public.leave_team();
+select tests.authenticate_as(current_setting('tests.adv')::uuid);
+select is((select overdue_deliverables from public.adviser_dashboard() where project_id = current_setting('tests.p4')::uuid), 1,
+  'P4: while it recruits again it still owes the proposal it missed');
+select tests.clear_authentication();
+
+-- ... and refills, which stamps formed_at with today.
+update public.teams set formed_at = now() where project_id = current_setting('tests.p4')::uuid;
+select tests.authenticate_as(current_setting('tests.adv')::uuid);
+select is((select overdue_deliverables from public.adviser_dashboard() where project_id = current_setting('tests.p4')::uuid), 1,
+  'P4: once refilled, formed_at is today but the missed proposal is still counted');
 select tests.clear_authentication();
 
 select * from finish();
