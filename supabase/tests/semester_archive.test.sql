@@ -23,7 +23,7 @@
 -- apart from "a team they were ever on" in every roster function, since a
 -- creator can't leave, be moved or be removed anyway.
 begin;
-select plan(141);
+select plan(145);
 
 select set_config('tests.admin',     tests.sign_in_with_microsoft('admin61a@utrgv.edu', 'Ana Admin')::text, true);
 select set_config('tests.owner_a',   tests.sign_in_with_microsoft('olivia61@utrgv.edu', 'Olivia Owner')::text, true);
@@ -183,6 +183,12 @@ select is(
     where user_id = current_setting('tests.adviser_b')::uuid and kind = 'adviser_invited' and read_at is null),
   0::bigint,
   'as is Fern''s invitation alert');
+select is(
+  (select count(*) from public.notifications n
+     join public.projects p on p.id = n.project_id
+    where p.semester_id = current_setting('tests.fall')::uuid and n.read_at is null),
+  0::bigint,
+  'and no alert about a Fall project is left unread, whatever kind it was: they would link to teams that no longer load');
 
 -- --- adviser links end ----------------------------------------------------------
 -- The row still says Ada advised team A (decision 6); the link is over
@@ -861,6 +867,26 @@ select throws_ok(
   $$ update public.users set is_admin = true where id = current_setting('tests.owner_b')::uuid $$,
   '23514', null,
   'Bea, who owns a team this semester, still cannot');
+
+-- --- deleting a user, closed semesters or not ----------------------------------------
+-- The guard refuses a direct delete of an archived row, but a user's seats,
+-- check-ins and requests go with them by foreign-key cascade, archived ones
+-- included. Pia holds an archived seat on team B and a current one.
+
+select ok(
+  exists (select 1 from public.team_members tm
+            join public.teams t on t.id = tm.team_id
+            join public.projects p on p.id = t.project_id
+           where tm.user_id = current_setting('tests.member_b')::uuid
+             and p.semester_id = current_setting('tests.fall')::uuid),
+  'Pia has a seat in a closed semester');
+select lives_ok(
+  $$ delete from public.users where id = current_setting('tests.member_b')::uuid $$,
+  'deleting her account is not blocked by it');
+select is(
+  (select count(*) from public.team_members where user_id = current_setting('tests.member_b')::uuid),
+  0::bigint,
+  'and her seats, archived and current, went with her');
 
 select * from finish();
 rollback;

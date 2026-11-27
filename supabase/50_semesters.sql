@@ -113,8 +113,9 @@
 --    semester. A semester filter in it could never change its answer.
 --
 -- 7. CLOSING DELETES NOTHING. It cancels pending requests, marks the
---    notifications that asked someone to answer them as read (the same thing
---    withdraw_join_request() does), and stamps the semester closed. Every row
+--    semester's unread notifications as read (for the ones that asked
+--    someone to answer a request, the same thing withdraw_join_request()
+--    does), and stamps the semester closed. Every row
 --    in every table is still there afterwards; the pgTAP file counts them.
 --
 -- 8. A CLOSE CAN BE UNDONE, BRIEFLY. reopen_semester() reopens the most
@@ -178,6 +179,12 @@ create policy semesters_select_signed_in
   on public.semesters for select
   to authenticated
   using (true);
+
+-- Not who closed or reopened one: those are admin ids, and nothing in the app
+-- reads them through the table (the pages go through the functions).
+revoke select on public.semesters from authenticated;
+grant select (id, name, starts_on, ends_on, created_at, closed_at, is_current)
+  on public.semesters to authenticated;
 
 -- --- current_semester_id ----------------------------------------------------
 -- The one rule (decision 1). Null between closing one semester and starting
@@ -344,13 +351,21 @@ $$;
 
 revoke all on function private.backfill_semester(uuid) from public, anon, authenticated;
 
+-- Only when some row still has no semester, and into the first semester ever
+-- made (not one found by name, so a renamed or differently seeded first
+-- semester can't turn a re-run into an error).
 do $$
 declare
   v_result jsonb;
 begin
-  v_result := private.backfill_semester(
-    (select id from public.semesters where name = 'Fall 2026'));
-  raise notice 'Semester backfill: %', v_result;
+  if exists (select 1 from public.projects where semester_id is null)
+     or exists (select 1 from public.milestones where semester_id is null)
+     or exists (select 1 from public.announcements where semester_id is null)
+     or exists (select 1 from public.next_steps where semester_id is null) then
+    v_result := private.backfill_semester(
+      (select id from public.semesters order by created_at, id limit 1));
+    raise notice 'Semester backfill: %', v_result;
+  end if;
 end;
 $$;
 
@@ -534,6 +549,17 @@ declare
   v_via text := tg_argv[0];
 begin
   perform pg_advisory_xact_lock_shared(hashtext('public.semesters'));
+
+  -- A delete that arrives from inside another trigger is a foreign-key
+  -- cascade (the only trigger that deletes rows here): removing a user
+  -- takes their seats, check-ins and requests with it, including ones in
+  -- closed semesters. Refusing those would make an account with any archived
+  -- row impossible to delete. A direct delete of an archived row, from a
+  -- function or the API, runs at depth 1 and is still refused; so is a direct
+  -- delete of an archived project, which is why its children never get here.
+  if tg_op = 'DELETE' and pg_trigger_depth() > 1 then
+    return old;
+  end if;
 
   if tg_op in ('UPDATE', 'DELETE') then
     perform private.require_open_semester(private.row_semester(v_via, to_jsonb(old)));
@@ -2693,8 +2719,11 @@ grant execute on function public.semester_close_preview() to authenticated;
 --
 --   1. pending join requests     → 'cancelled'
 --   2. pending adviser requests  → 'cancelled'
---   3. the notifications that asked someone to answer one of those
---                                → read (as withdraw_join_request() does)
+--   3. every unread notification about one of this semester's projects
+--                                → read: the ones that asked someone to answer a
+--                                  request (as withdraw_join_request() does), and
+--                                  the rest, which would otherwise keep the bell
+--                                  lit with links to teams that no longer load
 --   4. the semester              → closed_at, closed_by
 --
 -- Nothing is deleted (decision 7). Accepted adviser links are left as they
@@ -2752,7 +2781,6 @@ begin
     from public.projects p
    where p.id = n.project_id
      and p.semester_id = p_semester_id
-     and n.kind in ('join_request', 'adviser_invited')
      and n.read_at is null;
 
   update public.semesters

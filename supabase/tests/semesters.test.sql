@@ -13,7 +13,7 @@
 -- broken one would fail: rows left behind, rows gained or lost, a second run
 -- that does something.
 begin;
-select plan(133);
+select plan(135);
 
 select set_config('tests.admin',   tests.sign_in_with_microsoft('admin61@utrgv.edu',   'Ana Admin')::text, true);
 select set_config('tests.owner',   tests.sign_in_with_microsoft('owner61@utrgv.edu',   'Olivia Owner')::text, true);
@@ -202,6 +202,10 @@ select throws_ok(
 select tests.authenticate_as(current_setting('tests.student')::uuid);
 select is((select name from public.semesters), 'Fall 2026',
   'a signed-in student can read the semester (the positive control for the refusals below)');
+select is(has_column_privilege('authenticated', 'public.semesters', 'closed_by', 'select'), false,
+  'but not who closed it: that is an admin''s id');
+select is(has_column_privilege('authenticated', 'public.semesters', 'reopened_by', 'select'), false,
+  'or who reopened it');
 select throws_ok(
   $$ insert into public.semesters (name, starts_on, ends_on) values ('Sneaky', '2027-01-01', '2027-02-01') $$,
   '42501', null, 'a direct insert is refused');
