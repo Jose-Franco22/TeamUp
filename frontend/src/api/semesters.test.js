@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   closeSemester,
   createJoinRequest,
+  enrollInCurrentSemester,
+  getAdminDashboard,
   createProject,
   exportRosters,
   getAdviserDashboard,
@@ -43,6 +45,7 @@ import {
   projectRolesNeeded,
   projects,
   semesters,
+  semesterEnrollments,
   teamMembers,
   teams,
 } from './mockData';
@@ -57,6 +60,7 @@ const NO_SEMESTER = 'No semester is open right now — an admin has to start the
 const ARRAYS = {
   semesters, projects, teams, teamMembers, joinRequests, adviserRequests,
   notifications, milestones, nextSteps, announcements, projectRolesNeeded,
+  semesterEnrollments,
 };
 const saved = {};
 const counts = () => Object.fromEntries(Object.entries(ARRAYS).map(([k, a]) => [k, a.length]));
@@ -93,6 +97,7 @@ describe('the current semester', () => {
     setSessionUserId('u-adan');
     expect(await getCurrentSemester()).toEqual({
       id: FALL, name: 'Fall 2026', starts_on: '2026-08-24', ends_on: '2026-12-12', formation_deadline: null,
+      needs_enrollment: false,
     });
   });
 
@@ -242,10 +247,11 @@ describe('starting the next semester', () => {
     const spring = await startSemester(input);
     expect(spring).toEqual({
       id: expect.any(String), name: 'Spring 2027', starts_on: input.starts_on, ends_on: input.ends_on,
-      formation_deadline: input.formation_deadline,
+      formation_deadline: input.formation_deadline, needs_enrollment: false,
     });
+    // Adan was in Fall; Spring asks him whether he's taking it (decision 9).
     setSessionUserId('u-adan');
-    expect(await getCurrentSemester()).toEqual(spring);
+    expect(await getCurrentSemester()).toEqual({ ...spring, needs_enrollment: true });
 
     // Nicolas created an archived project; Adan's requests were cancelled.
     setSessionUserId('u-nicolas');
@@ -308,4 +314,65 @@ describe('past semesters', () => {
 test('a current team is not a past one', async () => {
   setSessionUserId('u-nicolas');
   await expect(getPastTeam('p-parking')).rejects.toThrow('That team is in the current semester');
+});
+
+// 50_semesters.sql, decision 9: an account carries over, a class doesn't.
+describe('who is in a semester', () => {
+  const unplacedIds = async () => {
+    setSessionUserId(ADMIN);
+    return (await getAdminDashboard()).unplaced_students.map((u) => u.id);
+  };
+
+  test('everyone already here is in Fall 2026; faculty and admins are never unplaced', async () => {
+    const ids = await unplacedIds();
+    expect(ids).toContain('u-adan');
+    expect(ids).not.toContain('u-dana');
+    expect(ids).not.toContain('u-luis');
+    expect(ids).not.toContain(ADMIN);
+  });
+
+  test("in the next semester nobody from Fall counts until they join, and joining counts them", async () => {
+    await closeFall();
+    await startSemester(springInput());
+    expect(await unplacedIds()).toEqual([]);
+
+    setSessionUserId('u-adan');
+    expect((await getCurrentSemester()).needs_enrollment).toBe(true);
+    const after = await enrollInCurrentSemester();
+    expect(after.needs_enrollment).toBe(false);
+    // Twice is the same as once.
+    await enrollInCurrentSemester();
+    expect(await unplacedIds()).toEqual(['u-adan']);
+  });
+
+  test('creating a project or asking to join one counts a student too', async () => {
+    await closeFall();
+    await startSemester(springInput());
+    setSessionUserId('u-nicolas');
+    const project = await createProject({
+      title: 'Campus shuttle tracker', description: 'Live shuttle positions on a campus map.',
+      team_size_target: 3, creator_role_id: 'r-backend', roles_needed: [],
+    });
+    expect((await getCurrentSemester()).needs_enrollment).toBe(false);
+    setSessionUserId('u-adan');
+    await createJoinRequest(project.id);
+    expect((await getCurrentSemester()).needs_enrollment).toBe(false);
+    expect(await unplacedIds()).toEqual(['u-adan']);
+  });
+
+  test('admins and faculty are never asked, and an admin cannot enroll', async () => {
+    await closeFall();
+    await startSemester(springInput());
+    setSessionUserId('u-dana');
+    expect((await getCurrentSemester()).needs_enrollment).toBe(false);
+    setSessionUserId(ADMIN);
+    expect((await getCurrentSemester()).needs_enrollment).toBe(false);
+    await expect(enrollInCurrentSemester()).rejects.toThrow("Admins aren't enrolled in a semester");
+  });
+
+  test('with no semester open there is nothing to join', async () => {
+    await closeFall();
+    setSessionUserId('u-adan');
+    await expect(enrollInCurrentSemester()).rejects.toThrow(NO_SEMESTER);
+  });
 });

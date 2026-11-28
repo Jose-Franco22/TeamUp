@@ -5,14 +5,17 @@ import { teamMembers, users } from './mockData';
 
 afterEach(() => setSessionUserId(null));
 
-test('the dashboard lists all teams and exactly the unplaced non-admin students', async () => {
+test('the dashboard lists all teams and exactly the unplaced students — not admins, not faculty', async () => {
   setSessionUserId('u-instructor');
   const data = await getAdminDashboard();
-  expect(data.summary).toEqual({ formed_teams: 1, open_teams: 3, unplaced_students: 6 });
+  const expected = users.filter(
+    (u) => !u.is_admin && !u.is_faculty && !teamMembers.some((m) => m.user_id === u.id)
+  );
+  expect(data.summary).toEqual({ formed_teams: 1, open_teams: 3, unplaced_students: expected.length });
   expect(data.teams).toHaveLength(4);
-  const expected = users.filter((u) => !u.is_admin && !teamMembers.some((m) => m.user_id === u.id));
   expect(data.unplaced_students.map((s) => s.id).sort()).toEqual(expected.map((s) => s.id).sort());
-  expect(data.unplaced_students.find((s) => s.id === 'u-sofia').pending_requests).toEqual([]);
+  // Sofia has no team, but she is on the faculty list (private.is_current_student()).
+  expect(data.unplaced_students.some((s) => s.id === 'u-sofia')).toBe(false);
   expect(data.unplaced_students.find((s) => s.id === 'u-adan').pending_requests.map((r) => r.id))
     .toEqual(['jr-3', 'jr-1']); // oldest first, excluding the declined jr-4
 });

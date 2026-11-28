@@ -648,6 +648,38 @@ export function currentMembership(userId) {
   return teamMembers.find((tm) => tm.user_id === userId && isCurrentTeam(tm.team_id)) ?? null;
 }
 
+// semester_enrollments (50_semesters.sql, decision 9): who is taking the
+// course in which semester. Everyone seeded is in Fall 2026, as the
+// migration enrolls every existing account in the first semester. The
+// database also enrolls anyone who takes a seat or asks to join a team in a
+// semester; isEnrolled() reads that off the seats and requests themselves
+// rather than every mock write remembering to add a row.
+export const semesterEnrollments = [];
+
+export function isEnrolled(userId, semesterId) {
+  if (!userId || !semesterId) return false;
+  if (semesterId === FIRST_SEMESTER_ID && users.some((u) => u.id === userId && !u.is_admin)) {
+    return true;
+  }
+  return (
+    semesterEnrollments.some((e) => e.user_id === userId && e.semester_id === semesterId) ||
+    teamMembers.some((tm) => tm.user_id === userId && teamSemesterId(tm.team_id) === semesterId) ||
+    joinRequests.some((r) => r.user_id === userId && projectSemesterId(r.project_id) === semesterId)
+  );
+}
+
+export function enroll(userId, semesterId) {
+  if (!isEnrolled(userId, semesterId)) {
+    semesterEnrollments.push({ semester_id: semesterId, user_id: userId, enrolled_at: new Date().toISOString() });
+  }
+}
+
+// private.is_current_student(): not an admin, not on the faculty list, and
+// in the current semester.
+export function isCurrentStudent(user) {
+  return Boolean(user) && !user.is_admin && !user.is_faculty && isEnrolled(user.id, currentSemesterId());
+}
+
 // private.require_open_semester(), the archive guard's sentence.
 export function assertOpenSemester(semesterId) {
   const semester = semesters.find((s) => s.id === semesterId);

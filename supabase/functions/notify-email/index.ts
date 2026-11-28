@@ -23,6 +23,7 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { composeEmail, isEmailedKind, shouldEmail } from './email.js';
 import { chunk, resendRequest, sendWithRetry } from './send.js';
 import { composeDigest } from './digest.js';
+import { sameSecret } from '../_shared/secret.js';
 
 const env = (name: string) => {
   const value = Deno.env.get(name);
@@ -34,7 +35,16 @@ const reply = (body: string, status = 200) => new Response(body, { status });
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return reply('Method not allowed', 405);
-  if (req.headers.get('x-webhook-secret') !== env('NOTIFY_EMAIL_SECRET')) return reply('Forbidden', 403);
+
+  // A readable answer rather than a crash when the function is deployed
+  // before its secret is set, the way sync-faculty handles it. Compared in
+  // constant time (../_shared/secret.js): this URL is public.
+  const secret = Deno.env.get('NOTIFY_EMAIL_SECRET');
+  if (!secret) {
+    console.error('notify-email: NOTIFY_EMAIL_SECRET is not set');
+    return reply('Not configured: NOTIFY_EMAIL_SECRET is not set', 503);
+  }
+  if (!(await sameSecret(req.headers.get('x-webhook-secret') ?? '', secret))) return reply('Forbidden', 403);
 
   // Only the id is taken from the payload: everything that goes into an
   // email is read back from the database with the service role.
@@ -70,10 +80,14 @@ async function emailNotification(db: SupabaseClient, id: string) {
     return reply('Skipped: opted out', 200);
   }
 
+  // This semester's deadline, through the same function the database's
+  // rules use. Not a read of milestones: there is a flagged milestone per
+  // semester (50_semesters.sql), and the service role sees all of them.
   let deadline: string | undefined;
   if (n.kind === 'deadline_reminder') {
-    const { data: m } = await db.from('milestones').select('due_at').eq('is_formation_deadline', true).maybeSingle();
-    deadline = m?.due_at;
+    const { data: due, error: dueError } = await db.rpc('formation_deadline');
+    if (dueError) console.error('notify-email: could not read the formation deadline:', dueError.message);
+    deadline = typeof due === 'string' ? due : undefined;
   }
 
   const email = composeEmail({
@@ -97,22 +111,20 @@ async function emailNotification(db: SupabaseClient, id: string) {
 async function emailAnnouncement(db: SupabaseClient, id: string) {
   const { data: a, error } = await db
     .from('announcements')
-    .select('title, body, author_id')
+    .select('title, body')
     .eq('id', id)
     .maybeSingle();
   if (error) return reply(error.message, 500);
   if (!a) return reply('Announcement not found', 404);
 
-  // Everyone with an address but the admin who posted it. Essential, so
-  // email_notifications isn't read.
-  const { data: users, error: usersError } = await db
-    .from('users')
-    .select('email')
-    .neq('id', a.author_id)
-    .not('email', 'is', null)
-    // A fixed order keeps each announcement-<id>-<batch> idempotency key
-    // covering the same people if the webhook fires twice.
-    .order('id');
+  // Everyone with an address but the admin who posted it, leaving out
+  // students who aren't in the announcement's semester — the rule is
+  // announcement_recipients() in 50_semesters.sql, ordered so each
+  // announcement-<id>-<batch> idempotency key covers the same people if the
+  // webhook fires twice. Essential, so email_notifications isn't read.
+  const { data: users, error: usersError } = await db.rpc('announcement_recipients', {
+    p_announcement_id: id,
+  });
   if (usersError) return reply(usersError.message, 500);
 
   const email = composeEmail({ kind: 'announcement', appUrl: env('APP_URL'), announcement: a });

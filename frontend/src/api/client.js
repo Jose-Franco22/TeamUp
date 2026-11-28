@@ -52,6 +52,9 @@ import {
   rowSemesterId,
   projectSemesterId,
   teamSemesterId,
+  isEnrolled,
+  enroll,
+  isCurrentStudent,
 } from './mockData';
 import { validateCheckIn, weekStart } from '../lib/checkIns';
 import { supabase } from '../lib/supabaseClient';
@@ -84,8 +87,9 @@ import {
   validateProject,
   validateSemester,
 } from '../lib/validation';
+import { mocksOn } from '../lib/mockMode';
 
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
+const USE_MOCKS = mocksOn();
 
 // A senior project team is 2 to 4 students. Exported so the create-project
 // form labels and bounds its input from the same numbers this file enforces.
@@ -223,7 +227,7 @@ export async function getAdminDashboard() {
     requireAdminSessionUserId();
     const teamList = teams.filter((t) => isCurrentTeam(t.id)).map(mockAdminTeam).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
     const unplaced = users
-      .filter((u) => !u.is_admin && !currentMembership(u.id))
+      .filter((u) => isCurrentStudent(u) && !currentMembership(u.id))
       .map(mockAdminStudent)
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     return {
@@ -323,7 +327,7 @@ export async function exportRosters() {
     const unplacedRows = !isAdmin
       ? []
       : users
-          .filter((u) => !u.is_admin && !currentMembership(u.id))
+          .filter((u) => isCurrentStudent(u) && !currentMembership(u.id))
           .map((u) => ({
             user_id: u.id,
             name: u.name,
@@ -564,12 +568,14 @@ export async function getAdminActions(limit = 20) {
 
 const ONLY_PAST_VIEWERS = 'Only the team, its adviser and admins can see a past team';
 
-function mockSemesterShape(s) {
+function mockSemesterShape(s, viewerId = sessionUserId) {
   if (!s) return null;
   const deadline = milestones.find((m) => m.is_formation_deadline && rowSemesterId(m) === s.id);
+  const viewer = users.find((u) => u.id === viewerId);
   return {
     id: s.id, name: s.name, starts_on: s.starts_on, ends_on: s.ends_on,
     formation_deadline: deadline?.due_at ?? null,
+    needs_enrollment: Boolean(viewer) && !viewer.is_admin && !viewer.is_faculty && !isEnrolled(viewer.id, s.id),
   };
 }
 
@@ -600,6 +606,26 @@ export async function getCurrentSemester() {
     return mockSemesterShape(currentSemester());
   }
   const { data, error } = await supabase.rpc('current_semester');
+  if (error) throw error;
+  return data ?? null;
+}
+
+/**
+ * The "Join <semester>" button (50_semesters.sql, decision 9): counts the
+ * signed-in student in the current semester, so they show up for placement
+ * and get its reminders and announcements. Resolves to getCurrentSemester()'s
+ * shape, with needs_enrollment now false.
+ */
+export async function enrollInCurrentSemester() {
+  if (USE_MOCKS) {
+    await delay();
+    const id = requireSessionUserId();
+    const semesterId = requireCurrentSemesterId();
+    if (users.find((u) => u.id === id)?.is_admin) throw new Error("Admins aren't enrolled in a semester");
+    enroll(id, semesterId);
+    return mockSemesterShape(currentSemester());
+  }
+  const { data, error } = await supabase.rpc('enroll_in_current_semester');
   if (error) throw error;
   return data ?? null;
 }

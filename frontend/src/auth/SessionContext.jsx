@@ -2,11 +2,12 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { users } from '../api/mockData';
 import { setSessionUserId } from '../api/client';
 import { supabase } from '../lib/supabaseClient';
+import { mocksOn } from '../lib/mockMode';
 
 // Session state lives here; client.js and page components never touch
 // supabase-js or the mock user list directly.
 
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
+const USE_MOCKS = mocksOn();
 const STORAGE_KEY = 'teamup.mockSessionUserId';
 const MOCK_ONBOARDED_KEY = 'teamup.mockOnboarded';
 

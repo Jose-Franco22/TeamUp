@@ -23,7 +23,7 @@
 -- apart from "a team they were ever on" in every roster function, since a
 -- creator can't leave, be moved or be removed anyway.
 begin;
-select plan(145);
+select plan(159);
 
 select set_config('tests.admin',     tests.sign_in_with_microsoft('admin61a@utrgv.edu', 'Ana Admin')::text, true);
 select set_config('tests.owner_a',   tests.sign_in_with_microsoft('olivia61@utrgv.edu', 'Olivia Owner')::text, true);
@@ -373,8 +373,27 @@ select is(
   'the admin dashboard lists this semester''s teams only');
 select is(
   (select jsonb_agg(u ->> 'name' order by u ->> 'name') from jsonb_array_elements(public.admin_dashboard() -> 'unplaced_students') u),
-  '["Ada Adviser", "Fern Faculty", "Oscar Outsider", "Sam Student"]'::jsonb,
-  'and counts as unplaced everyone with no team this semester — Oscar''s archived one doesn''t place him');
+  '["Sam Student"]'::jsonb,
+  'and counts as unplaced only Spring''s students with no team: not Ada and Fern (faculty), not Oscar (Fall only, hasn''t joined Spring)');
+
+-- Decision 9: Oscar joins Spring himself, and from then on he is one of its
+-- students — with no team, since his archived one doesn't place him.
+select tests.authenticate_as(current_setting('tests.outsider')::uuid);
+select is((public.current_semester() ->> 'needs_enrollment')::boolean, true,
+  'Spring asks Oscar, who was only in Fall, whether he is taking it');
+select lives_ok($$ select public.enroll_in_current_semester() $$, 'Oscar joins Spring');
+select lives_ok($$ select public.enroll_in_current_semester() $$, 'and joining twice changes nothing');
+select is((public.current_semester() ->> 'needs_enrollment')::boolean, false, 'and is not asked again');
+select tests.authenticate_as(current_setting('tests.adviser_a')::uuid);
+select is((public.current_semester() ->> 'needs_enrollment')::boolean, false, 'faculty are never asked');
+select tests.authenticate_as(current_setting('tests.admin')::uuid);
+select is((public.current_semester() ->> 'needs_enrollment')::boolean, false, 'nor admins');
+select throws_ok($$ select public.enroll_in_current_semester() $$,
+  'Admins aren''t enrolled in a semester', 'and an admin cannot enroll');
+select is(
+  (select jsonb_agg(u ->> 'name' order by u ->> 'name') from jsonb_array_elements(public.admin_dashboard() -> 'unplaced_students') u),
+  '["Oscar Outsider", "Sam Student"]'::jsonb,
+  'once he has joined, Oscar counts as unplaced — his archived team doesn''t place him');
 select is(
   (select t -> 'next_steps' ->> 'total' from jsonb_array_elements(public.admin_dashboard() -> 'teams') t
     where t ->> 'title' = 'Degree plan builder'),
@@ -854,6 +873,42 @@ select ok(
 select ok(
   current_setting('tests.admin')::uuid not in (select user_id from private.deadline_reminders),
   'an admin is not (the control: it does not simply remind everyone)');
+select ok(
+  current_setting('tests.adviser_a')::uuid not in (select user_id from private.deadline_reminders)
+  and current_setting('tests.adviser_b')::uuid not in (select user_id from private.deadline_reminders),
+  'nor are Ada and Fern, who are faculty, not students without a team');
+
+-- --- who an announcement is emailed to (decision 9) ------------------------------------
+-- Una's account is made in Spring, so she is in Spring's class and not Fall's.
+
+select set_config('tests.newcomer', tests.sign_in_with_microsoft('una61@utrgv.edu', 'Una Newcomer')::text, true);
+select tests.clear_authentication();
+select ok(
+  exists (select 1 from public.semester_enrollments
+           where user_id = current_setting('tests.newcomer')::uuid
+             and semester_id = current_setting('tests.spring')::uuid)
+  and not exists (select 1 from public.semester_enrollments
+                   where user_id = current_setting('tests.newcomer')::uuid
+                     and semester_id = current_setting('tests.fall')::uuid),
+  'an account made while Spring is open is enrolled in Spring, and only Spring');
+select set_config('tests.spring_recipients', (
+  select jsonb_agg(email order by email)
+    from public.announcement_recipients((select id from public.announcements where title = 'Spring notice'))
+)::text, true);
+select ok(
+  current_setting('tests.spring_recipients')::jsonb @> '["una61@utrgv.edu", "oscar61@utrgv.edu", "ada61@utrgv.edu"]'::jsonb,
+  'Spring''s notice goes to Spring''s students, Oscar who joined, and faculty');
+select ok(
+  not current_setting('tests.spring_recipients')::jsonb ? 'admin61a@utrgv.edu',
+  'but not to the admin who posted it');
+select ok(
+  not exists (
+    select 1 from public.announcement_recipients(current_setting('tests.fall_notice')::uuid)
+     where email = 'una61@utrgv.edu'),
+  'and Fall''s notice was never Una''s to get');
+select is(
+  (select count(*) from public.announcement_recipients(gen_random_uuid())), 0::bigint,
+  'an announcement that doesn''t exist has nobody to send to');
 
 -- --- admin access, this semester ------------------------------------------------------
 -- 18_ refuses admin access to anyone on a team. Since nothing in a closed

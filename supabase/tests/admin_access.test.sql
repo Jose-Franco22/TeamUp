@@ -1,6 +1,6 @@
 -- Issue #36: exercise real database permissions as API roles, never just UI flags.
 begin;
-select plan(32);
+select plan(36);
 
 select set_config('tests.admin', tests.sign_in_with_microsoft('instructor01@utrgv.edu', 'Instructor')::text, true);
 select set_config('tests.owner', tests.sign_in_with_microsoft('owner01@utrgv.edu', 'Owner')::text, true);
@@ -37,8 +37,10 @@ select is((select count(*)::int from public.team_members), 2, 'admin can read ev
 select is((select count(*)::int from public.join_requests), 1, 'admin can read requests on other users projects');
 select is((select count(*)::int from public.team_members where user_id = current_setting('tests.admin')::uuid),
   0, 'admin does not appear on student rosters');
+-- 51_user_update_columns.sql: is_admin isn't a column the browser may write
+-- at all, so the grant refuses before protect_admin_flag would.
 select throws_ok($$ update public.users set is_admin = false where id = auth.uid() $$,
-  '42501', 'Admin access can only be changed by a database administrator',
+  '42501', 'permission denied for table users',
   'even an admin cannot change their role through the browser');
 select throws_ok($$ select public.create_project(
   'Admin project', 'An admin must not be seated.', 2::smallint, current_setting('tests.role')::uuid, '[]'::jsonb
@@ -51,10 +53,25 @@ select tests.authenticate_as(current_setting('tests.owner')::uuid);
 select throws_ok($$ select public.require_admin() $$, '42501', 'Admin access required',
   'the admin-only RPC rejects a student');
 select throws_ok($$ update public.users set is_admin = true where id = auth.uid() $$,
-  '42501', 'Admin access can only be changed by a database administrator', 'student cannot promote themself');
+  '42501', 'permission denied for table users', 'student cannot promote themself');
 select is((select is_admin from public.users where id = auth.uid()), false, 'failed promotion leaves the flag false');
 select lives_ok($$ update public.users set bio = 'Updated profile' where id = auth.uid() $$,
   'regular profile updates are allowed');
+-- 51_user_update_columns.sql: identity is not the student's to rewrite. An
+-- email is what faculty_directory matches on, so taking a professor's would
+-- make a student "faculty".
+select throws_ok($$ update public.users set email = 'someprof@utrgv.edu' where id = auth.uid() $$,
+  '42501', 'permission denied for table users', 'a student cannot change their email');
+select throws_ok($$ update public.users set microsoft_oid = 'forged' where id = auth.uid() $$,
+  '42501', 'permission denied for table users', 'nor their Microsoft account id');
+select throws_ok($$ update public.users set name = 'Someone Else' where id = auth.uid() $$,
+  '42501', 'permission denied for table users', 'nor the name Microsoft gave them');
+select lives_ok($$ update public.users
+                      set github_url = '', availability_hours = 10, onboarded_at = now(),
+                          email_notifications = true, adviser_digest = true,
+                          advising_available = true, advising_max_teams = null
+                    where id = auth.uid() $$,
+  'every setting the app saves directly still saves');
 select is((select count(*)::int from public.users where id = current_setting('tests.admin')::uuid),
   0, 'student Browse and matching queries cannot select instructor profiles');
 select is((select count(*)::int from public.user_skills where user_id = current_setting('tests.admin')::uuid),

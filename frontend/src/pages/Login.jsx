@@ -3,8 +3,9 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useSession } from '../auth/SessionContext';
 import { teamMembers, users } from '../api/mockData';
 import { Loading } from '../components/States';
+import { mocksOn } from '../lib/mockMode';
 
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
+const USE_MOCKS = mocksOn();
 
 // Supabase redirects OAuth failures (e.g. the provisioning trigger
 // rejecting a non-@utrgv.edu account) back to redirectTo with error info

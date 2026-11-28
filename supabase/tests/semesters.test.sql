@@ -421,7 +421,8 @@ select set_config('tests.spring', public.start_semester(
 select is(
   current_setting('tests.spring')::jsonb - 'id',
   jsonb_build_object('name', 'Spring 2027', 'starts_on', '2027-01-19', 'ends_on', '2027-05-14',
-                     'formation_deadline', to_jsonb(current_setting('tests.deadline')::timestamptz)),
+                     'formation_deadline', to_jsonb(current_setting('tests.deadline')::timestamptz),
+                     'needs_enrollment', false),
   'start_semester() returns the new semester with its name, dates and formation deadline');
 select is(public.current_semester_id(), (current_setting('tests.spring')::jsonb ->> 'id')::uuid,
   'and it is the current one');

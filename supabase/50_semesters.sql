@@ -127,6 +127,24 @@
 --    the cancellations: requests the close cancelled stay cancelled, and
 --    anyone who still wants in asks again. reopened_at and reopened_by keep
 --    the record that it happened.
+--
+-- 9. A STUDENT IS IN A SEMESTER BECAUSE THEY SAID SO. users has no semester
+--    (decision 2), so without this every account ever made would be "a
+--    student with no team" in every later semester: the Fall class would
+--    fill Spring's Unplaced list, and get Spring's deadline reminders and
+--    announcement emails, which are essential and can't be turned off.
+--    public.semester_enrollments records who is taking the course when.
+--    A row is written when:
+--      * the student presses "Join <semester>" (enroll_in_current_semester());
+--      * an account is created while a semester is open — someone signing in
+--        for the first time is in this semester's class;
+--      * they take a seat on a team or ask to join one, which only a student
+--        in that semester would do.
+--    Everyone already here is enrolled in the first semester. A Fall student
+--    who comes back in Spring only to open Past semesters is not enrolled,
+--    and nothing course-wide reaches them. private.is_current_student() is
+--    the one place "a student this semester" is decided: not an admin, not
+--    on the faculty list, and enrolled in the current semester.
 begin;
 
 -- --- semesters ------------------------------------------------------------
@@ -392,6 +410,105 @@ alter table public.next_steps drop constraint if exists next_steps_sort_order_un
 alter table public.next_steps
   add constraint next_steps_sort_order_unique
   unique (semester_id, sort_order) deferrable initially immediate;
+
+-- --- who is taking the course (decision 9) -------------------------------------
+
+create table if not exists public.semester_enrollments (
+  semester_id uuid not null references public.semesters(id) on delete cascade,
+  user_id     uuid not null references public.users(id) on delete cascade,
+  enrolled_at timestamptz not null default now(),
+  primary key (semester_id, user_id)
+);
+
+create index if not exists semester_enrollments_user_idx
+  on public.semester_enrollments (user_id);
+
+comment on table public.semester_enrollments is
+  'Who is taking the course in which semester. Written by '
+  'enroll_in_current_semester() and by triggers on users, team_members and '
+  'join_requests; read through private.is_current_student().';
+
+-- Your own rows, and an admin all of them. No write policy: the function and
+-- the triggers below are the only way in.
+alter table public.semester_enrollments enable row level security;
+revoke all on table public.semester_enrollments from anon;
+revoke insert, update, delete, truncate on table public.semester_enrollments from authenticated;
+
+drop policy if exists semester_enrollments_select_own_or_admin on public.semester_enrollments;
+create policy semester_enrollments_select_own_or_admin
+  on public.semester_enrollments for select
+  to authenticated
+  using (user_id = auth.uid() or private.is_admin());
+
+-- Everyone already here is in the first semester. Only while the table is
+-- empty, so a re-run in a later semester can't put that semester's new
+-- accounts into Fall 2026.
+insert into public.semester_enrollments (semester_id, user_id)
+select (select id from public.semesters order by created_at, id limit 1), u.id
+  from public.users u
+ where not u.is_admin
+   and not exists (select 1 from public.semester_enrollments)
+on conflict do nothing;
+
+-- The one definition of "a student in this semester".
+create or replace function private.is_current_student(p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+      from public.users u
+      join public.semester_enrollments e
+        on e.user_id = u.id
+       and e.semester_id = public.current_semester_id()
+     where u.id = p_user_id
+       and not u.is_admin
+       and not exists (select 1 from public.faculty_directory fd
+                        where fd.email = lower(u.email))
+  );
+$$;
+
+revoke all on function private.is_current_student(uuid) from public, anon, authenticated;
+
+-- Writes the enrollment a row implies. tg_argv[0] is how to find the
+-- semester, as for archive_guard(): 'current' for a new account, or
+-- 'team' / 'project' for a seat or a join request. AFTER the row is written,
+-- so only a write the archive guard and every other check let through
+-- enrolls anyone.
+create or replace function private.enroll_from_row()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user uuid;
+  v_semester uuid;
+begin
+  if tg_argv[0] = 'current' then
+    if new.is_admin then
+      return null;
+    end if;
+    v_user := new.id;
+    v_semester := public.current_semester_id();
+  else
+    v_user := new.user_id;
+    v_semester := private.row_semester(tg_argv[0], to_jsonb(new));
+  end if;
+
+  if v_semester is not null then
+    insert into public.semester_enrollments (semester_id, user_id)
+    values (v_semester, v_user)
+    on conflict do nothing;
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function private.enroll_from_row() from public, anon, authenticated;
 
 -- --- statuses ------------------------------------------------------------------
 -- 'cancelled' for a join request the semester closed on. 24_'s list, plus
@@ -660,6 +777,22 @@ drop trigger if exists deliverable_comments_milestone_semester on public.deliver
 create trigger deliverable_comments_milestone_semester
   before insert or update of project_id, milestone_id on public.deliverable_comments
   for each row execute function private.deliverable_milestone_in_semester();
+
+-- The enrollments a write implies (decision 9).
+drop trigger if exists users_enroll on public.users;
+create trigger users_enroll
+  after insert on public.users
+  for each row execute function private.enroll_from_row('current');
+
+drop trigger if exists team_members_enroll on public.team_members;
+create trigger team_members_enroll
+  after insert or update of team_id on public.team_members
+  for each row execute function private.enroll_from_row('team');
+
+drop trigger if exists join_requests_enroll on public.join_requests;
+create trigger join_requests_enroll
+  after insert on public.join_requests
+  for each row execute function private.enroll_from_row('project');
 
 -- --- who can read what (decision 1) -------------------------------------------
 -- projects carries the rule; the rest ask "can I see its project?" by
@@ -1476,7 +1609,8 @@ $$;
 
 -- --- reminders -------------------------------------------------------------------
 
--- 37_deadline_reminders.sql's: everyone not yet on a full team *this
+-- 37_deadline_reminders.sql's: every student in this semester (decision 9:
+-- enrolled, not an admin, not faculty) not yet on a full team *this
 -- semester*. formation_deadline() is already this semester's.
 create or replace function private.send_deadline_reminders(p_now timestamptz default now())
 returns integer
@@ -1505,7 +1639,7 @@ begin
     insert into private.deadline_reminders (user_id, deadline_at, days_before)
     select u.id, v_deadline, v_days
       from public.users u
-     where not u.is_admin
+     where private.is_current_student(u.id)
        and not exists (
          select 1
            from public.team_members tm
@@ -2430,8 +2564,8 @@ as $$
   from public.users u where u.id = p_student_id and not u.is_admin;
 $$;
 
--- 33_next_steps.sql's dashboard: this semester's teams, and the students
--- who have no team this semester.
+-- 33_next_steps.sql's dashboard: this semester's teams, and this
+-- semester's students (decision 9) who have no team in it.
 create or replace function public.admin_dashboard()
 returns jsonb
 language plpgsql
@@ -2455,7 +2589,7 @@ begin
   select coalesce(jsonb_agg(private.admin_student_json(u.id) order by u.name, u.id), '[]'::jsonb)
     into unplaced_list
     from public.users u
-   where not u.is_admin
+   where private.is_current_student(u.id)
      and private.current_team_id(u.id) is null;
 
   return jsonb_build_object(
@@ -2593,10 +2727,8 @@ begin
                  )
                ) as u_row
           from public.users u
-         where not u.is_admin
+         where private.is_current_student(u.id)
            and private.current_team_id(u.id) is null
-           and not exists (select 1 from public.faculty_directory fd
-                            where fd.email = lower(u.email))
       ) unplaced;
   else
     v_unplaced := '[]'::jsonb;
@@ -2637,13 +2769,90 @@ as $$
            'formation_deadline', (select m.due_at
                                     from public.milestones m
                                    where m.semester_id = s.id
-                                     and m.is_formation_deadline))
+                                     and m.is_formation_deadline),
+           -- Whether to ask the caller "Join <semester>?" (decision 9): a
+           -- student account that isn't in this semester yet. Never an admin
+           -- or someone on the faculty list.
+           'needs_enrollment', (
+             select not u.is_admin
+                and not exists (select 1 from public.faculty_directory fd
+                                 where fd.email = lower(u.email))
+                and not exists (select 1 from public.semester_enrollments e
+                                 where e.semester_id = s.id and e.user_id = u.id)
+               from public.users u
+              where u.id = auth.uid()))
     from public.semesters s
    where s.is_current;
 $$;
 
 revoke all on function public.current_semester() from public, anon;
 grant execute on function public.current_semester() to authenticated;
+
+-- --- enroll_in_current_semester -------------------------------------------------
+-- The "Join <semester>" button (decision 9). Enrolls the caller in the
+-- current semester; doing it twice changes nothing. Refused when no semester
+-- is open, and for admins, who are never in a class. Returns
+-- current_semester(), so the page can drop the prompt from the answer.
+create or replace function public.enroll_in_current_semester()
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  caller uuid := auth.uid();
+  v_semester uuid := public.current_semester_id();
+begin
+  if caller is null then
+    raise exception 'Not signed in';
+  end if;
+  if v_semester is null then
+    raise exception 'No semester is open right now — an admin has to start the next one first';
+  end if;
+  if private.is_admin() then
+    raise exception 'Admins aren''t enrolled in a semester';
+  end if;
+
+  insert into public.semester_enrollments (semester_id, user_id)
+  values (v_semester, caller)
+  on conflict do nothing;
+
+  return public.current_semester();
+end;
+$$;
+
+revoke all on function public.enroll_in_current_semester() from public, anon;
+grant execute on function public.enroll_in_current_semester() to authenticated;
+
+-- --- announcement_recipients ------------------------------------------------------
+-- Who notify-email sends an announcement to: everyone with an address but
+-- its author, except students who aren't in the announcement's semester
+-- (decision 9) — admins and faculty still get every one. Ordered by id so
+-- each announcement-<id>-<batch> idempotency key covers the same people if
+-- the webhook fires twice. Service role only: it hands out email addresses.
+create or replace function public.announcement_recipients(p_announcement_id uuid)
+returns table (email text)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select u.email
+    from public.announcements a
+    join public.users u on u.id is distinct from a.author_id
+   where a.id = p_announcement_id
+     and u.email is not null
+     and (
+       u.is_admin
+       or exists (select 1 from public.faculty_directory fd where fd.email = lower(u.email))
+       or exists (select 1 from public.semester_enrollments e
+                   where e.semester_id = a.semester_id and e.user_id = u.id)
+     )
+   order by u.id;
+$$;
+
+revoke all on function public.announcement_recipients(uuid) from public, anon, authenticated;
+grant execute on function public.announcement_recipients(uuid) to service_role;
 
 -- --- what closing will touch --------------------------------------------------
 -- One definition, read by the preview the dialog shows and by

@@ -18,6 +18,7 @@ import AdvisedTeam from './pages/AdvisedTeam';
 import Avatar from './components/Avatar';
 import ThemeToggle from './components/ThemeToggle';
 import Walkthrough from './components/Walkthrough';
+import SemesterJoin from './components/SemesterJoin';
 import NotificationBell from './components/NotificationBell';
 import { PendingBadge, RequestNotices, useRequestAlerts } from './components/RequestAlerts';
 import { MilestoneBanner } from './components/Milestones';
@@ -142,6 +143,8 @@ export default function App() {
       </header>
 
       <main className="shell">
+        {/* Keyed on the user so a different account signing in asks afresh. */}
+        {signedIn && !isAdmin && <SemesterJoin key={user.id} />}
         {/* The Announcements page lists every deadline itself. */}
         {signedIn && !isAdmin && pathname !== '/announcements' && <MilestoneBanner />}
         <RequestNotices notices={requestAlerts.notices} onDismiss={requestAlerts.dismiss} />

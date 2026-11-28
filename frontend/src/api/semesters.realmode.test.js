@@ -80,3 +80,17 @@ test('a form the database would refuse is refused before it is sent', async () =
   });
   expect(fake.supabase.rpc).not.toHaveBeenCalled();
 });
+
+test('joining the semester calls enroll_in_current_semester with no arguments, and passes a refusal on', async () => {
+  const c = await realMode();
+  fake.state.rpcResult = { data: { id: SEM, name: 'Spring 2027', needs_enrollment: false }, error: null };
+  expect(await c.enrollInCurrentSemester()).toMatchObject({ needs_enrollment: false });
+  expect(fake.supabase.rpc).toHaveBeenLastCalledWith('enroll_in_current_semester');
+  fake.state.rpcResult = {
+    data: null,
+    error: { message: 'No semester is open right now — an admin has to start the next one first', code: 'P0001' },
+  };
+  await expect(c.enrollInCurrentSemester()).rejects.toMatchObject({
+    message: 'No semester is open right now — an admin has to start the next one first',
+  });
+});
