@@ -5,6 +5,7 @@ import { Empty, ErrorState, Loading } from '../components/States';
 import { ATTENTION, attentionReasons, daysSince, sortAdvisedTeams } from '../lib/adviserDashboard';
 import ExportRosters from '../components/ExportRosters';
 import { DELIVERABLE_STATUS } from '../lib/deliverables';
+import PastSemesters from '../components/PastSemesters';
 
 // The adviser dashboard (issue #56): every team I advise on one page, the
 // ones that need me first. Each card is a link to that team's read-only page
@@ -156,6 +157,9 @@ export default function Advising() {
           ))}
         </ul>
       )}
+
+      {/* #61: the teams advised in semesters that have closed. */}
+      <PastSemesters />
     </>
   );
 }

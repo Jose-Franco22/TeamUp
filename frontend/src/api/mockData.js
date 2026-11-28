@@ -203,8 +203,32 @@ export function evidenceForUser(userId) {
   );
 }
 
+// --- SEMESTERS (#61) ---------------------------------------------------
+// semesters: id, name, starts_on, ends_on, closed_at, closed_by. See
+// supabase/50_semesters.sql. The current semester is the one not closed —
+// the database generates is_current from closed_at, and so does
+// currentSemester() here. Every seeded project, milestone, announcement and
+// next step is in Fall 2026, as the migration's backfill puts the live rows.
+export const FIRST_SEMESTER_ID = 'sem-fall-2026';
+export const semesters = [
+  {
+    id: FIRST_SEMESTER_ID, name: 'Fall 2026', starts_on: '2026-08-24', ends_on: '2026-12-12',
+    created_at: '2026-08-01T00:00:00Z', closed_at: null, closed_by: null,
+  },
+];
+
+// public.current_semester_id(): the one rule for "current". Null between
+// closing one semester and starting the next.
+export function currentSemester() {
+  return semesters.find((s) => !s.closed_at) ?? null;
+}
+export function currentSemesterId() {
+  return currentSemester()?.id ?? null;
+}
+
 // --- PROJECTS ----------------------------------------------------------
-// projects: id, creator_id, title, description, team_size_target, status
+// projects: id, creator_id, title, description, team_size_target, status,
+// semester_id
 export const projects = [
   {
     id: 'p-parking',
@@ -218,6 +242,7 @@ export const projects = [
     // reads as unlinked, which is the state most of them are in all
     // semester and the one the owner's form has to handle.
     github_repo: 'https://github.com/Jose-Franco22/TeamUp',
+    semester_id: FIRST_SEMESTER_ID,
   },
   {
     id: 'p-degree',
@@ -227,6 +252,7 @@ export const projects = [
       'Constraint solver that generates a valid path to graduation from prerequisites and offering patterns.',
     team_size_target: 3,
     status: 'open',
+    semester_id: FIRST_SEMESTER_ID,
   },
   {
     id: 'p-scam',
@@ -236,6 +262,7 @@ export const projects = [
       'Classifier for fraudulent SMS with an explanation of which signals fired, aimed at first-time job seekers.',
     team_size_target: 4,
     status: 'open',
+    semester_id: FIRST_SEMESTER_ID,
   },
   {
     id: 'p-lab',
@@ -249,6 +276,7 @@ export const projects = [
     // members rather than backfilling with invented people.
     team_size_target: 2,
     status: 'full',
+    semester_id: FIRST_SEMESTER_ID,
   },
 ];
 
@@ -451,9 +479,12 @@ export function expertiseForAdviser(userId) {
 }
 
 // How many teams someone advises, and whether that fills the maximum they
-// set. Accepted rows only: a pending invitation does not fill a spot.
+// set. Accepted rows only: a pending invitation does not fill a spot. And
+// this semester's only (#61): last semester's teams ended with it.
 export function advisingAccepted(userId) {
-  return adviserRequests.filter((r) => r.adviser_id === userId && r.status === 'accepted').length;
+  return adviserRequests.filter(
+    (r) => r.adviser_id === userId && r.status === 'accepted' && isCurrentProject(r.project_id)
+  ).length;
 }
 
 export function advisingIsFull(user) {
@@ -515,20 +546,21 @@ export const checkIns = [
 // admin_actions, the record of every admin placement change.
 export const milestones = [];
 
-// formation_deadline() in 26_milestones.sql.
+// formation_deadline(): this semester's flagged milestone (50_semesters.sql).
 export function formationDeadline() {
-  return milestones.find((m) => m.is_formation_deadline)?.due_at ?? null;
+  return milestones.find((m) => m.is_formation_deadline && inCurrentSemester(m))?.due_at ?? null;
 }
 
-// Tests set the deadline directly. null clears it.
+// Tests set the deadline directly. null clears it. This semester's only.
 export function setFormationDeadline(dueAt) {
   for (let i = milestones.length - 1; i >= 0; i -= 1) {
-    if (milestones[i].is_formation_deadline) milestones.splice(i, 1);
+    if (milestones[i].is_formation_deadline && inCurrentSemester(milestones[i])) milestones.splice(i, 1);
   }
   if (dueAt) {
     milestones.push({
       id: `ms-deadline-${Date.now()}`, name: 'Team formation deadline', due_at: dueAt,
       is_formation_deadline: true, message: '', updated_at: new Date().toISOString(),
+      semester_id: currentSemesterId(),
     });
   }
 }
@@ -558,10 +590,10 @@ export const deliverableFiles = new Map();
 // completed_by, completed_at — one per step a team has checked off
 // (set_next_step_done(), #30).
 export const nextSteps = [
-  { id: 'ns-roster', title: 'Confirm your roster', due_at: null, sort_order: 1 },
-  { id: 'ns-repo', title: 'Create the repo and add your adviser', due_at: null, sort_order: 2 },
-  { id: 'ns-meeting', title: 'Schedule your first adviser meeting', due_at: null, sort_order: 3 },
-  { id: 'ns-proposal', title: 'Submit your project proposal', due_at: null, sort_order: 4 },
+  { id: 'ns-roster', title: 'Confirm your roster', due_at: null, sort_order: 1, semester_id: FIRST_SEMESTER_ID },
+  { id: 'ns-repo', title: 'Create the repo and add your adviser', due_at: null, sort_order: 2, semester_id: FIRST_SEMESTER_ID },
+  { id: 'ns-meeting', title: 'Schedule your first adviser meeting', due_at: null, sort_order: 3, semester_id: FIRST_SEMESTER_ID },
+  { id: 'ns-proposal', title: 'Submit your project proposal', due_at: null, sort_order: 4, semester_id: FIRST_SEMESTER_ID },
 ];
 export const nextStepCompletions = [];
 
@@ -572,6 +604,102 @@ export const nextStepCompletions = [];
 // /announcements (missing means never, so everything is new).
 export const announcements = [];
 export const announcementsSeenAt = {};
+
+// --- Which semester a row is in (#61) ----------------------------------
+// The database answers these in 50_semesters.sql: projects carry
+// semester_id, and everything hanging off a project or team inherits it.
+// The read paths below that mean "this semester" ask these and nothing else,
+// the way the SQL ones ask current_semester_id().
+
+// A row with no semester_id is Fall 2026's, exactly as the migration's
+// backfill puts every row that predates semesters there — which is also what
+// lets fixtures written before #61 keep meaning what they meant.
+export function rowSemesterId(row) {
+  return row ? row.semester_id ?? FIRST_SEMESTER_ID : null;
+}
+
+export function projectSemesterId(projectId) {
+  return rowSemesterId(projects.find((p) => p.id === projectId));
+}
+
+export function teamSemesterId(teamId) {
+  return projectSemesterId(teams.find((t) => t.id === teamId)?.project_id);
+}
+
+// projects' select policy: the current semester, and nothing else.
+export function isCurrentProject(projectId) {
+  const current = currentSemesterId();
+  return current !== null && projectSemesterId(projectId) === current;
+}
+
+export function isCurrentTeam(teamId) {
+  return isCurrentProject(teams.find((t) => t.id === teamId)?.project_id);
+}
+
+// For milestones, announcements and next steps, which carry their own.
+export function inCurrentSemester(row) {
+  const current = currentSemesterId();
+  return current !== null && rowSemesterId(row) === current;
+}
+
+// private.current_team_id(): the seat a student holds this semester. A seat
+// on an archived team is history, not "already on a team".
+export function currentMembership(userId) {
+  return teamMembers.find((tm) => tm.user_id === userId && isCurrentTeam(tm.team_id)) ?? null;
+}
+
+// semester_enrollments (50_semesters.sql, decision 9): who is taking the
+// course in which semester. Everyone seeded is in Fall 2026, as the
+// migration enrolls every existing account in the first semester. The
+// database also enrolls anyone who takes a seat or asks to join a team in a
+// semester; isEnrolled() reads that off the seats and requests themselves
+// rather than every mock write remembering to add a row.
+export const semesterEnrollments = [];
+
+export function isEnrolled(userId, semesterId) {
+  if (!userId || !semesterId) return false;
+  if (semesterId === FIRST_SEMESTER_ID && users.some((u) => u.id === userId && !u.is_admin)) {
+    return true;
+  }
+  return (
+    semesterEnrollments.some((e) => e.user_id === userId && e.semester_id === semesterId) ||
+    teamMembers.some((tm) => tm.user_id === userId && teamSemesterId(tm.team_id) === semesterId) ||
+    joinRequests.some((r) => r.user_id === userId && projectSemesterId(r.project_id) === semesterId)
+  );
+}
+
+export function enroll(userId, semesterId) {
+  if (!isEnrolled(userId, semesterId)) {
+    semesterEnrollments.push({ semester_id: semesterId, user_id: userId, enrolled_at: new Date().toISOString() });
+  }
+}
+
+// private.is_current_student(): not an admin, not on the faculty list, and
+// in the current semester.
+export function isCurrentStudent(user) {
+  return Boolean(user) && !user.is_admin && !user.is_faculty && isEnrolled(user.id, currentSemesterId());
+}
+
+// private.require_open_semester(), the archive guard's sentence.
+export function assertOpenSemester(semesterId) {
+  const semester = semesters.find((s) => s.id === semesterId);
+  if (semester?.closed_at) {
+    throw new Error(`${semester.name} has been closed — past semesters are read-only`);
+  }
+}
+
+export function assertOpenProject(projectId) {
+  assertOpenSemester(projectSemesterId(projectId));
+}
+
+// The guard's other half: a new row goes in the current semester, and with
+// none open there is nowhere for it to go.
+export const NO_OPEN_SEMESTER = 'No semester is open right now — an admin has to start the next one first';
+export function requireCurrentSemesterId() {
+  const id = currentSemesterId();
+  if (!id) throw new Error(NO_OPEN_SEMESTER);
+  return id;
+}
 
 // --- Composition helpers ----------------------------------------------
 // These stand in for the joins the backend will do. Keeping them here

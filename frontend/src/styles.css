@@ -1456,3 +1456,47 @@ button:disabled { opacity: 0.45; cursor: default; }
 @media (max-width: 760px) {
   .advising-list { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- semesters (issue #61) ---------- */
+/* The admin's Semester panel: the current one on a card, with Close beside it. */
+.semester-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.semester-name { margin: 0; font-size: 16px; font-weight: 600; }
+.semester-gap { margin: 0 0 12px; }
+
+/* The Close dialog reuses the walkthrough's backdrop and card. Three numbered
+   steps, so the export comes visibly before the confirmation. */
+.semester-dialog h2 { margin-top: 0; }
+.semester-steps { margin: 14px 0 0; padding-left: 20px; display: grid; gap: 16px; }
+.semester-steps h3 { margin: 0; font-size: 14.5px; font-weight: 600; }
+.semester-steps .desc { margin: 4px 0 10px; }
+.semester-impact { margin: 6px 0 0; padding-left: 18px; font-size: 13.5px; color: var(--slate); line-height: 1.6; }
+.semester-dialog .tour-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+
+/* Start the next semester. The two dates sit side by side until a phone. */
+.semester-form { display: grid; gap: 4px; }
+.semester-form h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+.semester-form .btn { justify-self: start; margin-top: 6px; }
+.semester-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 620px) {
+  .semester-dates { grid-template-columns: 1fr; }
+}
+
+/* Past semesters: read-only cards, one per semester, a row per team. The
+   Show button sits at the end of the row, and wraps under it on a phone. */
+.past-semester + .past-semester { margin-top: 12px; }
+.past-semester h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.past-team-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.past-team-head .btn { margin-left: auto; }
+.past-team-title { font-weight: 600; }
+.past-team-detail { margin: 10px 0 4px; padding-left: 12px; border-left: 2px solid var(--line); }
+.past-team-detail h4 { margin: 12px 0 4px; font-size: 13px; font-weight: 600; }
+.past-comments { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--slate); }
+/* Reopen sits between the "no semester is open" line and the new-semester
+   form; .hint already lays its sentence and buttons out in a wrapping row. */
+.semester-reopen { margin: 0 0 14px; }

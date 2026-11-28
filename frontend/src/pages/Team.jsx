@@ -21,6 +21,7 @@ import AdvisedTeams from '../components/AdvisedTeams';
 import CheckIns from '../components/CheckIns';
 import Deliverables from '../components/Deliverables';
 import RepoActivity from '../components/RepoActivity';
+import PastSemesters from '../components/PastSemesters';
 
 export default function Team() {
   const { data, loading, error, reload, setData } = useAsync(getMyTeam, []);
@@ -137,6 +138,9 @@ export default function Team() {
             own and land here (#54). The teams they advise still belong on
             this page — it is where "my teams" lives. */}
         <AdvisedTeams />
+        {/* #61: a student's team from a closed semester, and the teams an
+            adviser advised, read-only. Nothing renders until there is one. */}
+        <PastSemesters />
       </>
     );
   }
@@ -461,6 +465,7 @@ export default function Team() {
       {/* Below the viewer's own team, and separate from it: advising is not
           membership, and somebody can do both at once (#54). */}
       <AdvisedTeams />
+      <PastSemesters />
     </>
   );
 }

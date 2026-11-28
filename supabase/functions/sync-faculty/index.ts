@@ -15,6 +15,7 @@
 // ever runs, and the list silently stops being refreshed.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { DIRECTORY_URL, facultyEmails } from './faculty.js';
+import { sameSecret } from '../_shared/secret.js';
 
 const env = (name: string) => {
   const value = Deno.env.get(name);
@@ -23,21 +24,6 @@ const env = (name: string) => {
 };
 
 const reply = (body: string, status = 200) => new Response(body, { status });
-
-// Compared as SHA-256 digests, in constant time, so the response time says
-// nothing about how much of a guess was right.
-async function sameSecret(given: string, expected: string) {
-  const enc = new TextEncoder();
-  const [a, b] = await Promise.all([
-    crypto.subtle.digest('SHA-256', enc.encode(given)),
-    crypto.subtle.digest('SHA-256', enc.encode(expected)),
-  ]);
-  const x = new Uint8Array(a);
-  const y = new Uint8Array(b);
-  let diff = 0;
-  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
-  return diff === 0;
-}
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return reply('Method not allowed', 405);

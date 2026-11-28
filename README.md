@@ -197,6 +197,36 @@ reminder in the bell (and by email, with #21) 3 days and again 1 day before the 
 deadline. The job runs hourly; running it again never sends a second copy. Before each demo, check
 the `deadline-reminders` job is listed under Integrations → Cron in the Supabase dashboard.
 
+## Semesters (#61)
+
+Apply `supabase/50_semesters.sql` after `49`, then `supabase/51_user_update_columns.sql`.
+Rehearse a full close-and-start on a Supabase branch database first: the migration backfills every
+existing row into Fall 2026.
+
+An admin closes the current semester from `/admin` (everything in it becomes read-only) and starts
+the next one. Accounts carry over between semesters, so a student counts as being in a semester only
+once they're enrolled in it. Everyone already in the app is enrolled in the first semester. After
+that, a student is enrolled when:
+
+- their account is created while a semester is open;
+- they press **Join &lt;semester&gt;** on the prompt every unenrolled student sees; or
+- they create a project, ask to join one, or are placed on a team.
+
+Only enrolled students show as unplaced on `/admin` and in the roster export, and only they get
+that semester's deadline reminders and announcement emails. Admins and faculty are never counted as
+students.
+
+`51_user_update_columns.sql` limits what someone can change on their own `users` row to the
+profile and settings fields the app edits. Before it, a student could rewrite their `email` (which
+is how faculty are recognised) or their Microsoft id.
+
+## Deploying the frontend
+
+Set `VITE_USE_MOCKS=false`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the Vercel
+project. A production build with `VITE_USE_MOCKS` unset now runs against Supabase rather than the
+mock data, and shows a "TeamUp isn't configured" page if the two Supabase settings are missing. Only
+a demo deploy should set `VITE_USE_MOCKS=true`.
+
 ## Reviewing a requester (#27)
 
 Each incoming request on the Requests page shows the student's skills, availability and GitHub
@@ -214,7 +244,7 @@ pull request (`.github/workflows/tests.yml`), and a pull request shouldn't merge
 | Frontend | Validation logic, components and pages (Vitest + React Testing Library, mock API) | `cd frontend && npm test` |
 | Resume parsing | The resume parser (`node --test`) | `cd resume-parsing && npm test` (run `npm install` in `frontend/` first, since it shares code from there) |
 | Database | Constraints, RLS, triggers and RPC functions (pgTAP) | see below |
-| Edge Functions | What the `notify-email` function sends (`node --test`) | `node --test supabase/functions/*/*.test.js` |
+| Edge Functions | The Deno-free parts of every Edge Function, including `_shared/` (`node --test`) | `node --test supabase/functions/*/*.test.js` |
 
 Use `npm run test:watch` in `frontend/` to re-run tests as you edit.
 

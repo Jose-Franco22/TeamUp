@@ -99,7 +99,9 @@ describe('removing', () => {
     await user.click(removeButtons()[0]);
     await user.click(screen.getByRole('button', { name: 'Remove Jose' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Only the project creator can remove a member');
-    expect(screen.getByText('Jose Franco Garza')).toBeInTheDocument();
+    // On the roster. Not page-wide: the GitHub activity table names him too
+    // once it loads, and whether it has by now is a race.
+    expect(memberRow('Jose Franco Garza')).toBeInTheDocument();
   });
 });
 
